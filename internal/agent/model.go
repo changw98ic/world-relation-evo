@@ -12,19 +12,19 @@ import (
 	"time"
 )
 
-type Model struct {
+type ContentModel struct {
 	Endpoint, APIKey, Name string
 	Client                 *http.Client
 }
 
-const prompt = `You are one person in a persistent village. Decide ONE action from your own perception, goals, memories and personality. You are not a narrator and cannot create world events. Do not invent knowledge of people outside your perception. Speech is what you choose to tell a listener, not objective truth. Memories with kind speech are statements by their source, not verified facts; other kinds are outcomes you experienced. You may lie or refuse; do not add random distortion. One tick is one hour. Reply with one JSON object matching: {"kind":"wait|move|work|eat|speak|offer|accept|reject","target_id":"person ID","location":"location","text":"speech","food":integer,"price":integer,"offer_id":integer,"basis_event_id":integer,"statement":{"topic":"food_produced","location":"fields","quantity":integer}}. Omit irrelevant fields. Work at fields produces food (farmers 2, others 1). Eat consumes 1 food and reduces hunger. Offer proposes selling your food for coins to a nearby person; the buyer must separately accept before settlement. Accept/reject reference an offer addressed to you. You cannot directly alter another person's state. When acting on a memory or retelling it, set basis_event_id to that memory event_id. Speech may include a structured statement describing what you assert; it is not a fact. Keep its quantity/location consistent with your words, including deliberate exaggeration. Memory observation is a direct experience; memory statement is a received assertion. Never cite unseen event IDs. No prose outside JSON.`
+const prompt = `Write the concrete content for this character's already-selected action and interlocutor. You do NOT choose actions, targets, quantities, prices, routes, damage, healing or state changes. Output only JSON {"text":"words spoken or action description","basis_event_id":integer,"statement":{"topic":"food_produced","location":"fields","quantity":integer}}. Omit statement and basis if not relevant. A statement is a character assertion, never an objective fact or resource update. Cite only a memory event_id visible to this character when retelling it. Speech memories are claims by their source; observations are direct experiences. You may word or deliberately distort a retelling according to character identity, motivation and personality; do not apply automatic random distortion. Keep structured assertions consistent with the words you generate. Do not add behavior, target or state fields.`
 
-func (m Model) Decide(ctx context.Context, p sim.Perception) (sim.Action, error) {
-	b, _ := json.Marshal(p)
+func (m ContentModel) Generate(ctx context.Context, p sim.Perception, action sim.Action) (Content, error) {
+	b, _ := json.Marshal(map[string]any{"perception": p, "selected_action": action})
 	body, _ := json.Marshal(map[string]any{"model": m.Name, "messages": []map[string]string{{"role": "system", "content": prompt}, {"role": "user", "content": string(b)}}, "response_format": map[string]string{"type": "json_object"}})
 	req, e := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(m.Endpoint, "/")+"/chat/completions", bytes.NewReader(body))
 	if e != nil {
-		return sim.Action{}, e
+		return Content{}, e
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if m.APIKey != "" {
@@ -36,15 +36,15 @@ func (m Model) Decide(ctx context.Context, p sim.Perception) (sim.Action, error)
 	}
 	resp, e := client.Do(req)
 	if e != nil {
-		return sim.Action{}, e
+		return Content{}, e
 	}
 	defer resp.Body.Close()
 	raw, e := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if e != nil {
-		return sim.Action{}, e
+		return Content{}, e
 	}
 	if resp.StatusCode != 200 {
-		return sim.Action{}, fmt.Errorf("model HTTP %d: %s", resp.StatusCode, string(raw))
+		return Content{}, fmt.Errorf("model HTTP %d: %s", resp.StatusCode, string(raw))
 	}
 	var out struct {
 		Choices []struct {
@@ -55,14 +55,16 @@ func (m Model) Decide(ctx context.Context, p sim.Perception) (sim.Action, error)
 		} `json:"choices"`
 	}
 	if e = json.Unmarshal(raw, &out); e != nil {
-		return sim.Action{}, e
+		return Content{}, e
 	}
 	if len(out.Choices) == 0 {
-		return sim.Action{}, fmt.Errorf("model returned no choices")
+		return Content{}, fmt.Errorf("model returned no choices")
 	}
-	var a sim.Action
-	if e = json.Unmarshal([]byte(out.Choices[0].Message.Content), &a); e != nil {
-		return a, fmt.Errorf("invalid action JSON: %w", e)
+	var a Content
+	decoder := json.NewDecoder(strings.NewReader(out.Choices[0].Message.Content))
+	decoder.DisallowUnknownFields()
+	if e = decoder.Decode(&a); e != nil {
+		return a, fmt.Errorf("invalid content JSON: %w", e)
 	}
 	return a, nil
 }

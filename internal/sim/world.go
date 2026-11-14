@@ -38,6 +38,9 @@ type Offer struct {
 	Expires int64  `json:"expires"`
 }
 type Actor struct {
+	Tags        []string       `json:"tags"`
+	Health      int            `json:"health"`
+	Medicine    int            `json:"medicine"`
 	ID          string         `json:"id"`
 	Name        string         `json:"name"`
 	Role        string         `json:"role"`
@@ -78,9 +81,10 @@ type Event struct {
 	Payload  map[string]any `json:"payload"`
 }
 type Neighbor struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Role string `json:"role"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Role   string `json:"role"`
+	Health int    `json:"health"`
 }
 type Perception struct {
 	Tick      int64      `json:"tick"`
@@ -105,7 +109,19 @@ func Village(id string) *World {
 			role = "farmer"
 			goal = "Grow food and sell surplus"
 		}
-		w.Actors = append(w.Actors, Actor{ID: fmt.Sprintf("p%02d", i+1), Name: n, Role: role, Location: "homes", Food: 4 + i%3, Money: 12 + i%5, Hunger: 0, Goal: goal, Personality: []string{"careful and candid", "sociable and generous", "ambitious and skeptical"}[i%3], Trust: map[string]int{}})
+		tags := []string{"resident", "trader", "gatherer"}
+		if role == "farmer" {
+			tags = []string{"resident", "trader", "farmer"}
+		}
+		medicine := 0
+		if i == 28 {
+			tags = append(tags, "healer")
+			medicine = 5
+		}
+		if i == 29 {
+			tags = append(tags, "fighter")
+		}
+		w.Actors = append(w.Actors, Actor{Tags: tags, Health: 100, Medicine: medicine, ID: fmt.Sprintf("p%02d", i+1), Name: n, Role: role, Location: "homes", Food: 4 + i%3, Money: 12 + i%5, Hunger: 0, Goal: goal, Personality: []string{"careful and candid", "sociable and generous", "ambitious and skeptical"}[i%3], Trust: map[string]int{}})
 	}
 	return w
 }
@@ -120,6 +136,7 @@ func (w *World) actor(id string) *Actor {
 func (w *World) View(id string) Perception {
 	a := *w.actor(id)
 	a.Trust = cloneTrust(a.Trust)
+	a.Tags = append([]string(nil), a.Tags...)
 	start := len(a.Memories) - 32
 	if start < 0 {
 		start = 0
@@ -139,7 +156,7 @@ func (w *World) View(id string) Perception {
 	p := Perception{Tick: w.Tick, Self: a, Locations: append([]string(nil), Locations...)}
 	for _, b := range w.Actors {
 		if b.ID != id && b.Location == a.Location {
-			p.Nearby = append(p.Nearby, Neighbor{b.ID, b.Name, b.Role})
+			p.Nearby = append(p.Nearby, Neighbor{b.ID, b.Name, b.Role, b.Health})
 		}
 	}
 	for _, o := range w.Offers {
@@ -248,6 +265,9 @@ func (w *World) Apply(id string, x Action) []Event {
 		return []Event{w.record(a, x, kind, map[string]any{"text": text}, observers...)}
 	}
 	fail := func(reason string) []Event { return emit("action_failed", reason) }
+	if !Capabilities(*a)[x.Kind] {
+		return fail("identity tags do not grant action: " + x.Kind)
+	}
 	if x.BasisEventID != 0 {
 		known := false
 		for _, m := range a.Memories {
@@ -273,7 +293,7 @@ func (w *World) Apply(id string, x Action) []Event {
 		}
 		return fail("unknown location")
 	case "work":
-		if a.Role == "farmer" {
+		if hasTag(*a, "farmer") {
 			if a.Location != "fields" {
 				return fail("farming requires fields")
 			}
@@ -295,6 +315,33 @@ func (w *World) Apply(id string, x Action) []Event {
 		a.Food--
 		a.Hunger--
 		return emit("ate", a.Name+" ate 1 food")
+	case "attack":
+		if b == nil || b.ID == id || b.Location != a.Location {
+			return fail("target is not nearby")
+		}
+		damage := 10
+		if damage > b.Health {
+			damage = b.Health
+		}
+		b.Health -= damage
+		return emit("attacked", fmt.Sprintf("%s attacked %s for %d damage", a.Name, b.Name, damage), b)
+	case "heal":
+		if b == nil || b.ID == id || b.Location != a.Location {
+			return fail("patient is not nearby")
+		}
+		if a.Medicine < 1 {
+			return fail("no medicine")
+		}
+		if b.Health >= 100 {
+			return fail("patient has no injury")
+		}
+		amount := 15
+		if amount > 100-b.Health {
+			amount = 100 - b.Health
+		}
+		b.Health += amount
+		a.Medicine--
+		return emit("healed", fmt.Sprintf("%s healed %s for %d health", a.Name, b.Name, amount), b)
 	case "speak":
 		if b == nil || b.ID == id || b.Location != a.Location {
 			return fail("listener is not nearby")
@@ -340,4 +387,13 @@ func (w *World) Apply(id string, x Action) []Event {
 	default:
 		return fail("unknown action: " + x.Kind)
 	}
+}
+
+func hasTag(a Actor, tag string) bool {
+	for _, t := range a.Tags {
+		if t == tag {
+			return true
+		}
+	}
+	return false
 }

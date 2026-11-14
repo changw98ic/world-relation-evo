@@ -6,10 +6,10 @@ import (
 	"github.com/changw98ic/world-relation-evo/internal/sim"
 )
 
-// Rules is an offline baseline, not a claim of LLM-driven character intelligence.
-type Rules struct{}
+// rulesPolicy ranks offline choices; the pipeline owns content generation.
+type rulesPolicy struct{}
 
-func (Rules) Decide(_ context.Context, p sim.Perception) (sim.Action, error) {
+func (rulesPolicy) Decide(_ context.Context, p sim.Perception) (sim.Action, error) {
 	a := p.Self
 	if a.Hunger > 0 && a.Food > 0 {
 		return sim.Action{Kind: "eat"}, nil

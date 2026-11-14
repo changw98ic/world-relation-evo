@@ -26,7 +26,7 @@ func run() error {
 	id := flag.String("world", "village-30", "world ID")
 	steps := flag.Int("steps", 24, "hours to run; 0 runs continuously")
 	pace := flag.Duration("pace", time.Second, "real delay per simulation hour")
-	mode := flag.String("decider", "rules", "rules or model")
+	mode := flag.String("decider", "jev", "jev (production) or rules (offline test)")
 	flag.Parse()
 	if *steps < 0 || *pace < 0 {
 		return fmt.Errorf("steps and pace must be nonnegative")
@@ -36,13 +36,25 @@ func run() error {
 	var d sim.Decider
 	switch *mode {
 	case "rules":
-		d = agent.Rules{}
-	case "model":
+		d = agent.Offline()
+	case "jev":
 		endpoint, name := os.Getenv("WRE_MODEL_URL"), os.Getenv("WRE_MODEL")
 		if endpoint == "" || name == "" {
-			return fmt.Errorf("model mode requires WRE_MODEL_URL and WRE_MODEL")
+			return fmt.Errorf("jev mode requires WRE_MODEL_URL and WRE_MODEL")
 		}
-		d = agent.Model{Endpoint: endpoint, Name: name, APIKey: os.Getenv("WRE_MODEL_KEY")}
+		jevURL := os.Getenv("WRE_JEV_URL")
+		if jevURL == "" {
+			jevURL = "https://api.typesafe.ai/v1/systemone"
+		}
+		jevName := os.Getenv("WRE_JEV_MODEL")
+		if jevName == "" {
+			jevName = "jev-latest"
+		}
+		key := os.Getenv("WRE_JEV_KEY")
+		if key == "" {
+			return fmt.Errorf("jev mode requires WRE_JEV_KEY")
+		}
+		d = agent.Pipeline{Selector: agent.Jev{Endpoint: jevURL, Name: jevName, APIKey: key}, Generator: agent.ContentModel{Endpoint: endpoint, Name: name, APIKey: os.Getenv("WRE_MODEL_KEY")}}
 	default:
 		return fmt.Errorf("unknown decider %q", *mode)
 	}

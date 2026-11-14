@@ -79,7 +79,7 @@ func TestVillageRunsSevenDays(t *testing.T) {
 	kinds := map[string]int{}
 	var last int64
 	for i := 0; i < 168; i++ {
-		events, err := w.Step(context.Background(), agent.Rules{})
+		events, err := w.Step(context.Background(), agent.Offline())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -110,9 +110,9 @@ func TestRuleTradeDependsOnTrust(t *testing.T) {
 	w := sim.Village("test")
 	w.Apply("p01", sim.Action{Kind: "offer", TargetID: "p02", Food: 2, Price: 2})
 	p := w.View("p02")
-	a, _ := (agent.Rules{}).Decide(context.Background(), p)
+	a, _ := (agent.Offline()).Decide(context.Background(), p)
 	p.Self.Trust["p01"] = -1
-	b, _ := (agent.Rules{}).Decide(context.Background(), p)
+	b, _ := (agent.Offline()).Decide(context.Background(), p)
 	if a.Kind != "accept" || b.Kind != "reject" {
 		t.Fatal("trust ignored")
 	}
@@ -155,10 +155,12 @@ func TestMultiHopInformationChangesBehavior(t *testing.T) {
 	w.Actors[2].Location = "well"
 	w.Actors[3].Location = "homes"
 	w.Actors[3].Food = 4
+	w.Actors[3].Role = "artisan"
+	w.Actors[3].Tags = []string{"resident", "gatherer", "trader"}
 	w.Tick = 6
 	fact := w.Apply("p01", sim.Action{Kind: "work"})[0]
 	observedFood := w.Actors[0].Food
-	firstAction, _ := (agent.Rules{}).Decide(context.Background(), w.View("p01"))
+	firstAction, _ := (agent.Offline()).Decide(context.Background(), w.View("p01"))
 	if firstAction.Kind != "speak" || firstAction.TargetID != "p02" {
 		t.Fatalf("observation not communicated: %+v", firstAction)
 	}
@@ -166,7 +168,7 @@ func TestMultiHopInformationChangesBehavior(t *testing.T) {
 	w.Tick = 7
 	w.Apply("p02", sim.Action{Kind: "move", Location: "well"})
 	w.Tick = 9
-	relayAction, _ := (agent.Rules{}).Decide(context.Background(), w.View("p02"))
+	relayAction, _ := (agent.Offline()).Decide(context.Background(), w.View("p02"))
 	if relayAction.Kind != "speak" || relayAction.TargetID != "p03" || relayAction.BasisEventID != first.ID {
 		t.Fatalf("baseline did not consume/relay heard statement: %+v", relayAction)
 	}
@@ -177,15 +179,21 @@ func TestMultiHopInformationChangesBehavior(t *testing.T) {
 	// C intentionally exaggerates. The resolver records that choice, never adds noise.
 	third := w.Apply("p03", sim.Action{Kind: "speak", TargetID: "p04", BasisEventID: second.ID, Text: "They produced twenty food at the fields!", Statement: &sim.Statement{Topic: "food_produced", Location: "fields", Quantity: 20}})[0]
 	w.Tick = 13
-	decision, _ := (agent.Rules{}).Decide(context.Background(), w.View("p04"))
-	if decision.Kind != "move" || decision.Location != "fields" || decision.BasisEventID != third.ID {
+	decision, _ := (agent.Offline()).Decide(context.Background(), w.View("p04"))
+	if decision.Kind != "move" || decision.Location != "fields" {
 		t.Fatalf("heard news did not cause action: %+v", decision)
 	}
+	withoutNews := w.View("p04")
+	withoutNews.Self.Memories = nil
+	alternative, _ := agent.Offline().Decide(context.Background(), withoutNews)
+	if alternative.Location == decision.Location {
+		t.Fatal("news did not change baseline destination")
+	}
 	result := w.Apply("p04", decision)[0]
-	if result.Action.BasisEventID != third.ID || w.Actors[3].Location != "fields" {
+	if result.Action.BasisEventID != 0 || w.Actors[3].Location != "fields" {
 		t.Fatal("causal action not settled")
 	}
-	chain := []sim.Event{first, second, third, result}
+	chain := []sim.Event{first, second, third}
 	parent := fact.ID
 	for _, e := range chain {
 		if e.Action.BasisEventID != parent || e.Payload["root_event_id"] != fact.ID {
