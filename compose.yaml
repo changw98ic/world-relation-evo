@@ -1,0 +1,13 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: wre
+      POSTGRES_USER: wre
+      POSTGRES_PASSWORD: ${WRE_DB_PASSWORD:?Set WRE_DB_PASSWORD}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - world-data:/var/lib/postgresql/data
+volumes:
+  world-data:
