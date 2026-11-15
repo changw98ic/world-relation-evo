@@ -350,29 +350,11 @@ func (w *World) ObserveSpotlightAndRumors(sr *SpotlightRumorState, settled []Eve
 			}
 		}
 
-		// 3. Micro -> Macro Rumor Amplification.
-		if ev.Kind == "speech" && ev.Action.Statement != nil {
+		// 3. Micro -> Macro Rumor Amplification (strictly from interpersonal speech, never macro injection).
+		if ev.Kind == "speech" && (ev.Action.Statement != nil || ev.Action.Text != "") {
 			if panicEv, triggered := w.processRumorSpeech(sr, ev); triggered {
 				emitted = append(emitted, panicEv)
 			}
-		}
-
-		// 4. Macro -> Micro Teahouse Gossip Seeding.
-		if gossipEv, seeded := w.seedMacroGossip(sr, ev, cohortIndex); seeded {
-			emitted = append(emitted, gossipEv)
-		}
-	}
-
-	// Keep SeededGossipEvents bounded so long runs do not grow memory unboundedly.
-	if len(sr.SeededGossipEvents) > 256 {
-		ids := make([]int64, 0, len(sr.SeededGossipEvents))
-		for id := range sr.SeededGossipEvents {
-			ids = append(ids, id)
-		}
-		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-		trim := len(ids) - 256
-		for i := 0; i < trim; i++ {
-			delete(sr.SeededGossipEvents, ids[i])
 		}
 	}
 
@@ -380,13 +362,9 @@ func (w *World) ObserveSpotlightAndRumors(sr *SpotlightRumorState, settled []Eve
 }
 
 func (w *World) processRumorSpeech(sr *SpotlightRumorState, ev Event) (Event, bool) {
-	stmt := ev.Action.Statement
-	if stmt == nil {
-		return Event{}, false
-	}
-	topic, item, isPanicTopic := srClassifyRumorTopic(*stmt, ev.Action.Text)
-	if !isPanicTopic {
-		return Event{}, false
+	var stmt Statement
+	if ev.Action.Statement != nil {
+		stmt = *ev.Action.Statement
 	}
 
 	speaker := w.actor(ev.ActorID)
@@ -397,6 +375,19 @@ func (w *World) processRumorSpeech(sr *SpotlightRumorState, ev Event) (Event, bo
 		distID = stmt.Location
 	}
 	if distID == "" {
+		return Event{}, false
+	}
+
+	topic, item, sentiment := srClassifyRumorSpeech(stmt, ev.Action.Text)
+	if sentiment == "reassurance" {
+		for _, r := range sr.ActiveRumors {
+			if r != nil && !r.PanicFired && r.District == distID && (item == "" || r.Item == item) && r.Intensity > 0 {
+				r.Intensity--
+			}
+		}
+		return Event{}, false
+	}
+	if sentiment != "panic" {
 		return Event{}, false
 	}
 
@@ -497,121 +488,6 @@ func (w *World) processRumorSpeech(sr *SpotlightRumorState, ev Event) (Event, bo
 	}
 	w.NextID++
 	return panicEv, true
-}
-
-func (w *World) seedMacroGossip(sr *SpotlightRumorState, ev Event, cohortIndex map[string]*PopulationCohort) (Event, bool) {
-	if ev.ID <= 0 || sr.SeededGossipEvents[ev.ID] {
-		return Event{}, false
-	}
-
-	stmt, ok := srMacroEventToGossipStatement(w, ev, cohortIndex)
-	if !ok {
-		return Event{}, false
-	}
-
-	// Find awake focal actors in hub or market districts.
-	hasHubOrMarket := w.hasAnyHubOrMarketDistrict()
-	type candidate struct {
-		idx      int
-		sameDist int
-		salience int
-		id       string
-	}
-	var cands []candidate
-	for i := range w.Actors {
-		a := &w.Actors[i]
-		if a.Dead || w.Tick < a.JailedUntil {
-			continue
-		}
-		if a.Task != nil && a.Task.Action.Kind == "sleep" {
-			continue
-		}
-		inHubOrMarket := w.Map.DistrictHasFeature(a.Location, "hub") || w.Map.DistrictHasFeature(a.Location, "market")
-		if hasHubOrMarket && !inHubOrMarket {
-			continue
-		}
-		same := 0
-		if a.Location == stmt.Location {
-			same = 1
-		}
-		cands = append(cands, candidate{
-			idx:      i,
-			sameDist: same,
-			salience: sr.ActorSalience[a.ID],
-			id:       a.ID,
-		})
-	}
-	if len(cands) == 0 {
-		return Event{}, false
-	}
-
-	sort.Slice(cands, func(i, j int) bool {
-		if cands[i].sameDist != cands[j].sameDist {
-			return cands[i].sameDist > cands[j].sameDist
-		}
-		if cands[i].salience != cands[j].salience {
-			return cands[i].salience > cands[j].salience
-		}
-		return cands[i].id < cands[j].id
-	})
-	const maxRecipients = 6
-	if len(cands) > maxRecipients {
-		cands = cands[:maxRecipients]
-	}
-
-	rootID := payloadInt64(ev.Payload, "root_event_id")
-	if rootID <= 0 {
-		rootID = ev.ID
-	}
-	sourceID := ev.ActorID
-	if sourceID == "" {
-		sourceID = "world"
-	}
-	summaryText := srPayloadString(ev.Payload, "text")
-	if summaryText == "" {
-		summaryText = fmt.Sprintf("%s reported in %s (%s)", ev.Kind, stmt.Location, stmt.Topic)
-	}
-
-	recipients := make([]string, 0, len(cands))
-	for _, c := range cands {
-		a := &w.Actors[c.idx]
-		stmtCopy := stmt
-		mem := Memory{
-			Kind:        "gossip",
-			Tick:        w.Tick,
-			EventID:     ev.ID,
-			RootEventID: rootID,
-			Source:      sourceID,
-			Text:        summaryText,
-			Statement:   &stmtCopy,
-		}
-		a.Memories = appendMemory(a.Memories, mem)
-		sr.ActorSalience[a.ID] = minInt(1000, sr.ActorSalience[a.ID]+2)
-		recipients = append(recipients, a.ID)
-	}
-
-	sr.SeededGossipEvents[ev.ID] = true
-	sr.TotalGossipSeeded++
-
-	stmtCopy := stmt
-	gossipEv := Event{
-		ID:      w.NextID,
-		Tick:    w.Tick,
-		ActorID: "world",
-		Kind:    "gossip_seeded",
-		Action:  Action{Kind: "speak", BasisEventID: ev.ID, Location: stmt.Location, Statement: &stmtCopy},
-		Payload: map[string]any{
-			"text":            fmt.Sprintf("Teahouse gossip spread macro event #%d (%s) to %d focal actors", ev.ID, ev.Kind, len(recipients)),
-			"source_event_id": ev.ID,
-			"source_kind":     ev.Kind,
-			"district":        stmt.Location,
-			"recipients":      recipients,
-			"recipient_count": len(recipients),
-			"root_event_id":   rootID,
-		},
-	}
-	w.NextID++
-	return gossipEv, true
 }
 
 // StepDynamicSpotlight runs once per day when macro cohorts exist, decaying stale salience/heat,
@@ -830,22 +706,6 @@ func (w *World) StepDynamicSpotlight(sr *SpotlightRumorState) []Event {
 
 		vividGoal := fmt.Sprintf("Emerged from %s (heat %d) in %s to lead %s affairs and speak at the hub", cohortPtr.Name, hc.heat, actor.Location, cohortPtr.Profession)
 		actor.Goal = vividGoal
-		stmt := Statement{
-			Topic:    "spotlight",
-			Item:     "coins",
-			Location: actor.Location,
-			Quantity: hc.heat,
-		}
-		actor.Memories = appendMemory(actor.Memories, Memory{
-			Kind:        "spotlight",
-			Tick:        w.Tick,
-			EventID:     evID,
-			RootEventID: evID,
-			Source:      hc.id,
-			TargetID:    actor.ID,
-			Text:        vividGoal,
-			Statement:   &stmt,
-		})
 
 		sr.HydratedCohort[actor.ID] = hc.id
 		sr.HydratedTick[actor.ID] = w.Tick
@@ -893,7 +753,7 @@ func (w *World) canDehydrateSpotlightActor(sr *SpotlightRumorState, a Actor, hou
 	if a.IllicitGain != 0 {
 		return false
 	}
-	if houseOwnedBy[a.ID] || actorHasOffer[a.ID] {
+	if houseOwnedBy[a.ID] || actorHasOffer[a.ID] || w.actorHasActiveCreditContract(a.ID) {
 		return false
 	}
 	if srIsCoreBaselineActor(a.ID) {
@@ -931,15 +791,6 @@ func (w *World) isPublicForumDistrict(districtID string) bool {
 		w.Map.DistrictHasFeature(districtID, "academy")
 }
 
-func (w *World) hasAnyHubOrMarketDistrict() bool {
-	for _, d := range w.Map.Districts {
-		if w.Map.DistrictHasFeature(d.ID, "hub") || w.Map.DistrictHasFeature(d.ID, "market") {
-			return true
-		}
-	}
-	return false
-}
-
 func (w *World) isHighTrustPublicFigure(a *Actor) bool {
 	if a == nil || a.Dead {
 		return false
@@ -947,16 +798,15 @@ func (w *World) isHighTrustPublicFigure(a *Actor) bool {
 	if a.Level >= 5 {
 		return true
 	}
-	hasAuthorityRole := a.Professions["high_priest"] > 0 ||
-		a.Professions["xiucai"] > 0 ||
-		a.Professions["jinshi"] > 0 ||
-		a.Professions["constable"] > 0 ||
-		a.Professions["bailiff"] > 0 ||
-		a.Professions["censor"] > 0 ||
-		a.Professions["merchant_chief"] > 0 ||
-		ActorHasTag(a.Tags, "law") ||
-		ActorHasTag(a.Tags, "ritual") ||
-		ActorHasTag(a.Tags, "scholar")
+	idTags := a.IdentityTags()
+	caps := w.Catalog.Capabilities(*a)
+	hasAuthorityRole := w.Catalog.HasPublicTrustDuty(idTags) ||
+		caps["audit_corruption"] ||
+		caps["arrest"] ||
+		caps["perform_ritual"] ||
+		ActorHasTag(idTags, "law") ||
+		ActorHasTag(idTags, "ritual") ||
+		ActorHasTag(idTags, "scholar")
 	if !hasAuthorityRole && a.Level < 4 {
 		return false
 	}
@@ -972,128 +822,206 @@ func (w *World) isHighTrustPublicFigure(a *Actor) bool {
 	return incomingTrust >= 3
 }
 
-func srClassifyRumorTopic(stmt Statement, text string) (topic, item string, ok bool) {
+// srClassifyRumorSpeech evaluates both structured Statement fields and natural-language Text
+// polarity so refutations/reassurances (e.g. "没有短缺，粮食充足，不要恐慌" or "no shortage, don't panic")
+// are classified as "reassurance" rather than inverted into "panic".
+func srClassifyRumorSpeech(stmt Statement, text string) (topic, item, sentiment string) {
 	t := strings.ToLower(strings.TrimSpace(stmt.Topic))
 	item = strings.TrimSpace(stmt.Item)
 	if item == "" {
 		item = "food"
 	}
+
+	affirmCrisis, reassureCount, textTopic := srAnalyzeSpeechCrisisPolarity(text)
+
+	switch t {
+	case "reassurance", "refutation", "calm", "abundant", "surplus", "no_shortage", "stable_supply":
+		if affirmCrisis == 0 {
+			return "reassurance", item, "reassurance"
+		}
+	case "supply", "item_produced":
+		if stmt.Quantity > 0 && affirmCrisis == 0 {
+			if reassureCount > 0 {
+				return "reassurance", item, "reassurance"
+			}
+			return "", item, "neutral"
+		}
+	}
+
+	if affirmCrisis == 0 && reassureCount > 0 {
+		return "reassurance", item, "reassurance"
+	}
+
 	switch t {
 	case "shortage", "scarcity", "famine", "food_shortage", "water_shortage",
 		"hazard", "disaster", "plague", "epidemic", "panic", "hoarding",
 		"threat", "scandal", "revolt", "supply_crisis", "tax_surcharge":
-		return t, item, true
+		return t, item, "panic"
 	}
 	for _, kw := range []string{"shortage", "scarcity", "hazard", "panic", "crisis", "famine", "plague", "disaster", "scandal", "revolt", "hoard"} {
-		if strings.Contains(t, kw) {
-			return t, item, true
+		if strings.Contains(t, kw) && !strings.Contains(t, "no_") && !strings.Contains(t, "anti_") {
+			return t, item, "panic"
 		}
 	}
-	if t == "item_produced" && stmt.Quantity <= 0 {
-		return "shortage", item, true
+	if t == "item_produced" && stmt.Quantity <= 0 && strings.TrimSpace(t) != "" {
+		return "shortage", item, "panic"
 	}
-	lowerText := strings.ToLower(text)
-	for _, kw := range []string{"shortage", "famine", "panic", "饥荒", "断粮", "恐慌", "灾情"} {
-		if strings.Contains(lowerText, kw) {
-			return "shortage", item, true
+	if affirmCrisis > 0 {
+		if textTopic == "" {
+			textTopic = "shortage"
 		}
+		return textTopic, item, "panic"
 	}
-	return "", "", false
+	return "", item, "neutral"
 }
 
-func srMacroEventToGossipStatement(w *World, ev Event, cohortIndex map[string]*PopulationCohort) (Statement, bool) {
-	dID := srEventDistrict(w, ev)
-	switch ev.Kind {
-	case "disaster_struck":
-		qty := int(payloadInt64(ev.Payload, "wounded") + payloadInt64(ev.Payload, "deaths"))
-		if qty <= 0 {
-			qty = 1
+func srSplitSpeechClauses(s string) []string {
+	seps := func(r rune) bool {
+		switch r {
+		case ',', '.', ';', '!', '?', ':', '\n', '，', '。', '；', '！', '？', '：', '、':
+			return true
+		default:
+			return false
 		}
-		return Statement{Topic: "disaster", Item: "food", Location: dID, Quantity: qty}, true
-
-	case "cohort_corruption_purged":
-		if dID == "" {
-			if c := cohortIndex[srPayloadString(ev.Payload, "corrupt_cohort")]; c != nil {
-				dID = c.District
-			}
-		}
-		qty := int(payloadInt64(ev.Payload, "confiscated_coins"))
-		if qty <= 0 {
-			qty = 1
-		}
-		return Statement{Topic: "scandal", Item: "coins", Location: dID, Quantity: qty}, true
-
-	case "cohort_racket_clashed":
-		if dID == "" {
-			if c := cohortIndex[srPayloadString(ev.Payload, "victim_cohort")]; c != nil {
-				dID = c.District
-			}
-		}
-		item := srPayloadString(ev.Payload, "smashed_item")
-		if item == "" {
-			item = ev.Action.Item
-		}
-		if item == "" {
-			item = "food"
-		}
-		qty := int(payloadInt64(ev.Payload, "smashed_qty"))
-		if qty <= 0 {
-			qty = 1
-		}
-		return Statement{Topic: "hazard", Item: item, Location: dID, Quantity: qty}, true
-
-	case "cohort_tax_collected":
-		surcharge := payloadInt64(ev.Payload, "surcharge_coins")
-		if surcharge <= 0 {
-			return Statement{}, false
-		}
-		if dID == "" {
-			dID = w.firstHubOrYamenDistrict()
-		}
-		return Statement{Topic: "tax_surcharge", Item: "coins", Location: dID, Quantity: int(surcharge)}, true
-
-	case "revolt_erupted":
-		qty := int(payloadInt64(ev.Payload, "rebels"))
-		if qty <= 0 {
-			qty = int(payloadInt64(ev.Payload, "count"))
-		}
-		if qty <= 0 {
-			qty = 1
-		}
-		return Statement{Topic: "revolt", Item: "food", Location: dID, Quantity: qty}, true
-
-	case "merchant_hoarded":
-		item := srPayloadString(ev.Payload, "item")
-		if item == "" {
-			item = ev.Action.Item
-		}
-		if item == "" {
-			item = "food"
-		}
-		qty := int(payloadInt64(ev.Payload, "quantity"))
-		if qty <= 0 {
-			qty = maxInt(1, ev.Action.Quantity)
-		}
-		return Statement{Topic: "hoarding", Item: item, Location: dID, Quantity: qty}, true
-
-	case "district_control_shifted":
-		return Statement{Topic: "turf_shift", Item: "coins", Location: dID, Quantity: 1}, true
-
-	default:
-		return Statement{}, false
 	}
+	raw := strings.FieldsFunc(strings.ToLower(s), seps)
+	out := make([]string, 0, len(raw))
+	for _, cl := range raw {
+		cl = strings.TrimSpace(cl)
+		if cl != "" {
+			out = append(out, cl)
+		}
+	}
+	return out
 }
 
-func (w *World) firstHubOrYamenDistrict() string {
-	for _, d := range w.Map.Districts {
-		if w.Map.DistrictHasFeature(d.ID, "hub") || w.Map.DistrictHasFeature(d.ID, "yamen") {
-			return d.ID
+func srPrefixHasNegator(prefix string) bool {
+	p := strings.TrimSpace(prefix)
+	if p == "" {
+		return false
+	}
+	for _, zhNeg := range []string{
+		"没有", "并无", "并非", "毫无", "绝无", "未见", "未有", "未发", "未曾", "不曾",
+		"不是", "不会", "不要", "莫要", "不必", "无需", "无须", "切勿", "勿要", "别", "莫", "勿", "无", "不", "没",
+	} {
+		if strings.Contains(p, zhNeg) {
+			return true
 		}
 	}
-	if len(w.Map.Districts) > 0 {
-		return w.Map.Districts[0].ID
+	padded := " " + p + " "
+	for _, enNeg := range []string{
+		" no ", " not ", " never ", " without ", " zero ", " neither ", " nor ",
+		" don't ", " dont ", " doesn't ", " doesnt ", " didn't ", " didnt ",
+		" isn't ", " isnt ", " aren't ", " arent ", " wasn't ", " wasnt ",
+		" won't ", " wont ", " can't ", " cant ", " cannot ", " free of ", " false ", " unfounded ",
+	} {
+		if strings.Contains(padded, enNeg) {
+			return true
+		}
 	}
-	return ""
+	return false
+}
+
+func srAnalyzeSpeechCrisisPolarity(text string) (affirmCrisis int, reassure int, inferredTopic string) {
+	if strings.TrimSpace(text) == "" {
+		return 0, 0, ""
+	}
+	clauses := srSplitSpeechClauses(text)
+
+	type crisisTerm struct {
+		kw    string
+		topic string
+	}
+	crisisTerms := []crisisTerm{
+		{kw: "短缺", topic: "shortage"},
+		{kw: "缺粮", topic: "shortage"},
+		{kw: "断粮", topic: "shortage"},
+		{kw: "匮乏", topic: "shortage"},
+		{kw: "饥荒", topic: "famine"},
+		{kw: "灾荒", topic: "famine"},
+		{kw: "灾情", topic: "disaster"},
+		{kw: "瘟疫", topic: "plague"},
+		{kw: "疫病", topic: "plague"},
+		{kw: "恐慌", topic: "shortage"},
+		{kw: "暴乱", topic: "revolt"},
+		{kw: "哗变", topic: "revolt"},
+		{kw: "囤积", topic: "hoarding"},
+		{kw: "哄抢", topic: "shortage"},
+		{kw: "shortage", topic: "shortage"},
+		{kw: "scarcity", topic: "shortage"},
+		{kw: "scarce", topic: "shortage"},
+		{kw: "drying up", topic: "shortage"},
+		{kw: "running out", topic: "shortage"},
+		{kw: "famine", topic: "famine"},
+		{kw: "starving", topic: "famine"},
+		{kw: "plague", topic: "plague"},
+		{kw: "epidemic", topic: "plague"},
+		{kw: "disaster", topic: "disaster"},
+		{kw: "panic", topic: "shortage"},
+		{kw: "crisis", topic: "shortage"},
+		{kw: "revolt", topic: "revolt"},
+	}
+
+	abundanceTerms := []string{
+		"充足", "充裕", "丰足", "充沛", "富足", "有余", "满仓", "供应正常", "供应平稳", "物价平稳",
+		"plenty", "abundant", "sufficient", "ample", "enough", "well-stocked", "well stocked", "full granary",
+	}
+
+	refutationFraming := []string{
+		"辟谣", "纯属谣言", "系谣言", "是谣言", "皆为谣言", "不实", "假消息", "切勿轻信", "莫信谣",
+		"不缺", "未缺", "无虞", "无忧", "莫慌", "勿慌", "别慌", "不用慌", "人心安定",
+		"false rumor", "unfounded rumor", "mere rumor", "debunk", "stay calm", "remain calm",
+	}
+
+	for _, cl := range clauses {
+		clauseRefuted := false
+		for _, rf := range refutationFraming {
+			if strings.Contains(cl, rf) {
+				reassure++
+				clauseRefuted = true
+			}
+		}
+
+		matchedCrisisInClause := false
+		for _, ct := range crisisTerms {
+			idx := strings.Index(cl, ct.kw)
+			if idx < 0 {
+				continue
+			}
+			matchedCrisisInClause = true
+			prefix := cl[:idx]
+			suffix := cl[idx+len(ct.kw):]
+			postRefuted := strings.Contains(suffix, "是谣言") || strings.Contains(suffix, "属谣言") ||
+				strings.Contains(suffix, "不实") || strings.Contains(suffix, "is false") || strings.Contains(suffix, "is a rumor")
+			if clauseRefuted || postRefuted || srPrefixHasNegator(prefix) {
+				reassure++
+			} else {
+				affirmCrisis++
+				if inferredTopic == "" {
+					inferredTopic = ct.topic
+				}
+			}
+		}
+
+		if !matchedCrisisInClause {
+			for _, ab := range abundanceTerms {
+				idx := strings.Index(cl, ab)
+				if idx < 0 {
+					continue
+				}
+				prefix := cl[:idx]
+				if srPrefixHasNegator(prefix) {
+					affirmCrisis++
+					if inferredTopic == "" {
+						inferredTopic = "shortage"
+					}
+				} else {
+					reassure++
+				}
+			}
+		}
+	}
+	return affirmCrisis, reassure, inferredTopic
 }
 
 func srEventDistrict(w *World, ev Event) string {

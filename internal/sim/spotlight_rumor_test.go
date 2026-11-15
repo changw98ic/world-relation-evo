@@ -85,11 +85,11 @@ func TestSpotlightRumorDynamicHydrationPanicAndGossipLineage(t *testing.T) {
 	if sr.CohortHeat["cohort_crossroads_xiucai"] <= 0 || sr.CohortHeat["cohort_market_gangsters"] <= 0 {
 		t.Fatalf("expected cohort heat to rise from macro events, got %v", sr.CohortHeat)
 	}
-	if len(obsEvs) == 0 || obsEvs[0].Kind != "gossip_seeded" {
-		t.Fatalf("expected macro scandal/clash to seed teahouse gossip, got %+v", obsEvs)
+	if len(obsEvs) != 0 {
+		t.Fatalf("expected macro events not to inject synthetic gossip events into focal actors, got %+v", obsEvs)
 	}
 
-	// Day 1 spotlight step: promotes 3 top-heat figures (120 -> 123).
+	// Day 1 spotlight step: promotes 3 top-heat figures (120 -> 123) without injecting synthetic memories.
 	promEvs := w.StepDynamicSpotlight(sr)
 	promotedCount := 0
 	var promotedIDs []string
@@ -104,8 +104,11 @@ func TestSpotlightRumorDynamicHydrationPanicAndGossipLineage(t *testing.T) {
 	}
 	for _, id := range promotedIDs {
 		a := actorByID(w, id)
-		if a == nil || a.Goal == "" || len(a.Memories) == 0 {
-			t.Fatalf("promoted actor %s missing vivid goal/memory: %+v", id, a)
+		if a == nil || a.Goal == "" {
+			t.Fatalf("promoted actor %s missing vivid goal: %+v", id, a)
+		}
+		if len(a.Memories) != 0 {
+			t.Fatalf("promoted actor %s should not start with system-injected memories: %+v", id, a.Memories)
 		}
 	}
 
@@ -219,11 +222,19 @@ func TestSpotlightRumorDynamicHydrationPanicAndGossipLineage(t *testing.T) {
 		t.Fatalf("expected district morale to shift downward on panic: before=%d after=%d", moraleBefore, w.DistrictStates["market_street"].MoraleBonus)
 	}
 
-	// 3. Macro Scandal/Disaster -> Teahouse Gossip -> Citable BasisEventID in Apply("speak")
-	hubA, hubB := actorByID(w, "p24"), actorByID(w, "p25")
+	// 3. Epistemic Guard: Macro Disaster Does NOT Inject Memories; Witness -> Speak -> Listener Preserves Lineage
+	hubA := jrTestFindActorByRole(w, "gangster")
+	hubB := actorByID(w, "p25")
+	hubC := jrTestFindActorByRole(w, "constable")
+	if hubA == nil || hubB == nil || hubC == nil {
+		t.Fatal("missing hub test actors")
+	}
 	hubA.Location, hubA.InsideHouse, hubA.Task, hubA.JailedUntil = "crossroads", "", nil, 0
 	hubB.Location, hubB.InsideHouse, hubB.Task, hubB.JailedUntil = "crossroads", "", nil, 0
-	sr.ActorSalience[hubA.ID] = 500 // ensure hubA is chosen among top hub recipients
+	hubC.Location, hubC.InsideHouse, hubC.Task, hubC.JailedUntil = "crossroads", "", nil, 0
+	hubA.Money = 20
+	hubA.Energy = 80
+	sr.ActorSalience[hubA.ID] = 500
 
 	macroDisaster := sim.Event{
 		ID:      w.NextID,
@@ -240,32 +251,35 @@ func TestSpotlightRumorDynamicHydrationPanicAndGossipLineage(t *testing.T) {
 	}
 	w.NextID++
 	gossipEvs := w.ObserveSpotlightAndRumors(sr, []sim.Event{macroDisaster})
-	gossipEv := lastOfKind(gossipEvs, "gossip_seeded")
-	if gossipEv.ID == 0 {
-		t.Fatalf("expected gossip_seeded event for macro disaster, got %+v", gossipEvs)
+	if len(gossipEvs) != 0 {
+		t.Fatalf("expected zero gossip_seeded events from macro disaster, got %+v", gossipEvs)
 	}
-	gossipMem, ok := srTestFindMemoryByEventID(*hubA, macroDisaster.ID)
-	if !ok || gossipMem.Kind != "gossip" || gossipMem.RootEventID != macroDisaster.ID || gossipMem.Statement == nil {
-		t.Fatalf("expected focal hub actor %s to hold citable gossip memory for event %d, got ok=%v mem=%+v",
-			hubA.ID, macroDisaster.ID, ok, gossipMem)
+	if _, injected := srTestFindMemoryByEventID(*hubA, macroDisaster.ID); injected {
+		t.Fatalf("macro event %d was directly injected into focal actor %s memory without contact", macroDisaster.ID, hubA.ID)
 	}
 
+	// Instead, interpersonal interaction produces first-hand memory on hubA, which hubA relays via speak to hubB.
+	bribeEvs := w.Apply(hubA.ID, sim.Action{Kind: "bribe", TargetID: hubC.ID})
+	if len(bribeEvs) == 0 || bribeEvs[0].Kind != "bribed" {
+		t.Fatalf("expected first-hand bribed interaction, got %+v", bribeEvs)
+	}
+	rootEvID := bribeEvs[0].ID
 	speakGossip := w.Apply(hubA.ID, sim.Action{
 		Kind:         "speak",
 		TargetID:     hubB.ID,
-		Text:         "Did you hear? " + gossipMem.Text,
-		BasisEventID: macroDisaster.ID,
-		Statement:    gossipMem.Statement,
+		Text:         "Officer " + hubC.Name + " took a hush bribe at Crossroads.",
+		BasisEventID: rootEvID,
+		Statement:    &sim.Statement{Topic: "corruption", SubjectID: hubC.ID, Item: "coins", Location: "crossroads", Quantity: 4},
 	})
 	if len(speakGossip) == 0 || speakGossip[0].Kind != "speech" {
-		t.Fatalf("focal actor failed to cite seeded macro gossip via BasisEventID: %+v", speakGossip)
+		t.Fatalf("focal actor failed to cite first-hand interaction via BasisEventID: %+v", speakGossip)
 	}
-	if speakGossip[0].Action.BasisEventID != macroDisaster.ID || speakGossip[0].Payload["root_event_id"] != macroDisaster.ID {
+	if speakGossip[0].Action.BasisEventID != rootEvID || speakGossip[0].Payload["root_event_id"] != rootEvID {
 		t.Fatalf("speech lineage broken: %+v", speakGossip[0])
 	}
 	heardMem, heardOK := srTestFindMemoryByEventID(*hubB, speakGossip[0].ID)
-	if !heardOK || heardMem.RootEventID != macroDisaster.ID || heardMem.BasisEventID != macroDisaster.ID {
-		t.Fatalf("listener did not inherit macro root_event_id lineage: ok=%v mem=%+v", heardOK, heardMem)
+	if !heardOK || heardMem.RootEventID != rootEvID || heardMem.BasisEventID != rootEvID {
+		t.Fatalf("listener did not inherit root_event_id lineage: ok=%v mem=%+v", heardOK, heardMem)
 	}
 
 	// 4. agent.SalienceOrderedActorIDs ranking, filtering, determinism & tick rotation
@@ -413,8 +427,11 @@ func TestSpotlightRumorThreeDayMillionPopConservation(t *testing.T) {
 		t.Fatalf("expected both spotlight_promoted and spotlight_demoted over 3 days at 1M pop, got promoted=%d demoted=%d",
 			kinds["spotlight_promoted"], kinds["spotlight_demoted"])
 	}
-	if kinds["gossip_seeded"] == 0 {
-		t.Fatalf("expected teahouse gossip_seeded events over 3 days, got %v", kinds)
+	if kinds["gossip_seeded"] != 0 {
+		t.Fatalf("expected zero macro gossip_seeded memory injections over 3 days, got %d", kinds["gossip_seeded"])
+	}
+	if kinds["speech"] == 0 {
+		t.Fatalf("expected interpersonal speech propagation over 3 days, got %v", kinds)
 	}
 
 	// Verify strict 0-error conservation across all 6 ledgers.

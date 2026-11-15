@@ -98,17 +98,20 @@ func EffectiveMarketCreditSpec(s MarketCreditSpec) MarketCreditSpec {
 
 // LoanRecord tracks an individual Actor's usury loan and optional property collateral.
 type LoanRecord struct {
-	ID              int64  `json:"id"`
-	LenderID        string `json:"lender_id"`
-	BorrowerID      string `json:"borrower_id"`
-	Principal       int64  `json:"principal"`
-	AccruedInterest int64  `json:"accrued_interest"`
-	Repaid          int64  `json:"repaid,omitempty"`
-	RatePermille    int    `json:"rate_permille"`
-	IssuedTick      int64  `json:"issued_tick"`
-	DueTick         int64  `json:"due_tick"`
-	CollateralHouse string `json:"collateral_house,omitempty"`
-	Status          string `json:"status"` // "active", "repaid", "foreclosed", "defaulted"
+	ID                  int64  `json:"id"`
+	LenderID            string `json:"lender_id"`
+	LenderCohortID      string `json:"lender_cohort_id,omitempty"`
+	BorrowerID          string `json:"borrower_id"`
+	BorrowerCohortID    string `json:"borrower_cohort_id,omitempty"`
+	BorrowerCohortFunds int64  `json:"borrower_cohort_funds,omitempty"`
+	Principal           int64  `json:"principal"`
+	AccruedInterest     int64  `json:"accrued_interest"`
+	Repaid              int64  `json:"repaid,omitempty"`
+	RatePermille        int    `json:"rate_permille"`
+	IssuedTick          int64  `json:"issued_tick"`
+	DueTick             int64  `json:"due_tick"`
+	CollateralHouse     string `json:"collateral_house,omitempty"`
+	Status              string `json:"status"` // "active", "repaid", "foreclosed", "defaulted"
 }
 
 // CohortDebtRecord tracks macro usury debt between a debtor PopulationCohort and a creditor PopulationCohort.
@@ -127,12 +130,15 @@ type CohortDebtRecord struct {
 
 // ForeclosedTenancy tracks a former homeowner remaining in a foreclosed House as a rent-paying tenant.
 type ForeclosedTenancy struct {
-	HouseID      string `json:"house_id"`
-	OwnerID      string `json:"owner_id"`
-	TenantID     string `json:"tenant_id"`
-	DailyRent    int64  `json:"daily_rent"`
-	SinceTick    int64  `json:"since_tick"`
-	LastRentTick int64  `json:"last_rent_tick"`
+	HouseID           string `json:"house_id"`
+	OwnerID           string `json:"owner_id"`
+	OwnerCohortID     string `json:"owner_cohort_id,omitempty"`
+	TenantID          string `json:"tenant_id"`
+	TenantCohortID    string `json:"tenant_cohort_id,omitempty"`
+	TenantCohortFunds int64  `json:"tenant_cohort_funds,omitempty"`
+	DailyRent         int64  `json:"daily_rent"`
+	SinceTick         int64  `json:"since_tick"`
+	LastRentTick      int64  `json:"last_rent_tick"`
 }
 
 // MarketCreditState holds dynamic district prices, hoarded stocks, usury loan ledgers, and property/land annexation state.
@@ -939,6 +945,8 @@ func (w *World) ApplyMarketCreditAction(mc *MarketCreditState, actorID string, x
 				lender.Trust = map[string]int{}
 			}
 			lender.Trust[a.ID]++
+		} else if lc := w.findCohort(l.LenderCohortID); lc != nil && lc.Population > 0 {
+			lc.MoneyPool += pay
 		} else {
 			w.creditTreasury(pay, "fee")
 		}
@@ -993,6 +1001,7 @@ func (w *World) ApplyMarketCreditAction(mc *MarketCreditState, actorID string, x
 			return fail("loan has no remaining balance"), true
 		}
 		borrower := w.actor(l.BorrowerID)
+		borrowerCohort := w.findCohort(l.BorrowerCohortID)
 		houseID := l.CollateralHouse
 		if houseID == "" {
 			houseID = x.HouseID
@@ -1001,36 +1010,48 @@ func (w *World) ApplyMarketCreditAction(mc *MarketCreditState, actorID string, x
 			houseID = borrower.HomeID
 		}
 		h := w.house(houseID)
-		if h == nil || borrower == nil || h.OwnerID != borrower.ID {
+		borrowerAlive := (borrower != nil && !borrower.Dead) || (borrower == nil && borrowerCohort != nil && borrowerCohort.Population > 0)
+		if h == nil || !borrowerAlive || h.OwnerID != l.BorrowerID {
 			return fail("no foreclosable collateral house owned by borrower"), true
 		}
 
 		oldOwner := h.OwnerID
 		h.OwnerID = a.ID
-		h.Residents = appendUnique(h.Residents, borrower.ID)
+		h.Residents = appendUnique(h.Residents, l.BorrowerID)
 		dailyRent := int64(maxInt(1, h.Level) * spec.HouseDailyRentPerLevel)
-		mc.ForeclosedTenancies[h.ID] = ForeclosedTenancy{
+		tenancy := ForeclosedTenancy{
 			HouseID:      h.ID,
 			OwnerID:      a.ID,
-			TenantID:     borrower.ID,
+			TenantID:     l.BorrowerID,
 			DailyRent:    dailyRent,
 			SinceTick:    w.Tick,
 			LastRentTick: w.Tick,
 		}
-		l.Status = "foreclosed"
-		if borrower.Trust == nil {
-			borrower.Trust = map[string]int{}
+		if borrower == nil && borrowerCohort != nil {
+			tenancy.TenantCohortID = borrowerCohort.ID
+			tenancy.TenantCohortFunds = l.BorrowerCohortFunds
 		}
-		borrower.Trust[a.ID] -= 3
-		a.Trust[borrower.ID] -= 1
-		return emit("house_foreclosed", fmt.Sprintf("%s foreclosed %s from %s over overdue loan #%d (tenant rent %d/day)", a.Name, h.Name, borrower.Name, l.ID, dailyRent), map[string]any{
+		mc.ForeclosedTenancies[h.ID] = tenancy
+		l.Status = "foreclosed"
+		borrowerName := l.BorrowerID
+		var obs []*Actor
+		if borrower != nil {
+			borrowerName = borrower.Name
+			if borrower.Trust == nil {
+				borrower.Trust = map[string]int{}
+			}
+			borrower.Trust[a.ID] -= 3
+			a.Trust[borrower.ID] -= 1
+			obs = append(obs, borrower)
+		}
+		return emit("house_foreclosed", fmt.Sprintf("%s foreclosed %s from %s over overdue loan #%d (tenant rent %d/day)", a.Name, h.Name, borrowerName, l.ID, dailyRent), map[string]any{
 			"loan_id":      l.ID,
 			"house_id":     h.ID,
 			"old_owner_id": oldOwner,
 			"new_owner_id": a.ID,
-			"tenant_id":    borrower.ID,
+			"tenant_id":    l.BorrowerID,
 			"daily_rent":   dailyRent,
-		}, borrower), true
+		}, obs...), true
 	}
 
 	return nil, false
@@ -1061,12 +1082,120 @@ func (w *World) StepMarketAndCredit(mc *MarketCreditState) []Event {
 }
 
 func (w *World) findCohort(id string) *PopulationCohort {
+	if id == "" {
+		return nil
+	}
 	for i := range w.Cohorts {
 		if w.Cohorts[i].ID == id {
 			return &w.Cohorts[i]
 		}
 	}
 	return nil
+}
+
+// rebindDehydratedActorContracts preserves active loan and tenancy obligations when a living focal
+// Actor is dehydrated into targetCohortID, ensuring LOD precision changes never turn a living
+// borrower into a spurious loan default or orphan a lender's claim.
+func (w *World) rebindDehydratedActorContracts(actorID, targetCohortID string, actorMoney int) {
+	mc := w.MarketCredit
+	if mc == nil || actorID == "" || targetCohortID == "" {
+		return
+	}
+	for i := range mc.LoanRequests {
+		r := &mc.LoanRequests[i]
+		if r.Status == "pending" && (r.BorrowerID == actorID || r.LenderID == actorID) {
+			r.Status = "cancelled"
+		}
+	}
+	remFunds := int64(maxInt(0, actorMoney))
+	firstBorrowerLoanIdx := -1
+	for i := range mc.Loans {
+		l := &mc.Loans[i]
+		if l.Status != "active" {
+			continue
+		}
+		if l.LenderID == actorID {
+			l.LenderCohortID = targetCohortID
+		}
+		if l.BorrowerID == actorID {
+			l.BorrowerCohortID = targetCohortID
+			if firstBorrowerLoanIdx < 0 {
+				firstBorrowerLoanIdx = i
+			}
+			owed := maxInt64(0, l.Principal+l.AccruedInterest-l.Repaid)
+			need := owed + 6
+			alloc := minInt64(remFunds, need)
+			l.BorrowerCohortFunds += alloc
+			remFunds -= alloc
+		}
+	}
+	if remFunds > 0 && firstBorrowerLoanIdx >= 0 {
+		mc.Loans[firstBorrowerLoanIdx].BorrowerCohortFunds += remFunds
+		remFunds = 0
+	}
+	if len(mc.ForeclosedTenancies) > 0 {
+		hIDs := make([]string, 0, len(mc.ForeclosedTenancies))
+		for hID := range mc.ForeclosedTenancies {
+			hIDs = append(hIDs, hID)
+		}
+		sort.Strings(hIDs)
+		for _, hID := range hIDs {
+			ten := mc.ForeclosedTenancies[hID]
+			changed := false
+			if ten.OwnerID == actorID {
+				ten.OwnerCohortID = targetCohortID
+				changed = true
+			}
+			if ten.TenantID == actorID {
+				ten.TenantCohortID = targetCohortID
+				if remFunds > 0 {
+					ten.TenantCohortFunds += remFunds
+					remFunds = 0
+				}
+				changed = true
+			}
+			if changed {
+				mc.ForeclosedTenancies[hID] = ten
+			}
+		}
+	}
+}
+
+func (w *World) actorHasActiveCreditContract(actorID string) bool {
+	if actorID == "" {
+		return false
+	}
+	if a := w.actor(actorID); a != nil && a.Plan != nil && a.Plan.Status == "active" {
+		return true
+	}
+	if w.Continuity != nil {
+		for _, ag := range w.Continuity.Agreements {
+			if (ag.Status == "proposed" || ag.Status == "active") && (ag.SupplierID == actorID || ag.BuyerID == actorID) {
+				return true
+			}
+		}
+	}
+	mc := w.MarketCredit
+	if mc == nil {
+		return false
+	}
+	for _, r := range mc.LoanRequests {
+		if r.Status == "pending" && (r.BorrowerID == actorID || r.LenderID == actorID) {
+			return true
+		}
+	}
+	for i := range mc.Loans {
+		l := &mc.Loans[i]
+		if l.Status == "active" && (l.BorrowerID == actorID || l.LenderID == actorID) {
+			return true
+		}
+	}
+	for _, ten := range mc.ForeclosedTenancies {
+		if ten.OwnerID == actorID || ten.TenantID == actorID {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *World) stepDailyCreditAndAnnexation(mc *MarketCreditState, spec MarketCreditSpec) []Event {
@@ -1106,7 +1235,7 @@ func (w *World) stepDailyCreditAndAnnexation(mc *MarketCreditState, spec MarketC
 		d.AccruedInterest += interest
 	}
 
-	// 2. Collect daily tenant rent on foreclosed houses (focal actors).
+	// 2. Collect daily tenant rent on foreclosed houses (focal or dehydrated actors).
 	houseIDs := make([]string, 0, len(mc.ForeclosedTenancies))
 	for hID := range mc.ForeclosedTenancies {
 		houseIDs = append(houseIDs, hID)
@@ -1120,30 +1249,77 @@ func (w *World) stepDailyCreditAndAnnexation(mc *MarketCreditState, spec MarketC
 			continue
 		}
 		owner := w.actor(h.OwnerID)
+		ownerCohort := w.findCohort(ten.OwnerCohortID)
 		tenant := w.actor(ten.TenantID)
-		if owner == nil || owner.Dead || tenant == nil || tenant.Dead {
+		tenantCohort := w.findCohort(ten.TenantCohortID)
+		ownerAlive := (owner != nil && !owner.Dead) || (owner == nil && ownerCohort != nil && ownerCohort.Population > 0)
+		tenantAlive := (tenant != nil && !tenant.Dead) || (tenant == nil && tenantCohort != nil && tenantCohort.Population > 0)
+		if !ownerAlive || !tenantAlive {
 			delete(mc.ForeclosedTenancies, hID)
 			continue
 		}
-		ten.OwnerID = owner.ID
+		if owner != nil {
+			ten.OwnerID = owner.ID
+		}
 		rent := ten.DailyRent
 		if rent < 1 {
 			rent = int64(maxInt(1, h.Level) * spec.HouseDailyRentPerLevel)
 		}
-		if tenant.Money > 0 {
-			paid := minInt64(rent, int64(tenant.Money))
+		availRent := int64(0)
+		if tenant != nil {
+			availRent = int64(tenant.Money)
+		} else if tenantCohort != nil {
+			availRent = minInt64(ten.TenantCohortFunds, tenantCohort.MoneyPool)
+		}
+		if availRent > 0 {
+			paid := minInt64(rent, availRent)
 			if paid > 0 {
-				tenant.Money -= int(paid)
-				owner.Money += int(paid)
+				if tenant != nil {
+					tenant.Money -= int(paid)
+				} else {
+					tenantCohort.MoneyPool -= paid
+					ten.TenantCohortFunds -= paid
+				}
+				if owner != nil {
+					owner.Money += int(paid)
+				} else {
+					ownerCohort.MoneyPool += paid
+				}
 				ten.LastRentTick = w.Tick
-				ev := w.record(tenant, Action{Kind: "wait", TargetID: owner.ID, HouseID: h.ID, Price: int(paid)}, "house_rent_paid", map[string]any{
-					"text":      fmt.Sprintf("%s paid %d coins daily tenant rent for %s to %s", tenant.Name, paid, h.Name, owner.Name),
-					"house_id":  h.ID,
-					"owner_id":  owner.ID,
-					"tenant_id": tenant.ID,
-					"coins":     paid,
-				}, owner)
-				events = append(events, ev)
+				if tenant != nil {
+					var obs []*Actor
+					ownerName := ten.OwnerID
+					if owner != nil {
+						ownerName = owner.Name
+						obs = append(obs, owner)
+					}
+					ev := w.record(tenant, Action{Kind: "wait", TargetID: ten.OwnerID, HouseID: h.ID, Price: int(paid)}, "house_rent_paid", map[string]any{
+						"text":      fmt.Sprintf("%s paid %d coins daily tenant rent for %s to %s", tenant.Name, paid, h.Name, ownerName),
+						"house_id":  h.ID,
+						"owner_id":  ten.OwnerID,
+						"tenant_id": tenant.ID,
+						"coins":     paid,
+					}, obs...)
+					events = append(events, ev)
+				} else {
+					ev := Event{
+						ID:       w.NextID,
+						Tick:     w.Tick,
+						ActorID:  ten.TenantID,
+						TargetID: ten.OwnerID,
+						Kind:     "house_rent_paid",
+						Action:   Action{Kind: "wait", TargetID: ten.OwnerID, HouseID: h.ID, Price: int(paid)},
+						Payload: map[string]any{
+							"text":      fmt.Sprintf("%s (in %s) paid %d coins daily tenant rent for %s", ten.TenantID, tenantCohort.Name, paid, h.Name),
+							"house_id":  h.ID,
+							"owner_id":  ten.OwnerID,
+							"tenant_id": ten.TenantID,
+							"coins":     paid,
+						},
+					}
+					w.NextID++
+					events = append(events, ev)
+				}
 			}
 		}
 		mc.ForeclosedTenancies[hID] = ten
@@ -1248,13 +1424,19 @@ func (w *World) stepDailyCreditAndAnnexation(mc *MarketCreditState, spec MarketC
 
 	// 4. Update personal debt facts only. Repayment and foreclosure require
 	// borrower/creditor actions; the clock never chooses either on their behalf.
+	// A living borrower dehydrated into a PopulationCohort is NOT dead and MUST NOT default.
 	for i := range mc.Loans {
 		l := &mc.Loans[i]
 		if l.Status != "active" {
 			continue
 		}
 		borrower := w.actor(l.BorrowerID)
-		if borrower == nil || borrower.Dead {
+		borrowerCohort := w.findCohort(l.BorrowerCohortID)
+		if borrower != nil && borrower.Dead {
+			l.Status = "defaulted"
+			continue
+		}
+		if borrower == nil && (borrowerCohort == nil || borrowerCohort.Population <= 0) {
 			l.Status = "defaulted"
 			continue
 		}

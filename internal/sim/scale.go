@@ -229,7 +229,6 @@ func (w *World) buildStepIndex() *stepIndex {
 			Health:   a.Health,
 			Sleeping: a.Task != nil && a.Task.Action.Kind == "sleep",
 			Jailed:   a.JailedUntil > w.Tick,
-			Corrupt:  a.IllicitGain > 0,
 		}
 		if !a.InTransit() {
 			pk := placeKey{location: a.Location, insideHouse: a.InsideHouse}
@@ -991,6 +990,7 @@ func (w *World) DehydrateActor(actorID string) error {
 	}
 	reconcileCohortAgeBrackets(target)
 	target.MoneyPool += int64(a.Money)
+	w.rebindDehydratedActorContracts(actorID, target.ID, a.Money)
 	for item, qty := range a.Items {
 		if qty > 0 {
 			target.ItemPool[item] += int64(qty)

@@ -444,6 +444,7 @@ func (w *World) ApplyJusticeAction(jr *JusticeRevoltState, actorID string, x Act
 		}
 		a.Energy -= 4
 
+		observers := append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)
 		b.Task = nil
 		b.InsideHouse = ""
 		b.JailedUntil = w.Tick + spec.TrialSentenceTicks
@@ -482,7 +483,15 @@ func (w *World) ApplyJusticeAction(jr *JusticeRevoltState, actorID string, x Act
 			"jailed_until":   b.JailedUntil,
 			"bribe_shielded": bribeShielded,
 			"grievance":      grievance,
-		}, b)
+			"observation": Observation{
+				Kind:      "wrongful_conviction",
+				SubjectID: a.ID,
+				ObjectID:  b.ID,
+				CaseID:    caseID,
+				Location:  a.Location,
+				Quantity:  1,
+			},
+		}, observers...)
 		return []Event{ev}, true
 
 	case "file_appeal":
@@ -495,37 +504,64 @@ func (w *World) ApplyJusticeAction(jr *JusticeRevoltState, actorID string, x Act
 		if a.Energy < 4 {
 			return fail("insufficient energy to file appeal"), true
 		}
+		if x.TargetID == "" && x.BasisEventID == 0 {
+			return fail("appeal must specify a known wrongful-conviction target or basis event"), true
+		}
+		leads := ActorKnownWrongfulLeads(*a)
+		if x.BasisEventID != 0 {
+			var filtered []KnownWrongfulLead
+			for _, lead := range leads {
+				if lead.BasisEventID == x.BasisEventID {
+					filtered = append(filtered, lead)
+				}
+			}
+			leads = filtered
+		}
+		if len(leads) == 0 {
+			return fail("actor has no witnessed or reported knowledge of this wrongful conviction"), true
+		}
 
-		// Locate matching open wrongful conviction (by target suspect/magistrate, or most recent in district/world).
+		// Locate matching open wrongful conviction that the actor actually knows about AND is in the actor's current district.
 		caseIdx := -1
+		var matchedLead KnownWrongfulLead
+		remoteDistrict := ""
 		for i := len(jr.CourtCases) - 1; i >= 0; i-- {
 			c := jr.CourtCases[i]
 			if c.Status != "convicted" || !c.Wrongful {
 				continue
 			}
-			if x.TargetID != "" && (c.SuspectID == x.TargetID || c.MagistrateID == x.TargetID) {
-				caseIdx = i
-				break
+			if x.TargetID != "" && c.SuspectID != x.TargetID && c.MagistrateID != x.TargetID {
+				continue
 			}
-			if x.TargetID == "" && c.District == a.Location {
-				caseIdx = i
-				break
+			lead, ok := matchKnownLeadToCourtCase(leads, c)
+			if !ok {
+				continue
 			}
-		}
-		if caseIdx == -1 && x.TargetID == "" {
-			for i := len(jr.CourtCases) - 1; i >= 0; i-- {
-				if jr.CourtCases[i].Status == "convicted" && jr.CourtCases[i].Wrongful {
-					caseIdx = i
-					break
+			if c.District != a.Location {
+				if remoteDistrict == "" {
+					remoteDistrict = c.District
 				}
+				continue
 			}
+			caseIdx = i
+			matchedLead = lead
+			break
 		}
 		if caseIdx == -1 {
-			return fail("no open wrongful conviction found to appeal"), true
+			if remoteDistrict != "" {
+				return fail("must travel to " + remoteDistrict + " court to file appeal"), true
+			}
+			return fail("no known open wrongful conviction found in current district"), true
 		}
 
 		a.Energy -= 4
 		cc := &jr.CourtCases[caseIdx]
+		if x.TargetID == "" {
+			x.TargetID = cc.SuspectID
+		}
+		if x.BasisEventID == 0 {
+			x.BasisEventID = matchedLead.BasisEventID
+		}
 		cc.Status = "overturned"
 		cc.AppealByID = a.ID
 		cc.ResolvedTick = w.Tick
@@ -929,29 +965,12 @@ func (w *World) stepMacroAppeals(jr *JusticeRevoltState, spec JusticeRevoltSpec)
 			}
 		}
 	}
-	var censorActor *Actor
 	if censorCohort == nil {
-		for i := range w.Actors {
-			a := &w.Actors[i]
-			if !a.Dead && w.Tick >= a.JailedUntil && a.IllicitGain == 0 && w.actorCanAppeal(*a, spec) {
-				censorActor = a
-				break
-			}
-		}
-	}
-	if censorCohort == nil && censorActor == nil {
 		return nil
 	}
 
-	censorID := "oversight_board"
-	censorName := "Oversight Censorate"
-	if censorCohort != nil {
-		censorID = censorCohort.ID
-		censorName = censorCohort.Name
-	} else if censorActor != nil {
-		censorID = censorActor.ID
-		censorName = censorActor.Name
-	}
+	censorID := censorCohort.ID
+	censorName := censorCohort.Name
 
 	var events []Event
 	overturnedCount := 0
@@ -960,7 +979,7 @@ func (w *World) stepMacroAppeals(jr *JusticeRevoltState, spec JusticeRevoltSpec)
 			break
 		}
 		cc := &jr.CourtCases[i]
-		if cc.Status != "convicted" || !cc.Wrongful {
+		if cc.Status != "convicted" || !cc.Wrongful || !cc.IsCohort {
 			continue
 		}
 

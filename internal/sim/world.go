@@ -6,23 +6,30 @@ import (
 	"fmt"
 	"hash/fnv"
 	"sort"
+	"strings"
 	"sync"
 )
 
-// Observation is a first-hand material outcome witnessed by the acting character.
+// Observation is a first-hand material outcome witnessed by the acting character or co-located observer.
 type Observation struct {
-	Kind     string `json:"kind"`
-	Item     string `json:"item"`
-	Location string `json:"location"`
-	Quantity int    `json:"quantity"`
+	Kind      string `json:"kind"`
+	SubjectID string `json:"subject_id,omitempty"`
+	ObjectID  string `json:"object_id,omitempty"`
+	CaseID    int64  `json:"case_id,omitempty"`
+	Item      string `json:"item"`
+	Location  string `json:"location"`
+	Quantity  int    `json:"quantity"`
 }
 
 // Statement is a speaker's structured assertion inside speech (never an objective world fact).
 type Statement struct {
-	Topic    string `json:"topic"`
-	Item     string `json:"item"`
-	Location string `json:"location"`
-	Quantity int    `json:"quantity"`
+	Topic     string `json:"topic"`
+	SubjectID string `json:"subject_id,omitempty"`
+	ObjectID  string `json:"object_id,omitempty"`
+	CaseID    int64  `json:"case_id,omitempty"`
+	Item      string `json:"item"`
+	Location  string `json:"location"`
+	Quantity  int    `json:"quantity"`
 }
 
 type Memory struct {
@@ -182,7 +189,6 @@ type Neighbor struct {
 	Health   int      `json:"health"`
 	Sleeping bool     `json:"sleeping,omitempty"`
 	Jailed   bool     `json:"jailed,omitempty"`
-	Corrupt  bool     `json:"corrupt,omitempty"`
 }
 
 type RoadView struct {
@@ -230,6 +236,8 @@ type Perception struct {
 	MediateTargetID     string         `json:"mediate_target_id,omitempty"`
 	DistrictController  string         `json:"district_controller,omitempty"`
 	HasOpenWrongfulCase bool           `json:"has_open_wrongful_case,omitempty"`
+	AppealTargetID      string         `json:"appeal_target_id,omitempty"`
+	AppealBasisEventID  int64          `json:"appeal_basis_event_id,omitempty"`
 	DistrictGrievance   int            `json:"district_grievance,omitempty"`
 	Map                 WorldMap       `json:"-"`
 	Catalog             Catalog        `json:"-"`
@@ -815,7 +823,6 @@ func (w *World) View(id string) Perception {
 				Health:   b.Health,
 				Sleeping: b.Task != nil && b.Task.Action.Kind == "sleep",
 				Jailed:   b.JailedUntil > w.Tick,
-				Corrupt:  b.IllicitGain > 0,
 			})
 		}
 	}
@@ -905,7 +912,10 @@ func (w *World) applyPerceptionEvoHints(p *Perception) {
 			}
 			if p.OverdueBorrowerID == "" && l.LenderID == a.ID && w.Tick >= l.DueTick && l.Principal+l.AccruedInterest-l.Repaid > 0 {
 				if l.CollateralHouse != "" {
-					if h := w.house(l.CollateralHouse); h != nil && h.OwnerID == l.BorrowerID {
+					borrower := w.actor(l.BorrowerID)
+					borrowerCohort := w.findCohort(l.BorrowerCohortID)
+					borrowerAlive := (borrower != nil && !borrower.Dead) || (borrower == nil && borrowerCohort != nil && borrowerCohort.Population > 0)
+					if h := w.house(l.CollateralHouse); h != nil && borrowerAlive && h.OwnerID == l.BorrowerID {
 						p.OverdueBorrowerID = l.BorrowerID
 						p.OverdueHouseID = h.ID
 					}
@@ -933,11 +943,15 @@ func (w *World) applyPerceptionEvoHints(p *Perception) {
 				p.EligibleSpouseIDs = append(p.EligibleSpouseIDs, nb.ID)
 			}
 		}
+		nearbySet := make(map[string]bool, len(p.Nearby))
+		for _, nb := range p.Nearby {
+			nearbySet[nb.ID] = true
+		}
 		for _, g := range w.Relations.Grudges {
 			if g.Resolved {
 				continue
 			}
-			if p.MediateTargetID == "" && g.OffenderID != "" {
+			if p.MediateTargetID == "" && g.OffenderID != "" && nearbySet[g.OffenderID] && actorKnowsAboutGrudge(a, g) {
 				p.MediateTargetID = g.OffenderID
 			}
 			if g.AggrievedID == a.ID && g.OffenderID != "" {
@@ -947,13 +961,248 @@ func (w *World) applyPerceptionEvoHints(p *Perception) {
 	}
 	if w.JusticeRevolt != nil {
 		p.DistrictGrievance = w.JusticeRevolt.Grievance(a.Location)
-		for _, cc := range w.JusticeRevolt.CourtCases {
-			if cc.Status == "convicted" && cc.Wrongful {
-				p.HasOpenWrongfulCase = true
-				break
+		leads := ActorKnownWrongfulLeads(a)
+		if len(leads) > 0 {
+			for i := len(w.JusticeRevolt.CourtCases) - 1; i >= 0; i-- {
+				cc := w.JusticeRevolt.CourtCases[i]
+				if cc.Status != "convicted" || !cc.Wrongful || cc.District != a.Location {
+					continue
+				}
+				if lead, ok := matchKnownLeadToCourtCase(leads, cc); ok {
+					p.HasOpenWrongfulCase = true
+					p.AppealTargetID = cc.SuspectID
+					p.AppealBasisEventID = lead.BasisEventID
+					break
+				}
 			}
 		}
 	}
+}
+
+// KnownWrongfulLead represents a wrongful conviction that an Actor has personally witnessed
+// or heard about through interpersonal speech, with its citable BasisEventID.
+type KnownWrongfulLead struct {
+	BasisEventID int64  `json:"basis_event_id"`
+	CaseID       int64  `json:"case_id,omitempty"`
+	SuspectID    string `json:"suspect_id,omitempty"`
+	MagistrateID string `json:"magistrate_id,omitempty"`
+	District     string `json:"district,omitempty"`
+}
+
+func actorKnowsAboutGrudge(self Actor, g GrudgeRecord) bool {
+	if self.ID == g.AggrievedID || self.ID == g.OffenderID {
+		return true
+	}
+	for i := len(self.Memories) - 1; i >= 0; i-- {
+		m := self.Memories[i]
+		if (g.SourceEventID != 0 && (m.EventID == g.SourceEventID || m.RootEventID == g.SourceEventID)) ||
+			(g.RootEventID != 0 && (m.EventID == g.RootEventID || m.RootEventID == g.RootEventID)) {
+			return true
+		}
+		if (m.Source == g.OffenderID && m.TargetID == g.AggrievedID) || (m.Source == g.AggrievedID && m.TargetID == g.OffenderID) {
+			return true
+		}
+	}
+	return false
+}
+
+func memoryImplicatesCorruption(m Memory, selfID, suspectID string) bool {
+	if suspectID == "" || m.Kind == "action_failed" {
+		return false
+	}
+	if m.Observation != nil && (m.Observation.Kind == "corruption" || m.Observation.Kind == "wrongful_conviction") && m.Observation.SubjectID == suspectID {
+		return true
+	}
+	if m.Kind == "bribed" && m.TargetID == suspectID {
+		return true
+	}
+	if m.Kind == "wrongful_conviction" && m.Source == suspectID {
+		return true
+	}
+	if m.Kind == "speech" && m.Source != selfID && m.Statement != nil {
+		switch m.Statement.Topic {
+		case "corruption", "bribe", "scandal", "wrongful_conviction":
+			if m.Statement.SubjectID == suspectID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isAuditRefutingMemory(m Memory, suspectID string) bool {
+	if m.TargetID != suspectID {
+		return false
+	}
+	if m.Kind == "corruption_purged" || m.Kind == "audit_cleared" {
+		return true
+	}
+	return m.Kind == "action_failed" && strings.Contains(m.Text, "no illicit gain")
+}
+
+// ActorCorruptionEvidence reports whether self possesses witnessed or spoken epistemic evidence
+// implicating suspectID in corruption/framing that has not already been audited since that memory.
+func ActorCorruptionEvidence(self Actor, suspectID string) (int64, bool) {
+	if suspectID == "" || suspectID == self.ID {
+		return 0, false
+	}
+	latestResolvedTick := int64(-1)
+	for i := len(self.Memories) - 1; i >= 0; i-- {
+		m := self.Memories[i]
+		if isAuditRefutingMemory(m, suspectID) {
+			if m.Tick > latestResolvedTick {
+				latestResolvedTick = m.Tick
+			}
+		}
+	}
+	for i := len(self.Memories) - 1; i >= 0; i-- {
+		m := self.Memories[i]
+		if latestResolvedTick >= 0 && m.Tick < latestResolvedTick {
+			continue
+		}
+		if latestResolvedTick >= 0 && m.Tick == latestResolvedTick {
+			laterResolved := false
+			for j := i + 1; j < len(self.Memories); j++ {
+				if isAuditRefutingMemory(self.Memories[j], suspectID) {
+					laterResolved = true
+					break
+				}
+			}
+			if laterResolved {
+				continue
+			}
+		}
+		if memoryImplicatesCorruption(m, self.ID, suspectID) {
+			return m.EventID, true
+		}
+	}
+	return 0, false
+}
+
+// ActorCorruptionEvidenceWithBasis verifies that basisEventID in self.Memories implicates suspectID.
+func ActorCorruptionEvidenceWithBasis(self Actor, suspectID string, basisEventID int64) bool {
+	if basisEventID == 0 {
+		_, ok := ActorCorruptionEvidence(self, suspectID)
+		return ok
+	}
+	for i := len(self.Memories) - 1; i >= 0; i-- {
+		m := self.Memories[i]
+		if m.EventID == basisEventID {
+			return memoryImplicatesCorruption(m, self.ID, suspectID)
+		}
+	}
+	return false
+}
+
+// ActorKnownWrongfulLeads extracts wrongful-conviction leads personally witnessed or heard via speech by self.
+func ActorKnownWrongfulLeads(self Actor) []KnownWrongfulLead {
+	if len(self.Memories) == 0 {
+		return nil
+	}
+	var out []KnownWrongfulLead
+	seenSuspect := map[string]bool{}
+	seenCase := map[int64]bool{}
+	for i := len(self.Memories) - 1; i >= 0; i-- {
+		m := self.Memories[i]
+		var lead KnownWrongfulLead
+		valid := false
+		if m.Observation != nil && m.Observation.Kind == "wrongful_conviction" {
+			lead = KnownWrongfulLead{
+				BasisEventID: m.EventID,
+				CaseID:       m.Observation.CaseID,
+				MagistrateID: m.Observation.SubjectID,
+				SuspectID:    m.Observation.ObjectID,
+				District:     m.Observation.Location,
+			}
+			valid = true
+		} else if m.Kind == "wrongful_conviction" {
+			lead = KnownWrongfulLead{
+				BasisEventID: m.EventID,
+				MagistrateID: m.Source,
+				SuspectID:    m.TargetID,
+			}
+			valid = true
+		} else if m.Kind == "speech" && m.Source != self.ID && m.Statement != nil && m.Statement.Topic == "wrongful_conviction" {
+			lead = KnownWrongfulLead{
+				BasisEventID: m.EventID,
+				CaseID:       m.Statement.CaseID,
+				MagistrateID: m.Statement.SubjectID,
+				SuspectID:    m.Statement.ObjectID,
+				District:     m.Statement.Location,
+			}
+			valid = lead.CaseID > 0 || lead.SuspectID != "" || lead.MagistrateID != ""
+		}
+		if !valid {
+			continue
+		}
+		resolvedLater := false
+		for j := i + 1; j < len(self.Memories); j++ {
+			mj := self.Memories[j]
+			if mj.Kind == "conviction_overturned" && (lead.SuspectID != "" && mj.TargetID == lead.SuspectID) {
+				resolvedLater = true
+				break
+			}
+			if mj.Kind == "action_failed" && lead.SuspectID != "" && mj.TargetID == lead.SuspectID && strings.Contains(mj.Text, "no open wrongful conviction") {
+				resolvedLater = true
+				break
+			}
+		}
+		if resolvedLater {
+			continue
+		}
+		if lead.CaseID > 0 && seenCase[lead.CaseID] {
+			continue
+		}
+		if lead.SuspectID != "" && seenSuspect[lead.SuspectID] {
+			continue
+		}
+		if lead.CaseID > 0 {
+			seenCase[lead.CaseID] = true
+		}
+		if lead.SuspectID != "" {
+			seenSuspect[lead.SuspectID] = true
+		}
+		out = append(out, lead)
+	}
+	return out
+}
+
+func matchKnownLeadToCourtCase(leads []KnownWrongfulLead, cc CourtCase) (KnownWrongfulLead, bool) {
+	for _, lead := range leads {
+		if lead.CaseID > 0 && lead.CaseID == cc.ID {
+			return lead, true
+		}
+		if lead.SuspectID != "" && lead.SuspectID == cc.SuspectID && (lead.District == "" || lead.District == cc.District) {
+			return lead, true
+		}
+		if lead.CaseID == 0 && lead.SuspectID == "" && lead.MagistrateID != "" && lead.MagistrateID == cc.MagistrateID && (lead.District == "" || lead.District == cc.District) {
+			return lead, true
+		}
+	}
+	return KnownWrongfulLead{}, false
+}
+
+func (w *World) awakeSamePlaceObservers(placeActor Actor, excludeIDs ...string) []*Actor {
+	excl := make(map[string]bool, len(excludeIDs))
+	for _, id := range excludeIDs {
+		if id != "" {
+			excl[id] = true
+		}
+	}
+	var out []*Actor
+	for i := range w.Actors {
+		c := &w.Actors[i]
+		if c.Dead || excl[c.ID] || w.Tick < c.JailedUntil {
+			continue
+		}
+		if c.Task != nil && c.Task.Action.Kind == "sleep" {
+			continue
+		}
+		if SamePlace(placeActor, *c) {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func isRelocationAction(kind string) bool {
@@ -2582,11 +2831,20 @@ func (w *World) Apply(id string, x Action) []Event {
 				w.DistrictStates[a.Location] = ds
 			}
 		}
+		observers := append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)
 		ev := w.record(a, x, "bribed", map[string]any{
 			"text":        fmt.Sprintf("%s slipped %d hush-bribe coins to %s in %s", a.Name, bribeCoins, b.Name, a.Location),
 			"bribe_coins": bribeCoins,
 			"district":    a.Location,
-		}, b)
+			"observation": Observation{
+				Kind:      "corruption",
+				SubjectID: b.ID,
+				ObjectID:  a.ID,
+				Item:      "coins",
+				Location:  a.Location,
+				Quantity:  bribeCoins,
+			},
+		}, observers...)
 		return []Event{ev}
 
 	case "audit_corruption":
@@ -2596,11 +2854,21 @@ func (w *World) Apply(id string, x Action) []Event {
 		if a.IllicitGain > 0 {
 			return fail("corrupt officer cannot conduct anti-corruption audit")
 		}
-		if b.IllicitGain <= 0 {
-			return fail("target holds no illicit corrupt gains")
-		}
 		if a.Energy < 6 {
 			return fail("insufficient energy to conduct audit")
+		}
+		basisID, hasEv := ActorCorruptionEvidence(*a, b.ID)
+		if !hasEv {
+			return fail("no witnessed or reported corruption evidence against target")
+		}
+		if x.BasisEventID != 0 && !ActorCorruptionEvidenceWithBasis(*a, b.ID, x.BasisEventID) {
+			return fail("basis event does not implicate target in corruption")
+		}
+		if x.BasisEventID == 0 {
+			x.BasisEventID = basisID
+		}
+		if b.IllicitGain <= 0 {
+			return fail("target holds no illicit corrupt gains")
 		}
 		a.Energy -= 6
 		seized := minInt(b.IllicitGain, b.Money)
@@ -2623,12 +2891,13 @@ func (w *World) Apply(id string, x Action) []Event {
 			b.JailedUntil = w.Tick + 144
 			jailedUntil = b.JailedUntil
 		}
+		observers := append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)
 		ev := w.record(a, x, "corruption_purged", map[string]any{
 			"text":              fmt.Sprintf("%s audited and exposed %s for corruption, confiscating %d illicit coins (%d to treasury, %d audit reward)", a.Name, b.Name, seized, toTreasury, reward),
 			"confiscated_coins": toTreasury,
 			"reward_coins":      reward,
 			"jailed_until":      jailedUntil,
-		}, b)
+		}, observers...)
 		events := []Event{ev}
 		for _, profID := range []string{"xiucai", "chief_constable", "scholar", "constable"} {
 			if a.Professions[profID] > 0 {

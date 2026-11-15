@@ -57,6 +57,7 @@ func (rulesPolicy) Decide(_ context.Context, p sim.Perception) (sim.Action, erro
 	}
 
 	// 2. Settle incoming trade offers based on generic item demand, funds, and directed trust.
+	freeMoney := availableMoneyAfterAgreements(p)
 	for _, o := range p.Offers {
 		if o.Buyer != a.ID {
 			continue
@@ -69,7 +70,7 @@ func (rulesPolicy) Decide(_ context.Context, p sim.Perception) (sim.Action, erro
 			}
 		}
 		want := desiredBuyerStock(p, o.Item)
-		if sellerHere && a.Items[o.Item] < want && a.Money >= o.Price && a.Trust[o.Seller] >= 0 {
+		if sellerHere && a.Items[o.Item] < want && freeMoney >= o.Price && a.Trust[o.Seller] >= 0 {
 			return sim.Action{Kind: "accept", OfferID: o.ID, TargetID: o.Seller}, nil
 		}
 		return sim.Action{Kind: "reject", OfferID: o.ID, TargetID: o.Seller}, nil
@@ -125,7 +126,7 @@ func (rulesPolicy) Decide(_ context.Context, p sim.Perception) (sim.Action, erro
 	}
 
 	// 5. Standalone house asset maintenance when planks are on hand and roof condition drops.
-	if home := primaryHome(p); home != nil && home.Condition < 70 && a.Items["plank"] >= 1 && a.Energy >= 12 {
+	if home := primaryHome(p); home != nil && home.Condition < 70 && availableItemAfterAgreements(p, "plank") >= 1 && a.Energy >= 12 {
 		if act, ok := stepToRepairHouse(p, *home); ok {
 			return act, nil
 		}
@@ -200,10 +201,11 @@ func (rulesPolicy) Decide(_ context.Context, p sim.Perception) (sim.Action, erro
 			})
 			for _, itemID := range offerOrder {
 				spec := p.Catalog.Items[itemID]
-				if !spec.Tradeable || spec.BatchQty <= 0 || a.Items[itemID] < spec.OfferThreshold {
+				availQty := availableItemAfterAgreements(p, itemID)
+				if !spec.Tradeable || spec.BatchQty <= 0 || availQty < spec.OfferThreshold {
 					continue
 				}
-				if !p.Catalog.TagsProduce(a.IdentityTags(), itemID) && a.Items[itemID] < desiredBuyerStock(p, itemID)+spec.BatchQty {
+				if !p.Catalog.TagsProduce(a.IdentityTags(), itemID) && availQty < desiredBuyerStock(p, itemID)+spec.BatchQty {
 					continue
 				}
 				for _, b := range p.Nearby {
@@ -424,7 +426,7 @@ func planHouseUpgrade(p sim.Perception) (sim.Action, bool) {
 	if a.Professions["carpenter"] < 2 || a.Energy < 20 {
 		return sim.Action{}, false
 	}
-	if a.Items["plank"] < home.Level || a.Money < 4*home.Level {
+	if availableItemAfterAgreements(p, "plank") < home.Level || availableMoneyAfterAgreements(p) < 4*home.Level {
 		return sim.Action{}, false
 	}
 	if a.InsideHouse == home.ID {
@@ -551,13 +553,14 @@ func planCreditAndRelations(p sim.Perception) (sim.Action, bool) {
 		return sim.Action{}, false
 	}
 	allowed := p.Catalog.Capabilities(a)
+	freeMoney := availableMoneyAfterAgreements(p)
 	if allowed["foreclose_collateral"] && p.OverdueBorrowerID != "" && p.OverdueHouseID != "" {
 		return sim.Action{Kind: "foreclose_collateral", TargetID: p.OverdueBorrowerID, HouseID: p.OverdueHouseID}, true
 	}
-	if allowed["repay_loan"] && p.HasActiveLoan && a.Money >= 6 && a.Hunger <= 3 {
+	if allowed["repay_loan"] && p.HasActiveLoan && (freeMoney == a.Money && a.Money >= 6 || freeMoney >= 18) && a.Hunger <= 3 {
 		return sim.Action{Kind: "repay_loan"}, true
 	}
-	if allowed["mediate_feud"] && p.MediateTargetID != "" && a.Energy >= 12 && a.Health >= 50 && a.Money >= 4 && !recentlyConflictActed(a, p.Tick, 24) {
+	if allowed["mediate_feud"] && p.MediateTargetID != "" && a.Energy >= 12 && a.Health >= 50 && freeMoney >= 4 && !recentlyConflictActed(a, p.Tick, 24) {
 		for _, b := range p.Nearby {
 			if !b.Jailed && b.ID == p.MediateTargetID {
 				return sim.Action{Kind: "mediate_feud", TargetID: b.ID}, true
@@ -574,18 +577,43 @@ func planConflictAndLaw(p sim.Perception) (sim.Action, bool) {
 	}
 	allowed := p.Catalog.Capabilities(a)
 
-	// 0. Upright censors and honest law officers audit & purge co-located corrupt officers.
+	// 0. Upright censors and honest law officers audit & purge co-located officers when backed by epistemic evidence.
 	if allowed["audit_corruption"] && a.IllicitGain == 0 && a.Energy >= 12 {
 		for _, b := range p.Nearby {
-			if !b.Jailed && b.Corrupt {
-				return sim.Action{Kind: "audit_corruption", TargetID: b.ID}, true
+			if basisID, hasEv := sim.ActorCorruptionEvidence(a, b.ID); !b.Jailed && hasEv {
+				return sim.Action{Kind: "audit_corruption", TargetID: b.ID, BasisEventID: basisID}, true
 			}
 		}
 	}
 
-	// 0b. Upright censors file censorate appeals to overturn open wrongful convictions.
-	if allowed["file_appeal"] && p.HasOpenWrongfulCase && a.IllicitGain == 0 && a.Energy >= 10 {
-		return sim.Action{Kind: "file_appeal", Location: a.Location}, true
+	// 0b. Upright censors file censorate appeals for known local wrongful convictions (or travel to the court district they heard about).
+	if allowed["file_appeal"] && a.IllicitGain == 0 && a.Energy >= 10 {
+		if p.HasOpenWrongfulCase && p.AppealTargetID != "" {
+			return sim.Action{
+				Kind:         "file_appeal",
+				TargetID:     p.AppealTargetID,
+				Location:     a.Location,
+				BasisEventID: p.AppealBasisEventID,
+			}, true
+		}
+		if a.Energy >= 16 {
+			for _, lead := range sim.ActorKnownWrongfulLeads(a) {
+				if lead.District != "" && lead.District != a.Location {
+					visitedAfter := false
+					for _, past := range a.Memories {
+						if past.EventID > lead.BasisEventID && past.Kind == "moved" && strings.HasSuffix(past.Text, "to "+lead.District) {
+							visitedAfter = true
+							break
+						}
+					}
+					if !visitedAfter {
+						if step, ok := stepTowardDistrict(p, lead.District, lead.BasisEventID); ok {
+							return step, true
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// 1. Yamen constables and watch guards arrest co-located outlaws (unless bribed to look the other way!).
@@ -601,7 +629,7 @@ func planConflictAndLaw(p sim.Perception) (sim.Action, bool) {
 	}
 
 	// 1b. Solvent outlaws bribe nearby law officers to buy protection from arrest.
-	if allowed["bribe"] && a.Money >= 14 && a.Energy >= 10 {
+	if allowed["bribe"] && availableMoneyAfterAgreements(p) >= 14 && a.Energy >= 10 {
 		for _, b := range p.Nearby {
 			if !b.Jailed && sim.ActorHasTag(b.Tags, "law") && a.Trust[b.ID] < 3 {
 				return sim.Action{Kind: "bribe", TargetID: b.ID}, true
@@ -674,7 +702,7 @@ func planEcologyRitualAndInfra(p sim.Perception) (sim.Action, bool) {
 			if !seasonalDue && !crisisDue {
 				continue
 			}
-			if a.Money < rit.MoneyCost {
+			if availableMoneyAfterAgreements(p) < rit.MoneyCost {
 				continue
 			}
 			if !holdsAllItems(a.Items, rit.Inputs) {
@@ -829,7 +857,7 @@ func resolveRecipe(p sim.Perception, r sim.Recipe, depth int) (sim.Action, bool)
 		}
 	}
 
-	if a.Money < r.MoneyCost {
+	if availableMoneyAfterAgreements(p) < r.MoneyCost {
 		return sim.Action{}, false
 	}
 	if a.Energy < r.EnergyCost {
@@ -876,23 +904,73 @@ func informationAction(p sim.Perception) (sim.Action, bool) {
 			continue
 		}
 		var claim sim.Statement
-		if m.Observation != nil && m.Observation.Kind == "item_produced" {
-			claim = sim.Statement{
-				Topic:    "item_produced",
-				Item:     m.Observation.Item,
-				Location: m.Observation.Location,
-				Quantity: m.Observation.Quantity,
+		text := ""
+		if m.Observation != nil {
+			switch m.Observation.Kind {
+			case "item_produced":
+				claim = sim.Statement{
+					Topic:    "item_produced",
+					Item:     m.Observation.Item,
+					Location: m.Observation.Location,
+					Quantity: m.Observation.Quantity,
+				}
+				text = fmt.Sprintf("I produced %d %s at %s.", claim.Quantity, claim.Item, claim.Location)
+			case "corruption":
+				if m.Observation.SubjectID == "" || m.Observation.SubjectID == a.ID || a.IllicitGain > 0 {
+					continue
+				}
+				claim = sim.Statement{
+					Topic:     "corruption",
+					SubjectID: m.Observation.SubjectID,
+					ObjectID:  m.Observation.ObjectID,
+					Item:      "coins",
+					Location:  m.Observation.Location,
+					Quantity:  m.Observation.Quantity,
+				}
+				text = fmt.Sprintf("I witnessed %s taking %d illicit bribe coins at %s.", claim.SubjectID, claim.Quantity, claim.Location)
+			case "wrongful_conviction":
+				if m.Observation.ObjectID == "" || m.Observation.SubjectID == a.ID {
+					continue
+				}
+				claim = sim.Statement{
+					Topic:     "wrongful_conviction",
+					SubjectID: m.Observation.SubjectID,
+					ObjectID:  m.Observation.ObjectID,
+					CaseID:    m.Observation.CaseID,
+					Location:  m.Observation.Location,
+					Quantity:  1,
+				}
+				text = fmt.Sprintf("I witnessed %s wrongfully framing %s in %s (case #%d).", claim.SubjectID, claim.ObjectID, claim.Location, claim.CaseID)
+			default:
+				continue
 			}
 		} else if m.Kind == "speech" && m.Source != a.ID && m.Statement != nil {
 			claim = *m.Statement
-			if claim.Item == "" {
+			if claim.Item == "" && (claim.Topic == "item_produced" || claim.Topic == "supply") {
 				claim.Item = "food"
 			}
+			text = fmt.Sprintf("%s told me: %s", m.Source, m.Text)
 		} else {
 			continue
 		}
 
-		if m.Kind == "speech" && p.Tick-m.Tick <= 8 && a.Trust[m.Source] >= 0 && claim.Location != "" && a.Location != claim.Location {
+		if claim.Topic == "wrongful_conviction" && claim.Location != "" && a.Location != claim.Location && a.IllicitGain == 0 && a.Energy >= 16 && p.Catalog.Capabilities(a)["file_appeal"] {
+			visitedAfter := false
+			for _, past := range a.Memories {
+				if past.Tick > m.Tick && past.Kind == "moved" && strings.HasSuffix(past.Text, "to "+claim.Location) {
+					visitedAfter = true
+					break
+				}
+			}
+			if !visitedAfter {
+				if step, ok := stepTowardDistrict(p, claim.Location, m.EventID); ok {
+					return step, true
+				}
+			}
+		}
+
+		isSupplyTopic := claim.Topic == "item_produced" || claim.Topic == "supply" || claim.Topic == "surplus"
+		if isSupplyTopic && m.Kind == "speech" && p.Tick-m.Tick <= 8 && a.Trust[m.Source] >= 0 && claim.Location != "" && a.Location != claim.Location {
 			spec := p.Catalog.Items[claim.Item]
 			threshold := spec.ShortageThreshold + 2
 			if threshold <= 2 {
@@ -916,7 +994,7 @@ func informationAction(p sim.Perception) (sim.Action, bool) {
 		}
 
 		for _, b := range p.Nearby {
-			if b.ID == m.Source || b.Sleeping || b.Jailed {
+			if b.ID == m.Source || b.ID == claim.SubjectID || b.Sleeping || b.Jailed {
 				continue
 			}
 			told := false
@@ -929,14 +1007,36 @@ func informationAction(p sim.Perception) (sim.Action, bool) {
 			if told {
 				continue
 			}
-			text := fmt.Sprintf("I produced %d %s at %s.", claim.Quantity, claim.Item, claim.Location)
-			if m.Kind == "speech" {
-				text = fmt.Sprintf("%s told me: %s", m.Source, m.Text)
-			}
 			return sim.Action{Kind: "speak", TargetID: b.ID, Text: text, Statement: &claim, BasisEventID: m.EventID}, true
 		}
 	}
 	return sim.Action{}, false
+}
+
+func availableMoneyAfterAgreements(p sim.Perception) int {
+	reserved := 0
+	for _, g := range p.Continuity.Agreements {
+		if g.Status == "active" && g.BuyerID == p.Self.ID && p.Tick <= g.DueTick {
+			reserved += g.Price
+		}
+	}
+	if p.Self.Money <= reserved {
+		return 0
+	}
+	return p.Self.Money - reserved
+}
+
+func availableItemAfterAgreements(p sim.Perception, itemID string) int {
+	reserved := 0
+	for _, g := range p.Continuity.Agreements {
+		if g.Status == "active" && g.SupplierID == p.Self.ID && g.Item == itemID && p.Tick <= g.DueTick {
+			reserved += g.Quantity
+		}
+	}
+	if p.Self.Items[itemID] <= reserved {
+		return 0
+	}
+	return p.Self.Items[itemID] - reserved
 }
 
 // chooseContinuity is the offline character policy, not a world settlement rule.
@@ -944,6 +1044,7 @@ func informationAction(p sim.Perception) (sim.Action, bool) {
 func chooseContinuity(p sim.Perception) (sim.Action, bool) {
 	a := p.Self
 	allowed := p.Catalog.Capabilities(a)
+	freeMoney := availableMoneyAfterAgreements(p)
 	nearby := func(id string) bool {
 		for _, n := range p.Nearby {
 			if n.ID == id && !n.Sleeping && !n.Jailed {
@@ -957,7 +1058,7 @@ func chooseContinuity(p sim.Perception) (sim.Action, bool) {
 			continue
 		}
 		kind := "reject_loan"
-		if a.Trust[r.BorrowerID] >= 0 && a.Money-r.Principal >= 15 {
+		if a.Trust[r.BorrowerID] >= 0 && freeMoney-r.Principal >= 15 {
 			kind = "accept_loan"
 		}
 		if allowed[kind] {
@@ -967,7 +1068,7 @@ func chooseContinuity(p sim.Perception) (sim.Action, bool) {
 	actions := sim.ContinuityActions(p)
 	for _, x := range actions {
 		if x.Kind == "accept_agreement" && allowed[x.Kind] {
-			if a.Trust[x.TargetID] >= 0 && a.Money >= x.Price && a.Items[x.Item] < desiredBuyerStock(p, x.Item) {
+			if a.Trust[x.TargetID] >= 0 && freeMoney >= x.Price && a.Items[x.Item] < desiredBuyerStock(p, x.Item) {
 				return x, true
 			}
 			return sim.Action{Kind: "reject_agreement", TargetID: x.TargetID, AgreementID: x.AgreementID}, true

@@ -1790,8 +1790,8 @@ func TestIntegratedFourPillarsMillionPopConservation(t *testing.T) {
 		t.Fatalf("expected active justice & revolt pillar, got trials=%d wrongful=%d overturned=%d strikes=%d riots=%d revolts=%d",
 			summary.CourtTrials, summary.WrongfulConvictions, summary.AppealsOverturned, summary.TaxStrikes, summary.GranaryRiots, summary.RevoltsErupted)
 	}
-	if w.SpotlightRumor == nil || summary.SpotlightPromotions == 0 || summary.GossipSeeded == 0 {
-		t.Fatalf("expected active spotlight & rumor pillar, got promoted=%d demoted=%d panics=%d gossip=%d",
+	if w.SpotlightRumor == nil || summary.SpotlightPromotions == 0 || summary.GossipSeeded != 0 {
+		t.Fatalf("expected active spotlight pillar with zero direct macro gossip injection, got promoted=%d demoted=%d panics=%d gossip=%d",
 			summary.SpotlightPromotions, summary.SpotlightDemotions, summary.RumorPanics, summary.GossipSeeded)
 	}
 

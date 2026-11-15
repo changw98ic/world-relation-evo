@@ -305,8 +305,10 @@ func Options(p sim.Perception) []Option {
 			Kind: "foreclose_collateral", TargetID: p.OverdueBorrowerID, HouseID: p.OverdueHouseID,
 		})
 	}
-	if p.HasOpenWrongfulCase && a.IllicitGain == 0 && a.Energy >= 6 {
-		add("File censorate appeal against wrongful conviction (-6 energy)", sim.Action{Kind: "file_appeal", Location: a.Location})
+	if p.HasOpenWrongfulCase && p.AppealTargetID != "" && a.IllicitGain == 0 && a.Energy >= 6 {
+		add("File censorate appeal for "+p.AppealTargetID+" (-6 energy)", sim.Action{
+			Kind: "file_appeal", TargetID: p.AppealTargetID, Location: a.Location, BasisEventID: p.AppealBasisEventID,
+		})
 	}
 	if len(a.Guilds) > 0 && p.DistrictController == "" && a.Energy >= 6 {
 		add("Claim district sovereignty for "+a.Guilds[0], sim.Action{Kind: "claim_turf", FactionID: a.Guilds[0], Location: a.Location})
@@ -353,8 +355,10 @@ func Options(p sim.Perception) []Option {
 		if a.Money >= 4 && a.Energy >= 3 && sim.ActorHasTag(b.Tags, "law") {
 			add("Slip hush bribe to law officer "+b.Name+" (-3 energy)", sim.Action{Kind: "bribe", TargetID: b.ID})
 		}
-		if a.IllicitGain == 0 && b.Corrupt && a.Energy >= 6 {
-			add("Audit and expose corrupt officer "+b.Name+" (-6 energy)", sim.Action{Kind: "audit_corruption", TargetID: b.ID})
+		if basisID, hasEv := sim.ActorCorruptionEvidence(a, b.ID); a.IllicitGain == 0 && hasEv && a.Energy >= 6 {
+			add("Audit and expose corrupt officer "+b.Name+" (-6 energy)", sim.Action{
+				Kind: "audit_corruption", TargetID: b.ID, BasisEventID: basisID,
+			})
 		}
 		if a.Health >= 45 && b.Health > 0 && a.Energy >= 7 && p.Tick >= a.RestUntil && (sim.ActorHasTag(b.Tags, "outlaw") || sim.ActorHasTag(b.Tags, "raider") || sim.ActorHasTag(b.Tags, "thief") || sim.ActorHasTag(b.Tags, "gang") || a.Trust[b.ID] < 0) {
 			add("Arrest outlaw "+b.Name+" for yamen bounty (-7 energy)", sim.Action{Kind: "arrest", TargetID: b.ID})
@@ -385,7 +389,7 @@ func Options(p sim.Perception) []Option {
 				Kind: "mediate_feud", TargetID: b.ID,
 			})
 		}
-		if (a.IllicitGain > 0 || p.DistrictGrievance >= 35) && !b.Corrupt && a.Energy >= 5 && !sim.ActorHasTag(b.Tags, "law") && !sim.ActorHasTag(b.Tags, "censor") {
+		if (a.IllicitGain > 0 || p.DistrictGrievance >= 35) && a.Energy >= 5 && !sim.ActorHasTag(b.Tags, "law") && !sim.ActorHasTag(b.Tags, "censor") && !sim.ActorHasTag(b.Tags, "outlaw") {
 			add(fmt.Sprintf("Frame %s in scapegoat court docket (-5 energy)", b.Name), sim.Action{
 				Kind: "frame_suspect", TargetID: b.ID,
 			})
@@ -578,26 +582,90 @@ func (TemplateContent) Generate(_ context.Context, p sim.Perception, a sim.Actio
 	if a.Kind != "speak" {
 		return Content{}, nil
 	}
+	alreadyToldTarget := func(rootID int64) bool {
+		if rootID == 0 || a.TargetID == "" {
+			return false
+		}
+		for _, past := range p.Self.Memories {
+			if past.Kind == "speech" && past.Source == p.Self.ID && past.TargetID == a.TargetID && past.RootEventID == rootID {
+				return true
+			}
+		}
+		return false
+	}
 	for i := len(p.Self.Memories) - 1; i >= 0; i-- {
 		m := p.Self.Memories[i]
-		if p.Tick-m.Tick > sim.TicksPerDay {
+		if p.Tick-m.Tick > sim.TicksPerDay || alreadyToldTarget(m.RootEventID) {
 			continue
 		}
-		if m.Observation != nil && m.Observation.Kind == "item_produced" {
-			q := m.Observation.Quantity
-			return Content{
-				Text:         fmt.Sprintf("I produced %d %s at %s.", q, m.Observation.Item, m.Observation.Location),
-				BasisEventID: m.EventID,
-				Statement:    &sim.Statement{Topic: "item_produced", Item: m.Observation.Item, Location: m.Observation.Location, Quantity: q},
-			}, nil
+		if m.Observation != nil {
+			switch m.Observation.Kind {
+			case "item_produced":
+				q := m.Observation.Quantity
+				return Content{
+					Text:         fmt.Sprintf("I produced %d %s at %s.", q, m.Observation.Item, m.Observation.Location),
+					BasisEventID: m.EventID,
+					Statement:    &sim.Statement{Topic: "item_produced", Item: m.Observation.Item, Location: m.Observation.Location, Quantity: q},
+				}, nil
+			case "corruption":
+				if m.Observation.SubjectID == "" || m.Observation.SubjectID == p.Self.ID || m.Observation.SubjectID == a.TargetID || p.Self.IllicitGain > 0 {
+					continue
+				}
+				return Content{
+					Text:         fmt.Sprintf("I witnessed %s taking %d illicit bribe coins at %s.", m.Observation.SubjectID, m.Observation.Quantity, m.Observation.Location),
+					BasisEventID: m.EventID,
+					Statement: &sim.Statement{
+						Topic:     "corruption",
+						SubjectID: m.Observation.SubjectID,
+						ObjectID:  m.Observation.ObjectID,
+						Item:      "coins",
+						Location:  m.Observation.Location,
+						Quantity:  m.Observation.Quantity,
+					},
+				}, nil
+			case "wrongful_conviction":
+				if m.Observation.ObjectID == "" || m.Observation.SubjectID == p.Self.ID || m.Observation.SubjectID == a.TargetID {
+					continue
+				}
+				return Content{
+					Text:         fmt.Sprintf("I witnessed %s wrongfully framing %s in %s (case #%d).", m.Observation.SubjectID, m.Observation.ObjectID, m.Observation.Location, m.Observation.CaseID),
+					BasisEventID: m.EventID,
+					Statement: &sim.Statement{
+						Topic:     "wrongful_conviction",
+						SubjectID: m.Observation.SubjectID,
+						ObjectID:  m.Observation.ObjectID,
+						CaseID:    m.Observation.CaseID,
+						Location:  m.Observation.Location,
+						Quantity:  1,
+					},
+				}, nil
+			}
 		}
 		if m.Kind == "speech" && m.Source != p.Self.ID && m.Source != a.TargetID && m.Statement != nil {
 			v := *m.Statement
-			return Content{
-				Text:         fmt.Sprintf("%s said %d %s was produced at %s.", m.Source, v.Quantity, v.Item, v.Location),
-				BasisEventID: m.EventID,
-				Statement:    &v,
-			}, nil
+			if v.SubjectID != "" && v.SubjectID == a.TargetID {
+				continue
+			}
+			switch v.Topic {
+			case "corruption":
+				return Content{
+					Text:         fmt.Sprintf("%s said %s took illicit bribes (%d coins) at %s.", m.Source, v.SubjectID, v.Quantity, v.Location),
+					BasisEventID: m.EventID,
+					Statement:    &v,
+				}, nil
+			case "wrongful_conviction":
+				return Content{
+					Text:         fmt.Sprintf("%s said %s wrongfully framed %s in %s (case #%d).", m.Source, v.SubjectID, v.ObjectID, v.Location, v.CaseID),
+					BasisEventID: m.EventID,
+					Statement:    &v,
+				}, nil
+			default:
+				return Content{
+					Text:         fmt.Sprintf("%s said %d %s was produced at %s.", m.Source, v.Quantity, v.Item, v.Location),
+					BasisEventID: m.EventID,
+					Statement:    &v,
+				}, nil
+			}
 		}
 	}
 	return Content{Text: fmt.Sprintf("I have %d food, %d energy, and am trying to %s.", p.Self.Items["food"], p.Self.Energy, p.Self.Goal)}, nil

@@ -65,8 +65,14 @@ func RecallMemories(a Actor, cues MemoryCues, limit int) []Memory {
 					score += 4
 				}
 			}
-			if peerSet[m.Source] || peerSet[m.TargetID] {
+			if peerSet[m.Source] || peerSet[m.TargetID] ||
+				(m.Observation != nil && (peerSet[m.Observation.SubjectID] || peerSet[m.Observation.ObjectID])) ||
+				(m.Statement != nil && (peerSet[m.Statement.SubjectID] || peerSet[m.Statement.ObjectID])) {
 				score += 6
+			}
+			if (m.Observation != nil && (m.Observation.Kind == "corruption" || m.Observation.Kind == "wrongful_conviction")) ||
+				(m.Statement != nil && (m.Statement.Topic == "corruption" || m.Statement.Topic == "wrongful_conviction")) {
+				score += 5
 			}
 			content := strings.ToLower(m.Kind + " " + m.Text)
 			if m.Observation != nil {
