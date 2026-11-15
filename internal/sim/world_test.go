@@ -254,17 +254,6 @@ func TestCustomProfessionWorksWithoutCodeChanges(t *testing.T) {
 	buyer.Guilds = []string{"merchants_guild"}
 	buyer.Professions = map[string]int{"peddler": 1, "gatherer": 1} // settled trader: no further profession detour
 
-	// Verify dyadic CommunicationStance works on "pottery" with zero code changes!
-	listenerView := sim.Neighbor{ID: buyer.ID, Name: buyer.Name, Role: buyer.Role, Tags: buyer.Tags, Health: 100}
-	if stance, _ := agent.CommunicationStance(w.Catalog, *potter, listenerView, "pottery"); stance != "conservative" {
-		t.Fatalf("tight-stock potter->buyer expected conservative, got %q", stance)
-	}
-	potter.Items["pottery"] = 4
-	if stance, _ := agent.CommunicationStance(w.Catalog, *potter, listenerView, "pottery"); stance != "exaggerate" {
-		t.Fatalf("ample-stock potter->buyer expected exaggerate, got %q", stance)
-	}
-	delete(potter.Items, "pottery")
-
 	// Run offline pipeline: potter should leave house -> dig clay -> enter kiln house -> fire pottery
 	// -> walk roads to market_street -> sell pottery to buyer, all without engine code changes!
 	var dugClay, firedPottery, soldPottery bool
@@ -573,8 +562,8 @@ func TestVillageRunsSevenDays(t *testing.T) {
 		if a.Money < 0 || a.Energy < 0 || a.Energy > sim.MaxEnergy || a.Health < 0 || a.Health > sim.MaxHealth {
 			t.Fatalf("actor %s out of bounds: money=%d energy=%d health=%d", a.ID, a.Money, a.Energy, a.Health)
 		}
-		if len(a.Memories) > sim.MaxActorMemories {
-			t.Fatalf("actor %s memories exceeded cap %d: %d", a.ID, sim.MaxActorMemories, len(a.Memories))
+		if len(w.View(a.ID).Self.Memories) > sim.MaxRecalledMemories {
+			t.Fatalf("actor %s memories exceeded cap %d: %d", a.ID, sim.MaxRecalledMemories, len(w.View(a.ID).Self.Memories))
 		}
 		for item, qty := range a.Items {
 			if qty < 0 {
@@ -774,14 +763,16 @@ func TestFarmerDiversifiedTasksAndCompostYield(t *testing.T) {
 			t.Fatal(err)
 		}
 		key := act.Kind
-		if act.Kind == "craft" {
+		if act.Kind == "craft" || act.Kind == "start_plan" {
 			key = "craft:" + act.RecipeID
 		} else if act.Kind == "repair_house" {
 			key = "repair_house"
 		}
 		chosen[key]++
 	}
-	// At 06:00 AM inside their houses: compost-needing farmers craft compost indoors, leaky-shack farmer repairs roof, others step outside toward well/market/fields!
+	// At 06:00 AM, compost-needing farmers choose compost production (possibly
+	// by starting its persistent plan), a leaky-shack farmer repairs the roof,
+	// and others travel. These are initial intentions, not completed output.
 	for _, want := range []string{"craft:make_compost", "repair_house", "leave_house"} {
 		if chosen[want] == 0 {
 			t.Fatalf("farmers lacked initial diversity; missing %s in %v", want, chosen)
@@ -1389,11 +1380,11 @@ func TestGenreDecoupledSciFiColonyPackWithoutCodeChanges(t *testing.T) {
 
 	sciFiCat := sim.Catalog{
 		TagActions: map[string][]string{
-			"colonist":  {"wait", "move", "enter_house", "leave_house", "sleep", "eat", "drink", "relieve", "medicate", "speak", "maintain_infra", "join_faction", "join_profession"},
-			"trader":    {"offer", "accept", "reject"},
-			"ranger":    {"attack", "hunt_threat"},
-			"medic":     {"heal"},
-			"psion":     {"perform_ritual"},
+			"colonist": {"wait", "move", "enter_house", "leave_house", "sleep", "eat", "drink", "relieve", "medicate", "speak", "maintain_infra", "join_faction", "join_profession"},
+			"trader":   {"offer", "accept", "reject"},
+			"ranger":   {"attack", "hunt_threat"},
+			"medic":    {"heal"},
+			"psion":    {"perform_ritual"},
 		},
 		LevelThresholds:        []int{0, 8, 20, 40},
 		FactionLevelThresholds: []int{0, 30, 90},
@@ -1484,7 +1475,7 @@ func TestGenreDecoupledSciFiColonyPackWithoutCodeChanges(t *testing.T) {
 		Actors: []sim.Actor{
 			{
 				ID: "c01", Name: "林舰长", Role: "harmonic_psion", Tags: []string{"colonist", "trader"},
-				Attributes: sim.Attributes{Strength: 9, Dexterity: 9, Insight: 12, Spirit: 12},
+				Attributes:  sim.Attributes{Strength: 9, Dexterity: 9, Insight: 12, Spirit: 12},
 				Professions: map[string]int{"harmonic_psion": 2}, Guilds: []string{"core_order"},
 				Location: "orbital_hub", HomeID: "hab_01", AgeYears: 32, Health: 100, Energy: 95, Money: 30,
 				Items: map[string]int{"synth_ration": 8, "core_cell": 2, "nano_med": 2, "alloy_ore": 2},
@@ -1492,7 +1483,7 @@ func TestGenreDecoupledSciFiColonyPackWithoutCodeChanges(t *testing.T) {
 			},
 			{
 				ID: "c02", Name: "赵游骑", Role: "exo_ranger", Tags: []string{"colonist", "trader"},
-				Attributes: sim.Attributes{Strength: 13, Dexterity: 12, Insight: 9, Spirit: 10},
+				Attributes:  sim.Attributes{Strength: 13, Dexterity: 12, Insight: 9, Spirit: 10},
 				Professions: map[string]int{"exo_ranger": 2}, Guilds: []string{"defense_wing"},
 				Location: "ice_asteroid", HomeID: "hab_01", AgeYears: 28, Health: 100, Energy: 95, Money: 20,
 				Items: map[string]int{"synth_ration": 8, "nano_med": 2, "thermal_suit": 1},

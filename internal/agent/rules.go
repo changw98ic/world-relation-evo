@@ -108,6 +108,11 @@ func (rulesPolicy) Decide(_ context.Context, p sim.Perception) (sim.Action, erro
 		return planSleep(p), nil
 	}
 
+	// Continuing intentions yield to physiological needs, not to unrelated daily work.
+	if action, ok := chooseContinuity(p); ok {
+		return action, nil
+	}
+
 	// 4. Community healing if capable and carrying medicinal items.
 	if p.Catalog.Capabilities(a)["heal"] {
 		if medItem := cheapestMedicinalItem(p.Catalog, a, itemKeys); medItem != "" {
@@ -158,6 +163,13 @@ func (rulesPolicy) Decide(_ context.Context, p sim.Perception) (sim.Action, erro
 
 	// 9. Generic profession recipe planning (inputs -> bonus inputs -> facility/district -> craft).
 	if action, ok := planCatalogWork(p); ok {
+		if action.Kind == "craft" && (a.Plan == nil || a.Plan.Status != "active") {
+			for _, candidate := range sim.ContinuityActions(p) {
+				if candidate.Kind == "start_plan" && candidate.RecipeID == action.RecipeID {
+					return candidate, nil
+				}
+			}
+		}
 		return action, nil
 	}
 
@@ -922,6 +934,93 @@ func informationAction(p sim.Perception) (sim.Action, bool) {
 				text = fmt.Sprintf("%s told me: %s", m.Source, m.Text)
 			}
 			return sim.Action{Kind: "speak", TargetID: b.ID, Text: text, Statement: &claim, BasisEventID: m.EventID}, true
+		}
+	}
+	return sim.Action{}, false
+}
+
+// chooseContinuity is the offline character policy, not a world settlement rule.
+// It returns one choice; only World.Apply performs transfers or records commitments.
+func chooseContinuity(p sim.Perception) (sim.Action, bool) {
+	a := p.Self
+	allowed := p.Catalog.Capabilities(a)
+	nearby := func(id string) bool {
+		for _, n := range p.Nearby {
+			if n.ID == id && !n.Sleeping && !n.Jailed {
+				return true
+			}
+		}
+		return false
+	}
+	for _, r := range p.LoanRequests {
+		if r.Status != "pending" || r.LenderID != a.ID || !nearby(r.BorrowerID) {
+			continue
+		}
+		kind := "reject_loan"
+		if a.Trust[r.BorrowerID] >= 0 && a.Money-r.Principal >= 15 {
+			kind = "accept_loan"
+		}
+		if allowed[kind] {
+			return sim.Action{Kind: kind, TargetID: r.BorrowerID}, true
+		}
+	}
+	actions := sim.ContinuityActions(p)
+	for _, x := range actions {
+		if x.Kind == "accept_agreement" && allowed[x.Kind] {
+			if a.Trust[x.TargetID] >= 0 && a.Money >= x.Price && a.Items[x.Item] < desiredBuyerStock(p, x.Item) {
+				return x, true
+			}
+			return sim.Action{Kind: "reject_agreement", TargetID: x.TargetID, AgreementID: x.AgreementID}, true
+		}
+		if x.Kind == "fulfill_agreement" && allowed[x.Kind] {
+			return x, true
+		}
+	}
+	// Produce the goods already promised before taking up a new line of work.
+	for _, g := range p.Continuity.Agreements {
+		if g.Status != "active" || g.SupplierID != a.ID || p.Tick > g.DueTick || a.Items[g.Item] >= g.Quantity {
+			continue
+		}
+		for _, r := range p.Catalog.Recipes {
+			if r.OutputItem == g.Item && canPractice(p.Catalog, a, r) {
+				if x, ok := resolveRecipe(p, r, 0); ok {
+					return x, true
+				}
+			}
+		}
+	}
+	if allowed["borrow_loan"] && !p.HasActiveLoan && a.Money < 2 && totalEdibleItems(p.Catalog, a) < 3 {
+		pending := false
+		for _, r := range p.LoanRequests {
+			if r.BorrowerID == a.ID && r.Status == "pending" {
+				pending = true
+			}
+		}
+		if !pending {
+			for _, q := range p.LoanQuotes {
+				if q.Principal > 0 && nearby(q.LenderID) && a.Trust[q.LenderID] >= 0 {
+					return sim.Action{Kind: "borrow_loan", TargetID: q.LenderID}, true
+				}
+			}
+		}
+	}
+	if a.Plan != nil && a.Plan.Status == "active" {
+		if a.Plan.Stage == "produce" {
+			if r, ok := p.Catalog.RecipeByID(a.Plan.RecipeID); ok && canPractice(p.Catalog, a, r) {
+				return resolveRecipe(p, r, 0)
+			}
+		}
+		// Propose a continuing sale when there is a compatible buyer, rather than
+		// dropping the objective after production or manufacturing a buyer response.
+		for _, x := range actions {
+			if x.Kind != "propose_agreement" || x.Item != a.Plan.Item || !allowed[x.Kind] || a.Trust[x.TargetID] < 0 {
+				continue
+			}
+			for _, n := range p.Nearby {
+				if n.ID == x.TargetID && p.Catalog.TagsConsume(n.Tags, x.Item) && !p.Catalog.TagsProduce(n.Tags, x.Item) && !recentlyRejectedBy(a, n.ID, p.Tick) {
+					return x, true
+				}
+			}
 		}
 	}
 	return sim.Action{}, false

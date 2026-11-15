@@ -247,17 +247,20 @@ func TestMarketCreditDynamicPricingHoardingUsuryAndAnnexation(t *testing.T) {
 	if lender == nil || borrower == nil || borrower2 == nil {
 		t.Fatal("missing focal test actors")
 	}
+	lender.Location, lender.InsideHouse = borrower.Location, borrower.InsideHouse
+	borrower2.Location, borrower2.InsideHouse = borrower.Location, borrower.InsideHouse
 	lender.Money = 120
 	borrower.Money = 5
 	borrower2.Money = 10
 	initialFocalCoins = wf.TotalCoins()
 
 	// 4a. Solvent focal loan & repayment
-	evs, ok := wf.ApplyMarketCreditAction(fmc, borrower2.ID, sim.Action{Kind: "borrow_loan", TargetID: lender.ID, Quantity: 20, HouseID: "none"})
+	evs, ok := wf.ApplyMarketCreditAction(fmc, borrower2.ID, sim.Action{Kind: "borrow_loan", TargetID: lender.ID})
+	evs, ok = wf.ApplyMarketCreditAction(fmc, lender.ID, sim.Action{Kind: "accept_loan", TargetID: borrower2.ID})
 	if !ok || lastOfKind(evs, "loan_issued").Kind != "loan_issued" {
 		t.Fatalf("expected loan_issued, got ok=%v evs=%+v", ok, evs)
 	}
-	if borrower2.Money != 30 || lender.Money != 100 || wf.TotalCoins() != initialFocalCoins {
+	if borrower2.Money != 22 || lender.Money != 108 || wf.TotalCoins() != initialFocalCoins {
 		t.Fatalf("loan issuance coin mismatch: borrower2=%d lender=%d total=%d(want %d)", borrower2.Money, lender.Money, wf.TotalCoins(), initialFocalCoins)
 	}
 	evs, ok = wf.ApplyMarketCreditAction(fmc, borrower2.ID, sim.Action{Kind: "repay_loan", TargetID: lender.ID, Quantity: 20})
@@ -273,7 +276,8 @@ func TestMarketCreditDynamicPricingHoardingUsuryAndAnnexation(t *testing.T) {
 	if h01 == nil || h01.OwnerID != borrower.ID {
 		t.Fatalf("expected p01 to own h01 initially, got %+v", h01)
 	}
-	evs, ok = wf.ApplyMarketCreditAction(fmc, borrower.ID, sim.Action{Kind: "borrow_loan", TargetID: lender.ID, Quantity: 25, HouseID: "h01"})
+	evs, ok = wf.ApplyMarketCreditAction(fmc, borrower.ID, sim.Action{Kind: "borrow_loan", TargetID: lender.ID})
+	evs, ok = wf.ApplyMarketCreditAction(fmc, lender.ID, sim.Action{Kind: "accept_loan", TargetID: borrower.ID})
 	if !ok || lastOfKind(evs, "loan_issued").Kind != "loan_issued" {
 		t.Fatalf("expected collateralized loan_issued, got %+v", evs)
 	}
@@ -454,29 +458,38 @@ func TestMarketCreditDynamicPricingHoardingUsuryAndAnnexation(t *testing.T) {
 		t.Fatal("CloneMarketCreditState aliased AnnexedSharePermille map")
 	}
 
-	// 7. Also test automatic focal house foreclosure inside StepMarketAndCredit
+	// 7. Daily credit marks overdue; only the lender action forecloses.
 	wa := sim.Village("mc-auto-foreclose")
 	amc := sim.NewMarketCreditState()
 	aLender := actorByID(wa, "p27")
 	aBorrower := actorByID(wa, "p01")
+	aLender.Location, aLender.InsideHouse = aBorrower.Location, aBorrower.InsideHouse
 	aLender.Money = 100
 	aBorrower.Money = 2
 	initAutoCoins := wa.TotalCoins()
-	if _, ok := wa.ApplyMarketCreditAction(amc, aBorrower.ID, sim.Action{Kind: "borrow_loan", TargetID: aLender.ID, Quantity: 20, HouseID: "h01"}); !ok {
+	if _, ok := wa.ApplyMarketCreditAction(amc, aBorrower.ID, sim.Action{Kind: "borrow_loan", TargetID: aLender.ID}); !ok {
 		t.Fatal("expected borrow_loan handled")
 	}
+	wa.ApplyMarketCreditAction(amc, aLender.ID, sim.Action{Kind: "accept_loan", TargetID: aBorrower.ID})
 	aLender.Money += aBorrower.Money
 	aBorrower.Money = 0
 	wa.Tick = int64(amc.Spec.LoanTermTicks) + 1
 	autoEvs := wa.StepMarketAndCredit(amc)
-	if ev := lastOfKind(autoEvs, "house_foreclosed"); ev.Kind != "house_foreclosed" {
-		t.Fatalf("expected automatic house_foreclosed in StepMarketAndCredit, got %+v", autoEvs)
+	if ev := lastOfKind(autoEvs, "house_foreclosed"); ev.Kind == "house_foreclosed" {
+		t.Fatalf("daily credit must not decide foreclosure, got %+v", autoEvs)
+	}
+	if mcTestHouseByID(wa, "h01").OwnerID != aBorrower.ID || wa.Tick < amc.Loans[0].DueTick {
+		t.Fatal("daily credit must retain deed and mark debt overdue")
+	}
+	forecloseEvs, _ := wa.ApplyMarketCreditAction(amc, aLender.ID, sim.Action{Kind: "foreclose_collateral", TargetID: aBorrower.ID, HouseID: "h01"})
+	if lastOfKind(forecloseEvs, "house_foreclosed").Kind != "house_foreclosed" {
+		t.Fatalf("explicit foreclosure failed: %+v", forecloseEvs)
 	}
 	if h := mcTestHouseByID(wa, "h01"); h == nil || h.OwnerID != aLender.ID {
 		t.Fatalf("expected h01 foreclosed to %s, got %+v", aLender.ID, h)
 	}
 	if wa.TotalCoins() != initAutoCoins {
-		t.Fatalf("M0 coin drift on automatic foreclosure: got=%d want=%d", wa.TotalCoins(), initAutoCoins)
+		t.Fatalf("M0 coin drift on explicit foreclosure: got=%d want=%d", wa.TotalCoins(), initAutoCoins)
 	}
 }
 
@@ -548,4 +561,3 @@ func TestMarketCreditSolventRepaymentAndMultiDayConservation(t *testing.T) {
 		t.Fatalf("final M0 coin mismatch: got=%d want=%d", got, initialCoins)
 	}
 }
-

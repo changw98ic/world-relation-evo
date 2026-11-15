@@ -184,8 +184,8 @@ type Catalog struct {
 func DefaultCatalog() Catalog {
 	return Catalog{
 		TagActions: map[string][]string{
-			"resident": {"wait", "move", "enter_house", "leave_house", "sleep", "eat", "drink", "relieve", "medicate", "speak", "repair_house", "transfer_house", "upgrade_house", "maintain_infra", "join_faction", "join_profession", "marry", "swear_bond", "mediate_feud"},
-			"trader":   {"offer", "accept", "reject", "borrow_loan", "repay_loan", "foreclose_collateral"},
+			"resident": {"start_plan", "abandon_plan", "wait", "move", "enter_house", "leave_house", "sleep", "eat", "drink", "relieve", "medicate", "speak", "repair_house", "transfer_house", "upgrade_house", "maintain_infra", "join_faction", "join_profession", "marry", "swear_bond", "mediate_feud"},
+			"trader":   {"propose_agreement", "accept_agreement", "reject_agreement", "fulfill_agreement", "accept_loan", "reject_loan", "cancel_loan", "offer", "accept", "reject", "borrow_loan", "repay_loan", "foreclose_collateral"},
 			"fighter":  {"attack", "avenge_feud", "claim_turf"},
 			"healer":   {"heal"},
 			"martial":  {"spar", "hunt_threat", "avenge_feud", "claim_turf"},

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -228,92 +229,84 @@ func TestNonSpeechSkipsContentGenerator(t *testing.T) {
 	}
 }
 
-func TestIdentityPairShapesExaggerationAndConservatismAcrossProfessions(t *testing.T) {
-	w := sim.Village("dyad-stance")
-	// Put p01 (farmer), p02 (farmer), p15 (carpenter), p30 (guard) outdoors at crossroads.
-	for _, idx := range []int{0, 1, 14, 29} {
-		w.Actors[idx].InsideHouse = ""
-		w.Actors[idx].Location = "crossroads"
+func TestOfflineSpeechDoesNotInventIdentityBasedDistortion(t *testing.T) {
+	w := sim.Village("offline-expression")
+	w.Actors[0].Memories = []sim.Memory{{EventID: 1, Tick: w.Tick, Source: "p01", Observation: &sim.Observation{Kind: "item_produced", Item: "food", Location: "south_fields", Quantity: 2}}}
+	for _, stock := range []int{1, 20} {
+		w.Actors[0].Items["food"] = stock
+		for _, target := range []string{"p02", "p15", "p30"} {
+			c, err := (TemplateContent{}).Generate(context.Background(), w.View("p01"), sim.Action{Kind: "speak", TargetID: target})
+			if err != nil || c.Statement == nil || c.Statement.Quantity != 2 {
+				t.Fatalf("offline fixture distorted production for stock=%d target=%s: %+v %v", stock, target, c, err)
+			}
+		}
 	}
+}
 
-	// p01 harvests 2 food at south_fields first, then returns to crossroads.
-	w.Actors[0].Location = "south_fields"
-	w.Apply("p01", sim.Action{Kind: "craft", RecipeID: "farm_grain"})
-	for w.Actors[0].Task != nil {
-		w.Tick++
-		w.Advance("p01")
+func TestOfflineRetellingPreservesClaimAndSource(t *testing.T) {
+	p := sim.Village("retelling").View("p01")
+	original := sim.Statement{Topic: "item_produced", Item: "", Location: "south_fields", Quantity: 17}
+	p.Self.Memories = []sim.Memory{{EventID: 8, RootEventID: 2, Tick: p.Tick, Kind: "speech", Source: "p03", Statement: &original}}
+	c, err := (TemplateContent{}).Generate(context.Background(), p, sim.Action{Kind: "speak", TargetID: "p02"})
+	if err != nil || c.BasisEventID != 8 || c.Statement == nil || *c.Statement != original || !strings.Contains(c.Text, "p03 said") {
+		t.Fatalf("retelling changed claim semantics or provenance: %+v %v", c, err)
 	}
-	w.Actors[0].Location = "crossroads"
-	w.Actors[0].Items["food"] = 6 // below food SurplusThreshold (8)
+}
 
-	tc := TemplateContent{}
-
-	// 1. Farmer -> fellow Farmer: candid (quantity stays 2)
-	cPeer, err := tc.Generate(context.Background(), w.View("p01"), sim.Action{Kind: "speak", TargetID: "p02"})
-	if err != nil || cPeer.Statement == nil || cPeer.Statement.Quantity != 2 {
-		t.Fatalf("farmer->farmer expected candid quantity 2, got %+v err=%v", cPeer, err)
-	}
-
-	// 2. Farmer (limited surplus, food=6 < 8) -> Carpenter buyer: conservative (2 -> 1)
-	cBuyerTight, err := tc.Generate(context.Background(), w.View("p01"), sim.Action{Kind: "speak", TargetID: "p15"})
-	if err != nil || cBuyerTight.Statement == nil || cBuyerTight.Statement.Quantity != 1 {
-		t.Fatalf("farmer(low surplus)->carpenter expected conservative quantity 1, got %+v err=%v", cBuyerTight, err)
-	}
-
-	// 3. Farmer (ample surplus, food=10 >= 8) -> Carpenter buyer: exaggerate (2 -> 4)
-	w.Actors[0].Items["food"] = 10
-	cBuyerAmple, err := tc.Generate(context.Background(), w.View("p01"), sim.Action{Kind: "speak", TargetID: "p15"})
-	if err != nil || cBuyerAmple.Statement == nil || cBuyerAmple.Statement.Quantity != 4 {
-		t.Fatalf("farmer(ample surplus)->carpenter expected exaggerated quantity 4, got %+v err=%v", cBuyerAmple, err)
-	}
-
-	// 4. Farmer -> Armed Guard (coercive power): conservative (2 -> 1)
-	cGuard, err := tc.Generate(context.Background(), w.View("p01"), sim.Action{Kind: "speak", TargetID: "p30"})
-	if err != nil || cGuard.Statement == nil || cGuard.Statement.Quantity != 1 {
-		t.Fatalf("farmer->guard expected conservative quantity 1, got %+v err=%v", cGuard, err)
-	}
-
-	// 5. Carpenter -> Farmer retelling food news: exaggerate (4 -> 8)
-	w.Apply("p01", sim.Action{Kind: "speak", TargetID: "p15", Text: cBuyerAmple.Text, BasisEventID: cBuyerAmple.BasisEventID, Statement: cBuyerAmple.Statement})
-	cCarpenterToFarmer, err := tc.Generate(context.Background(), w.View("p15"), sim.Action{Kind: "speak", TargetID: "p02"})
-	if err != nil || cCarpenterToFarmer.Statement == nil || cCarpenterToFarmer.Statement.Quantity != 8 {
-		t.Fatalf("carpenter->farmer expected exaggerated quantity 8, got %+v err=%v", cCarpenterToFarmer, err)
-	}
-
-	// 6. Symmetric non-farmer check: Carpenter producing planks speaking to Farmer plank-buyer!
-	farmerListener := sim.Neighbor{ID: "p01", Name: w.Actors[0].Name, Role: "farmer", Tags: w.Actors[0].Tags, Health: 100}
-	w.Actors[14].Items["plank"] = 1 // below plank SurplusThreshold (3)
-	if st, _ := CommunicationStance(w.Catalog, w.Actors[14], farmerListener, "plank"); st != "conservative" {
-		t.Fatalf("carpenter(tight plank)->farmer expected conservative, got %q", st)
-	}
-	w.Actors[14].Items["plank"] = 4 // >= plank SurplusThreshold (3)
-	if st, _ := CommunicationStance(w.Catalog, w.Actors[14], farmerListener, "plank"); st != "exaggerate" {
-		t.Fatalf("carpenter(ample plank)->farmer expected exaggerate, got %q", st)
-	}
-
-	var gotStance, gotListenerRole string
-	s := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		var req struct {
+func TestContentModelUsesSituationWithoutPrescribingStance(t *testing.T) {
+	w := sim.Village("expression")
+	w.Actors[0].InsideHouse = ""
+	w.Actors[1].InsideHouse = ""
+	w.Actors[1].Location = w.Actors[0].Location
+	w.Actors[0].Hunger = 73
+	w.Actors[0].Trust["p02"] = -9
+	w.Actors[0].Personality = "proud but fond of old friends"
+	w.Actors[0].Goal = "rebuild the household"
+	var claim = 3
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		var request struct {
 			Messages []struct {
 				Content string `json:"content"`
 			} `json:"messages"`
 		}
-		json.NewDecoder(r.Body).Decode(&req)
-		var payload struct {
-			Interaction struct {
-				InformationStance string       `json:"information_stance"`
-				Listener          sim.Neighbor `json:"listener"`
-			} `json:"interaction"`
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
 		}
-		json.Unmarshal([]byte(req.Messages[1].Content), &payload)
-		gotStance = payload.Interaction.InformationStance
-		gotListenerRole = payload.Interaction.Listener.Role
-		json.NewEncoder(rw).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": `{"text":"南亩到处都在出粮","statement":{"topic":"item_produced","item":"food","location":"south_fields","quantity":8}}`}}}})
+		var payload struct {
+			Perception  sim.Perception             `json:"perception"`
+			Selected    sim.Action                 `json:"selected_action"`
+			Interaction map[string]json.RawMessage `json:"interaction"`
+		}
+		if err := json.Unmarshal([]byte(request.Messages[1].Content), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Perception.Self.Hunger != 73 || payload.Perception.Self.Personality != w.Actors[0].Personality || payload.Perception.Self.Goal != w.Actors[0].Goal || payload.Perception.Self.Trust["p02"] != -9 {
+			t.Error("speaker circumstances missing from model context")
+		}
+		if payload.Selected.Kind != "speak" || payload.Selected.TargetID != "p02" {
+			t.Error("selected action changed")
+		}
+		for _, key := range []string{"information_stance", "stance_reason"} {
+			if _, ok := payload.Interaction[key]; ok {
+				t.Errorf("prescribed stance remains: %s", key)
+			}
+		}
+		content, _ := json.Marshal(Content{Text: fmt.Sprintf("我听说出了 %d 份粮食", claim), Statement: &sim.Statement{Topic: "item_produced", Item: "food", Location: "south_fields", Quantity: claim}})
+		json.NewEncoder(rw).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": string(content)}}}})
 	}))
-	defer s.Close()
-	_, err = (ContentModel{Endpoint: s.URL, Name: "test"}).Generate(context.Background(), w.View("p15"), sim.Action{Kind: "speak", TargetID: "p02"})
-	if err != nil || gotStance != "exaggerate" || gotListenerRole != "farmer" {
-		t.Fatalf("ContentModel dyad payload wrong: stance=%q listenerRole=%q err=%v", gotStance, gotListenerRole, err)
+	defer server.Close()
+	p := Pipeline{Selector: chooseKind{kind: "speak", target: "p02"}, Generator: ContentModel{Endpoint: server.URL, Name: "test"}}
+	for _, q := range []int{3, 17} {
+		claim = q
+		before, _ := json.Marshal(w.Actors)
+		action, err := p.Decide(context.Background(), w.View("p01"))
+		after, _ := json.Marshal(w.Actors)
+		if err != nil || action.Kind != "speak" || action.TargetID != "p02" || action.Statement == nil || action.Statement.Quantity != q {
+			t.Fatalf("expression was rewritten or changed action: %+v %v", action, err)
+		}
+		if string(before) != string(after) {
+			t.Fatal("content generation changed actor state")
+		}
 	}
 }
 

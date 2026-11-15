@@ -76,3 +76,31 @@ WRE_TEST_DATABASE_URL="$DATABASE_URL" go test ./internal/store -v
 - `cmd/wre`: runner CLI and committed NDJSON event stream
 
 No license has been selected yet.
+
+### Personal continuity
+
+Actors can select persistent production-and-sale plans (`start_plan` / `abandon_plan`).
+Plans survive sleeping, travel, day changes and PostgreSQL snapshots. Completed
+craft tasks and actual sales advance their counters; speech and offered trades do
+not. The current plan type is production followed by sale, not arbitrary prose goals.
+
+`propose_agreement` creates catalog-priced future delivery terms. The specified
+buyer chooses `accept_agreement` or `reject_agreement`; only `fulfill_agreement`
+settles goods and payment. Pending proposals expire and overdue agreements become
+unfulfilled. Participants retain their exchanges and see their own open agreements
+in subsequent decisions. These are goods-for-payment commitments, not an automatic
+natural-language contract parser.
+
+Personal credit uses `borrow_loan` → lender `accept_loan` / `reject_loan`. A request
+records system-quoted principal, interest, term and collateral without moving assets.
+Daily settlement accrues interest but no longer originates personal loans, repays them,
+or forecloses collateral on a character’s behalf. Repayment and foreclosure are explicit
+character actions; pending requests can be withdrawn with `cancel_loan`. Both Jev and offline character
+policies use these explicit actions; the engine only settles their consequences.
+
+Personal memories are retained in snapshots. Each decision recalls at most 32,
+combining recent context with relevant older experiences, plans and counterparties.
+Observations remain observations and statements remain attributed claims. The content
+model receives the character's situation without a preassigned honesty stance or
+fixed quantity distortion. Offline text is a deterministic test fixture, not a claim
+of model-quality realism.

@@ -17,12 +17,11 @@ type ContentModel struct {
 	Client                 *http.Client
 }
 
-const prompt = `Write the spoken Chinese dialogue for this character's already-selected speak action and listener. You do NOT choose actions, targets, quantities, prices, routes, house transfers, crafting, damage, healing or state changes. Output only JSON {"text":"words spoken to the listener","basis_event_id":integer,"statement":{"topic":"item_produced","item":"item_id","location":"district_id","quantity":integer}}. Omit statement and basis_event_id if not reporting or retelling item production/supply news. A statement is a character assertion, never an objective fact or inventory update. When citing a memory, set basis_event_id ONLY to an integer present in interaction.citable_memory_event_ids (each memory's own event_id—never use a memory's root_event_id or basis_event_id, which belong to upstream speakers you did not witness directly). When reporting or retelling supply quantities, state quantities candidly ("candid"), understate them ("conservative"), or amplify them ("exaggerate") according to interaction.information_stance and interaction.stance_reason, which reflect both speaker and listener supply/demand roles, authority, stock, and trust. Keep statement.quantity strictly consistent with the number spoken in text. Do not add behavior, target or state fields.`
+const prompt = `Write the spoken Chinese dialogue for this character's already-selected speak action and listener. Choose the wording, tone, disclosures and assertions from the speaker's current needs, personality, goal, relationships and remembered experiences in perception, and the actual listener. Identity and stock are circumstances, not a prescribed stance: do not assume a profession always lies, a buyer always exaggerates, or authority always makes someone understate. The character may be candid, uncertain, mistaken, evasive or deceptive when their circumstances support it; no fixed quantity multiplier applies. You generate speech, not actions or state changes. Output only JSON {"text":"words spoken to the listener","basis_event_id":integer,"statement":{"topic":"item_produced","item":"item_id","location":"district_id","quantity":integer}}. Omit statement and basis_event_id if not reporting or retelling item production/supply news. A statement is a character assertion, never an objective fact or inventory update; statement.quantity is the claimed quantity, not an action quantity. When citing a memory, set basis_event_id ONLY to an integer present in interaction.citable_memory_event_ids (the memory's own event_id, not its root_event_id or basis_event_id). Preserve the distinction between witnessed experiences and things heard from others. Keep statement.quantity consistent with the number spoken in text. Do not add behavior, target or state fields.`
 
 func (m ContentModel) Generate(ctx context.Context, p sim.Perception, action sim.Action) (Content, error) {
 	listener, _ := findNeighbor(p.Nearby, action.TargetID)
 	topicItem := PrimaryTopicItem(p.Catalog, p.Self, listener)
-	stance, reason := CommunicationStance(p.Catalog, p.Self, listener, topicItem)
 	citableIDs := make([]int64, 0, len(p.Self.Memories))
 	for _, mem := range p.Self.Memories {
 		citableIDs = append(citableIDs, mem.EventID)
@@ -32,29 +31,27 @@ func (m ContentModel) Generate(ctx context.Context, p sim.Perception, action sim
 		"selected_action": action,
 		"interaction": map[string]any{
 			"speaker": map[string]any{
-				"id":            p.Self.ID,
-				"name":          p.Self.Name,
-				"role":          p.Self.Role,
-				"tags":          p.Self.Tags,
+				"id":               p.Self.ID,
+				"name":             p.Self.Name,
+				"role":             p.Self.Role,
+				"tags":             p.Self.Tags,
 				"attributes":       p.Self.Attributes,
 				"professions":      p.Self.Professions,
 				"profession_ranks": p.Self.ProfessionRanks,
 				"level":            p.Self.Level,
-				"guilds":        p.Self.Guilds,
-				"location":      p.Self.Location,
-				"inside_house":  p.Self.InsideHouse,
-				"energy":        p.Self.Energy,
-				"sleep_trait":   p.Self.SleepTrait,
-				"items":         p.Self.Items,
-				"personality":   p.Self.Personality,
-				"goal":          p.Self.Goal,
+				"guilds":           p.Self.Guilds,
+				"location":         p.Self.Location,
+				"inside_house":     p.Self.InsideHouse,
+				"energy":           p.Self.Energy,
+				"sleep_trait":      p.Self.SleepTrait,
+				"items":            p.Self.Items,
+				"personality":      p.Self.Personality,
+				"goal":             p.Self.Goal,
 			},
 			"listener":                  listener,
 			"speaker_trust_to_listener": p.Self.Trust[action.TargetID],
 			"citable_memory_event_ids":  citableIDs,
 			"primary_topic_item":        topicItem,
-			"information_stance":        stance,
-			"stance_reason":             reason,
 		},
 	}
 	b, _ := json.Marshal(payload)

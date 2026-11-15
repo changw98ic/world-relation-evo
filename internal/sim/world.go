@@ -62,6 +62,7 @@ type Task struct {
 }
 
 type Actor struct {
+	Plan            *PersonalPlan     `json:"plan,omitempty"`
 	ID              string            `json:"id"`
 	Name            string            `json:"name"`
 	Role            string            `json:"role"`
@@ -122,6 +123,7 @@ func SamePlace(a, b Actor) bool {
 }
 
 type World struct {
+	Continuity       *ContinuityState         `json:"continuity,omitempty"`
 	ID               string                   `json:"id"`
 	Tick             int64                    `json:"tick"`
 	NextID           int64                    `json:"next_id"`
@@ -144,6 +146,7 @@ type World struct {
 }
 
 type Action struct {
+	AgreementID  int64      `json:"agreement_id,omitempty"`
 	BasisEventID int64      `json:"basis_event_id,omitempty"`
 	Statement    *Statement `json:"statement,omitempty"`
 	Kind         string     `json:"kind"`
@@ -202,16 +205,19 @@ type FactionView struct {
 }
 
 type Perception struct {
-	Tick             int64          `json:"tick"`
-	Clock            Clock          `json:"clock"`
-	Calendar         CalendarState  `json:"calendar"`
-	Self             Actor          `json:"self"`
-	CurrentDistrict  District       `json:"current_district"`
-	DistrictState    *DistrictState `json:"district_state,omitempty"`
-	CurrentHouse     *House         `json:"current_house,omitempty"`
-	AccessibleHouses []House        `json:"accessible_houses,omitempty"`
-	Factions         []FactionView  `json:"factions,omitempty"`
-	Roads            []RoadView     `json:"roads,omitempty"`
+	Continuity          ContinuityView `json:"continuity"`
+	LoanRequests        []LoanRequest  `json:"loan_requests,omitempty"`
+	LoanQuotes          []LoanRequest  `json:"loan_quotes,omitempty"`
+	Tick                int64          `json:"tick"`
+	Clock               Clock          `json:"clock"`
+	Calendar            CalendarState  `json:"calendar"`
+	Self                Actor          `json:"self"`
+	CurrentDistrict     District       `json:"current_district"`
+	DistrictState       *DistrictState `json:"district_state,omitempty"`
+	CurrentHouse        *House         `json:"current_house,omitempty"`
+	AccessibleHouses    []House        `json:"accessible_houses,omitempty"`
+	Factions            []FactionView  `json:"factions,omitempty"`
+	Roads               []RoadView     `json:"roads,omitempty"`
 	Nearby              []Neighbor     `json:"nearby,omitempty"`
 	Offers              []Offer        `json:"offers,omitempty"`
 	SpotlightSalience   int            `json:"spotlight_salience,omitempty"`
@@ -741,27 +747,6 @@ func (w *World) View(id string) Perception {
 		}
 		a.Task = &tc
 	}
-	start := len(a.Memories) - 32
-	if start < 0 {
-		start = 0
-	}
-	if len(a.Memories) > 0 {
-		a.Memories = append([]Memory(nil), a.Memories[start:]...)
-		for i := range a.Memories {
-			m := &a.Memories[i]
-			if m.SourceTags != nil {
-				m.SourceTags = append([]string(nil), m.SourceTags...)
-			}
-			if m.Statement != nil {
-				v := *m.Statement
-				m.Statement = &v
-			}
-			if m.Observation != nil {
-				v := *m.Observation
-				m.Observation = &v
-			}
-		}
-	}
 
 	dist, _ := w.Map.DistrictByID(a.Location)
 	if dist.Features != nil {
@@ -849,6 +834,7 @@ func (w *World) View(id string) Perception {
 		}
 	}
 	w.applyPerceptionEvoHints(&p)
+	recallPerceptionMemories(&p)
 	return p
 }
 
@@ -887,7 +873,25 @@ func (w *World) applyPerceptionEvoHints(p *Perception) {
 	if p == nil {
 		return
 	}
+	p.Self.Plan = ClonePersonalPlan(p.Self.Plan)
+	p.Continuity = w.ContinuityFor(p.Self.ID)
 	a := p.Self
+	p.LoanRequests = w.MarketCredit.PendingLoanRequests(a.ID)
+	spec := DefaultMarketCreditSpec()
+	if w.MarketCredit != nil {
+		spec = EffectiveMarketCreditSpec(w.MarketCredit.Spec)
+	}
+	for _, nb := range p.Nearby {
+		if lender := w.actor(nb.ID); lender != nil && !nb.Jailed {
+			if amount := QuotePersonalLoan(a, *lender); amount > 0 {
+				collateral := ""
+				if h := w.house(a.HomeID); h != nil && h.OwnerID == a.ID {
+					collateral = h.ID
+				}
+				p.LoanQuotes = append(p.LoanQuotes, LoanRequest{BorrowerID: a.ID, LenderID: lender.ID, Principal: amount, RatePermille: spec.DailyLoanInterestPermille, TermTicks: spec.LoanTermTicks, CollateralHouse: collateral})
+			}
+		}
+	}
 	if w.SpotlightRumor != nil && w.SpotlightRumor.ActorSalience != nil {
 		p.SpotlightSalience = w.SpotlightRumor.ActorSalience[a.ID]
 	}
@@ -1035,6 +1039,7 @@ func (w *World) Step(ctx context.Context, d Decider) ([]Event, error) {
 	}
 
 	w.Tick++
+	events = append(events, w.AdvanceContinuity()...)
 	// Physiological hunger accumulates once every 6 hours (24 quarter-hour ticks).
 	if w.Tick%(6*TicksPerHour) == 0 {
 		for i := range w.Actors {
@@ -1158,23 +1163,14 @@ func (w *World) record(a *Actor, x Action, kind string, data map[string]any, obs
 		v := obs
 		m.Observation = &v
 	}
-	a.Memories = appendBoundedMemory(a.Memories, m)
+	a.Memories = appendMemory(a.Memories, m)
 	for _, b := range observers {
 		if b != nil && b.ID != a.ID {
-			b.Memories = appendBoundedMemory(b.Memories, m)
+			b.Memories = appendMemory(b.Memories, m)
 		}
 	}
+	w.ObserveContinuity(e)
 	return e
-}
-
-const MaxActorMemories = 64
-
-func appendBoundedMemory(list []Memory, m Memory) []Memory {
-	list = append(list, m)
-	if len(list) > MaxActorMemories {
-		list = append([]Memory(nil), list[len(list)-MaxActorMemories:]...)
-	}
-	return list
 }
 
 // grantProfessionXP advances profession experience (and optional guild influence) with level-up and rank-advancement events.
@@ -2857,7 +2853,7 @@ func (w *World) Apply(id string, x Action) []Event {
 			a.Trust[seller.ID]++
 			seller.Trust[a.ID]++
 			w.Offers = append(w.Offers[:i], w.Offers[i+1:]...)
-			events := emit("trade_completed", fmt.Sprintf("%s bought %d %s from %s for %d coins", a.Name, o.Quantity, o.Item, seller.Name, o.Price), seller)
+			events := []Event{w.record(a, x, "trade_completed", map[string]any{"text": fmt.Sprintf("%s bought %d %s from %s for %d coins", a.Name, o.Quantity, o.Item, seller.Name, o.Price), "item": o.Item, "quantity": o.Quantity, "seller_id": seller.ID}, seller)}
 			tier := w.Catalog.Items[o.Item].Tier
 			if tier < 1 {
 				tier = 1
@@ -2867,7 +2863,10 @@ func (w *World) Apply(id string, x Action) []Event {
 		}
 		return fail("offer not found")
 
-	case "borrow_loan", "repay_loan", "foreclose_collateral":
+	case "start_plan", "abandon_plan", "propose_agreement", "accept_agreement", "reject_agreement", "fulfill_agreement":
+		return w.ApplyContinuity(a, x)
+
+	case "borrow_loan", "accept_loan", "reject_loan", "cancel_loan", "repay_loan", "foreclose_collateral":
 		if evs, ok := w.ApplyMarketCreditAction(w.ensureMarketCredit(), id, x); ok {
 			return evs
 		}

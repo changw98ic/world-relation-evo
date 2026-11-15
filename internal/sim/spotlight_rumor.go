@@ -585,7 +585,7 @@ func (w *World) seedMacroGossip(sr *SpotlightRumorState, ev Event, cohortIndex m
 			Text:        summaryText,
 			Statement:   &stmtCopy,
 		}
-		a.Memories = appendBoundedMemory(a.Memories, mem)
+		a.Memories = appendMemory(a.Memories, mem)
 		sr.ActorSalience[a.ID] = minInt(1000, sr.ActorSalience[a.ID]+2)
 		recipients = append(recipients, a.ID)
 	}
@@ -836,7 +836,7 @@ func (w *World) StepDynamicSpotlight(sr *SpotlightRumorState) []Event {
 			Location: actor.Location,
 			Quantity: hc.heat,
 		}
-		actor.Memories = appendBoundedMemory(actor.Memories, Memory{
+		actor.Memories = appendMemory(actor.Memories, Memory{
 			Kind:        "spotlight",
 			Tick:        w.Tick,
 			EventID:     evID,

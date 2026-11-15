@@ -17,33 +17,33 @@ const MaxNearbyView = 32
 // advance in profession XP/level/rank, promote into Tier-2 professions, and can dynamically
 // hydrate/dehydrate individual Actors on demand.
 type PopulationCohort struct {
-	ID               string           `json:"id"`
-	Name             string           `json:"name"`
-	District         string           `json:"district"`
-	FactionID        string           `json:"faction_id,omitempty"`
-	Profession       string           `json:"profession"`
-	Tier             int              `json:"tier"`
-	ProfLevel        int              `json:"prof_level"`
-	Rank             string           `json:"rank,omitempty"`
-	Population       int              `json:"population"`
-	Children         int              `json:"children,omitempty"`
-	Adults           int              `json:"adults,omitempty"`
-	Elders           int              `json:"elders,omitempty"`
-	Wounded          int              `json:"wounded,omitempty"`
-	Sick             int              `json:"sick,omitempty"`
-	Jailed           int              `json:"jailed,omitempty"`
-	CumulativeDeaths int              `json:"cumulative_deaths,omitempty"`
-	CumulativeBirths int              `json:"cumulative_births,omitempty"`
-	RestUntilTick    int64            `json:"rest_until_tick,omitempty"`
-	AvgEnergy        int              `json:"avg_energy"`
-	AvgHunger        int              `json:"avg_hunger"`
-	AvgThirst        int              `json:"avg_thirst,omitempty"`
+	ID                 string           `json:"id"`
+	Name               string           `json:"name"`
+	District           string           `json:"district"`
+	FactionID          string           `json:"faction_id,omitempty"`
+	Profession         string           `json:"profession"`
+	Tier               int              `json:"tier"`
+	ProfLevel          int              `json:"prof_level"`
+	Rank               string           `json:"rank,omitempty"`
+	Population         int              `json:"population"`
+	Children           int              `json:"children,omitempty"`
+	Adults             int              `json:"adults,omitempty"`
+	Elders             int              `json:"elders,omitempty"`
+	Wounded            int              `json:"wounded,omitempty"`
+	Sick               int              `json:"sick,omitempty"`
+	Jailed             int              `json:"jailed,omitempty"`
+	CumulativeDeaths   int              `json:"cumulative_deaths,omitempty"`
+	CumulativeBirths   int              `json:"cumulative_births,omitempty"`
+	RestUntilTick      int64            `json:"rest_until_tick,omitempty"`
+	AvgEnergy          int              `json:"avg_energy"`
+	AvgHunger          int              `json:"avg_hunger"`
+	AvgThirst          int              `json:"avg_thirst,omitempty"`
 	AvgXP              int              `json:"avg_xp,omitempty"`
 	MoneyPool          int64            `json:"money_pool"`
 	IllicitWealth      int64            `json:"illicit_wealth,omitempty"`
 	ProtectedUntilTick int64            `json:"protected_until_tick,omitempty"`
 	ItemPool           map[string]int64 `json:"item_pool,omitempty"`
-	HydratedSeq      int              `json:"hydrated_seq,omitempty"`
+	HydratedSeq        int              `json:"hydrated_seq,omitempty"`
 }
 
 // EffectivePopulation returns healthy, free working-age cohort members able to work, patrol, or fight.
@@ -274,27 +274,6 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 		}
 		a.Task = &tc
 	}
-	start := len(a.Memories) - 32
-	if start < 0 {
-		start = 0
-	}
-	if len(a.Memories) > 0 {
-		a.Memories = append([]Memory(nil), a.Memories[start:]...)
-		for i := range a.Memories {
-			m := &a.Memories[i]
-			if m.SourceTags != nil {
-				m.SourceTags = append([]string(nil), m.SourceTags...)
-			}
-			if m.Statement != nil {
-				v := *m.Statement
-				m.Statement = &v
-			}
-			if m.Observation != nil {
-				v := *m.Observation
-				m.Observation = &v
-			}
-		}
-	}
 
 	dist := idx.districtByID[a.Location]
 	if dist.Features != nil {
@@ -423,6 +402,7 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 		p.Offers = append([]Offer(nil), offers...)
 	}
 	w.applyPerceptionEvoHints(&p)
+	recallPerceptionMemories(&p)
 	return p
 }
 

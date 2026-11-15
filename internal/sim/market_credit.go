@@ -8,19 +8,19 @@ import (
 // MarketCreditSpec declares genre-decoupled parameters for dynamic supply/demand pricing,
 // speculative hoarding, usury credit, collateral foreclosure, and land/workshop annexation.
 type MarketCreditSpec struct {
-	MinPricePermille         int    `json:"min_price_permille,omitempty"`
-	MaxPricePermille         int    `json:"max_price_permille,omitempty"`
-	HoardSurplusMultiplier   int    `json:"hoard_surplus_multiplier,omitempty"`
-	HoardTriggerPermille     int    `json:"hoard_trigger_permille,omitempty"`
-	HoardReleasePermille     int    `json:"hoard_release_permille,omitempty"`
-	DailyLoanInterestPermille int   `json:"daily_loan_interest_permille,omitempty"`
-	LoanTermTicks            int    `json:"loan_term_ticks,omitempty"`
-	MaxTenantSharePermille   int    `json:"max_tenant_share_permille,omitempty"`
-	DailyRentPermille        int    `json:"daily_rent_permille,omitempty"`
-	HouseDailyRentPerLevel   int    `json:"house_daily_rent_per_level,omitempty"`
-	SubsistenceFloorPerCap   int    `json:"subsistence_floor_per_cap,omitempty"`
-	CreditorReservePerCap    int    `json:"creditor_reserve_per_cap,omitempty"`
-	TraderTag                string `json:"trader_tag,omitempty"`
+	MinPricePermille          int    `json:"min_price_permille,omitempty"`
+	MaxPricePermille          int    `json:"max_price_permille,omitempty"`
+	HoardSurplusMultiplier    int    `json:"hoard_surplus_multiplier,omitempty"`
+	HoardTriggerPermille      int    `json:"hoard_trigger_permille,omitempty"`
+	HoardReleasePermille      int    `json:"hoard_release_permille,omitempty"`
+	DailyLoanInterestPermille int    `json:"daily_loan_interest_permille,omitempty"`
+	LoanTermTicks             int    `json:"loan_term_ticks,omitempty"`
+	MaxTenantSharePermille    int    `json:"max_tenant_share_permille,omitempty"`
+	DailyRentPermille         int    `json:"daily_rent_permille,omitempty"`
+	HouseDailyRentPerLevel    int    `json:"house_daily_rent_per_level,omitempty"`
+	SubsistenceFloorPerCap    int    `json:"subsistence_floor_per_cap,omitempty"`
+	CreditorReservePerCap     int    `json:"creditor_reserve_per_cap,omitempty"`
+	TraderTag                 string `json:"trader_tag,omitempty"`
 }
 
 // DefaultMarketCreditSpec returns balanced defaults for dynamic pricing, hoarding, usury, and annexation.
@@ -140,8 +140,9 @@ type MarketCreditState struct {
 	Spec                 MarketCreditSpec             `json:"spec,omitempty"`
 	DistrictPrices       map[string]map[string]int    `json:"district_prices"`
 	HoardedStock         map[string]map[string]int64  `json:"hoarded_stock"`
-	Loans                []LoanRecord               `json:"loans,omitempty"`
-	CohortDebts          []CohortDebtRecord         `json:"cohort_debts,omitempty"`
+	LoanRequests         []LoanRequest                `json:"loan_requests,omitempty"`
+	Loans                []LoanRecord                 `json:"loans,omitempty"`
+	CohortDebts          []CohortDebtRecord           `json:"cohort_debts,omitempty"`
 	AnnexedSharePermille map[string]int               `json:"annexed_share_permille"`
 	CreditorCohort       map[string]string            `json:"creditor_cohort"`
 	ForeclosedTenancies  map[string]ForeclosedTenancy `json:"foreclosed_tenancies"`
@@ -191,6 +192,7 @@ func CloneMarketCreditState(s *MarketCreditState) *MarketCreditState {
 			out.HoardedStock[h] = cp
 		}
 	}
+	out.LoanRequests = append([]LoanRequest(nil), s.LoanRequests...)
 	if s.Loans != nil {
 		out.Loans = append([]LoanRecord(nil), s.Loans...)
 	}
@@ -682,13 +684,13 @@ func (w *World) stepMerchantHoarding(mc *MarketCreditState, spec MarketCreditSpe
 					Kind:    "hoard_released",
 					Action:  Action{Kind: "offer", Location: c.District, Item: itemID, Quantity: int(curHoarded)},
 					Payload: map[string]any{
-						"text":          fmt.Sprintf("%s released %d hoarded %s in %s (%s at %d‰ price)", c.Name, curHoarded, itemID, c.District, reason, pricePermille),
-						"holder_id":     c.ID,
-						"district":      c.District,
-						"item":          itemID,
-						"quantity":      curHoarded,
+						"text":           fmt.Sprintf("%s released %d hoarded %s in %s (%s at %d‰ price)", c.Name, curHoarded, itemID, c.District, reason, pricePermille),
+						"holder_id":      c.ID,
+						"district":       c.District,
+						"item":           itemID,
+						"quantity":       curHoarded,
 						"price_permille": pricePermille,
-						"reason":        reason,
+						"reason":         reason,
 					},
 				}
 				w.NextID++
@@ -843,10 +845,10 @@ func (w *World) stepMerchantHoarding(mc *MarketCreditState, spec MarketCreditSpe
 }
 
 // ApplyMarketCreditAction handles focal Actor usury credit actions:
-// "borrow_loan", "repay_loan", and "foreclose_collateral".
+// Requests, bilateral acceptance/rejection, borrower cancellation, repayment and foreclosure.
 func (w *World) ApplyMarketCreditAction(mc *MarketCreditState, actorID string, x Action) ([]Event, bool) {
 	switch x.Kind {
-	case "borrow_loan", "repay_loan", "foreclose_collateral":
+	case "borrow_loan", "accept_loan", "reject_loan", "cancel_loan", "repay_loan", "foreclose_collateral":
 	default:
 		return nil, false
 	}
@@ -888,63 +890,8 @@ func (w *World) ApplyMarketCreditAction(mc *MarketCreditState, actorID string, x
 	}
 
 	switch x.Kind {
-	case "borrow_loan":
-		b := w.actor(x.TargetID)
-		if b == nil || b.ID == a.ID || b.Dead || w.Tick < b.JailedUntil {
-			return fail("lender is unavailable"), true
-		}
-		amount := x.Quantity
-		if amount <= 0 {
-			amount = x.Price
-		}
-		if amount <= 0 {
-			return fail("invalid loan amount"), true
-		}
-		if b.Money < amount {
-			return fail("lender has insufficient coins"), true
-		}
-		collateral := ""
-		if x.HouseID != "" && x.HouseID != "none" {
-			h := w.house(x.HouseID)
-			if h == nil || h.OwnerID != a.ID {
-				return fail("actor does not own collateral house " + x.HouseID), true
-			}
-			collateral = h.ID
-		} else if x.HouseID == "" && a.HomeID != "" {
-			if h := w.house(a.HomeID); h != nil && h.OwnerID == a.ID {
-				collateral = h.ID
-			}
-		}
-
-		b.Money -= amount
-		a.Money += amount
-		if b.Trust == nil {
-			b.Trust = map[string]int{}
-		}
-		loanID := mc.allocLoanID()
-		dueTick := w.Tick + int64(spec.LoanTermTicks)
-		rec := LoanRecord{
-			ID:              loanID,
-			LenderID:        b.ID,
-			BorrowerID:      a.ID,
-			Principal:       int64(amount),
-			AccruedInterest: 0,
-			RatePermille:    spec.DailyLoanInterestPermille,
-			IssuedTick:      w.Tick,
-			DueTick:         dueTick,
-			CollateralHouse: collateral,
-			Status:          "active",
-		}
-		mc.Loans = append(mc.Loans, rec)
-		return emit("loan_issued", fmt.Sprintf("%s borrowed %d coins from %s at %d‰/day (due tick %d)", a.Name, amount, b.Name, spec.DailyLoanInterestPermille, dueTick), map[string]any{
-			"loan_id":          loanID,
-			"lender_id":        b.ID,
-			"borrower_id":      a.ID,
-			"principal":        int64(amount),
-			"rate_permille":    spec.DailyLoanInterestPermille,
-			"due_tick":         dueTick,
-			"collateral_house": collateral,
-		}, b), true
+	case "borrow_loan", "accept_loan", "reject_loan", "cancel_loan":
+		return w.applyPersonalCredit(mc, a, x, spec), true
 
 	case "repay_loan":
 		idx := -1
@@ -1090,7 +1037,7 @@ func (w *World) ApplyMarketCreditAction(mc *MarketCreditState, actorID string, x
 }
 
 // StepMarketAndCredit advances dynamic district pricing, merchant hoarding/release,
-// daily usury interest accrual, repayments, foreclosures, land annexation, and rent collection.
+// daily interest and overdue facts, aggregate cohort credit, and rent collection.
 func (w *World) StepMarketAndCredit(mc *MarketCreditState) []Event {
 	if mc == nil {
 		return nil
@@ -1285,7 +1232,7 @@ func (w *World) stepDailyCreditAndAnnexation(mc *MarketCreditState, spec MarketC
 				Kind:     "cohort_rent_paid",
 				Action:   Action{Kind: "wait", TargetID: creditor.ID, Item: rentItem, Quantity: int(rentQty), Price: int(rentCoins)},
 				Payload: map[string]any{
-					"text":          fmt.Sprintf("%s paid land/workshop rent (%d coins, %d %s) on %d‰ annexed share to %s", debtor.Name, rentCoins, rentQty, rentItem, sharePermille, creditor.Name),
+					"text":            fmt.Sprintf("%s paid land/workshop rent (%d coins, %d %s) on %d‰ annexed share to %s", debtor.Name, rentCoins, rentQty, rentItem, sharePermille, creditor.Name),
 					"debtor_cohort":   debtor.ID,
 					"creditor_cohort": creditor.ID,
 					"share_permille":  sharePermille,
@@ -1299,90 +1246,21 @@ func (w *World) stepDailyCreditAndAnnexation(mc *MarketCreditState, spec MarketC
 		}
 	}
 
-	// 4. Settle focal Actor loan repayments and overdue house foreclosures.
+	// 4. Update personal debt facts only. Repayment and foreclosure require
+	// borrower/creditor actions; the clock never chooses either on their behalf.
 	for i := range mc.Loans {
 		l := &mc.Loans[i]
 		if l.Status != "active" {
 			continue
 		}
 		borrower := w.actor(l.BorrowerID)
-		lender := w.actor(l.LenderID)
 		if borrower == nil || borrower.Dead {
 			l.Status = "defaulted"
 			continue
 		}
 		owed := l.Principal + l.AccruedInterest - l.Repaid
-		keep := 2
-		if w.Tick >= l.DueTick {
-			keep = 0
-		}
-		if owed > 0 && borrower.Money > keep && (w.Tick >= l.DueTick || borrower.Money >= int(owed)+4) {
-			pay := minInt64(owed, int64(borrower.Money-keep))
-			if pay > 0 {
-				borrower.Money -= int(pay)
-				var obs []*Actor
-				if lender != nil && !lender.Dead {
-					lender.Money += int(pay)
-					obs = append(obs, lender)
-				} else {
-					w.creditTreasury(pay, "fee")
-				}
-				l.Repaid += pay
-				rem := l.Principal + l.AccruedInterest - l.Repaid
-				if rem <= 0 {
-					rem = 0
-					l.Status = "repaid"
-				}
-				ev := w.record(borrower, Action{Kind: "repay_loan", TargetID: l.LenderID, OfferID: l.ID, Quantity: int(pay)}, "loan_repaid", map[string]any{
-					"text":           fmt.Sprintf("%s repaid %d coins on loan #%d (remaining %d, status %s)", borrower.Name, pay, l.ID, rem, l.Status),
-					"loan_id":        l.ID,
-					"lender_id":      l.LenderID,
-					"borrower_id":    l.BorrowerID,
-					"coins":          pay,
-					"remaining_owed": rem,
-					"status":         l.Status,
-				}, obs...)
-				events = append(events, ev)
-			}
-		}
-		if l.Status == "active" && w.Tick >= l.DueTick {
-			rem := l.Principal + l.AccruedInterest - l.Repaid
-			if rem <= 0 {
-				l.Status = "repaid"
-				continue
-			}
-			houseID := l.CollateralHouse
-			if houseID == "" {
-				houseID = borrower.HomeID
-			}
-			h := w.house(houseID)
-			if h != nil && h.OwnerID == borrower.ID && lender != nil && !lender.Dead {
-				oldOwner := h.OwnerID
-				h.OwnerID = lender.ID
-				h.Residents = appendUnique(h.Residents, borrower.ID)
-				dailyRent := int64(maxInt(1, h.Level) * spec.HouseDailyRentPerLevel)
-				mc.ForeclosedTenancies[h.ID] = ForeclosedTenancy{
-					HouseID:      h.ID,
-					OwnerID:      lender.ID,
-					TenantID:     borrower.ID,
-					DailyRent:    dailyRent,
-					SinceTick:    w.Tick,
-					LastRentTick: w.Tick,
-				}
-				l.Status = "foreclosed"
-				ev := w.record(lender, Action{Kind: "foreclose_collateral", TargetID: borrower.ID, HouseID: h.ID, OfferID: l.ID}, "house_foreclosed", map[string]any{
-					"text":         fmt.Sprintf("%s foreclosed %s from %s over overdue loan #%d (tenant rent %d/day)", lender.Name, h.Name, borrower.Name, l.ID, dailyRent),
-					"loan_id":      l.ID,
-					"house_id":     h.ID,
-					"old_owner_id": oldOwner,
-					"new_owner_id": lender.ID,
-					"tenant_id":    borrower.ID,
-					"daily_rent":   dailyRent,
-				}, borrower)
-				events = append(events, ev)
-			} else {
-				l.Status = "defaulted"
-			}
+		if owed <= 0 {
+			l.Status = "repaid"
 		}
 	}
 
@@ -1616,78 +1494,7 @@ func (w *World) stepDailyCreditAndAnnexation(mc *MarketCreditState, spec MarketC
 		events = append(events, ev)
 	}
 
-	// 7. Issue distress loans to cash-poor living focal actors from liquid focal merchant/wealthy actors.
-	hasActiveActorLoan := make(map[string]bool, len(mc.Loans))
-	for _, l := range mc.Loans {
-		if l.Status == "active" {
-			hasActiveActorLoan[l.BorrowerID] = true
-		}
-	}
-	for i := range w.Actors {
-		a := &w.Actors[i]
-		if a.Dead || w.Tick < a.JailedUntil || a.Money >= 4 || hasActiveActorLoan[a.ID] {
-			continue
-		}
-		var lender *Actor
-		for j := range w.Actors {
-			cand := &w.Actors[j]
-			if cand.Dead || cand.ID == a.ID || w.Tick < cand.JailedUntil {
-				continue
-			}
-			if cand.Money < 25 {
-				continue
-			}
-			if w.isMerchantActor(cand, spec) || cand.Money >= 40 {
-				if cand.Location == a.Location {
-					lender = cand
-					break
-				}
-				if lender == nil {
-					lender = cand
-				}
-			}
-		}
-		if lender == nil {
-			continue
-		}
-		amt := minInt(12, lender.Money-15)
-		if amt <= 0 {
-			continue
-		}
-		collateral := ""
-		if a.HomeID != "" {
-			if h := w.house(a.HomeID); h != nil && h.OwnerID == a.ID {
-				collateral = h.ID
-			}
-		}
-		lender.Money -= amt
-		a.Money += amt
-		loanID := mc.allocLoanID()
-		dueTick := w.Tick + int64(spec.LoanTermTicks)
-		mc.Loans = append(mc.Loans, LoanRecord{
-			ID:              loanID,
-			LenderID:        lender.ID,
-			BorrowerID:      a.ID,
-			Principal:       int64(amt),
-			RatePermille:    spec.DailyLoanInterestPermille,
-			IssuedTick:      w.Tick,
-			DueTick:         dueTick,
-			CollateralHouse: collateral,
-			Status:          "active",
-		})
-		hasActiveActorLoan[a.ID] = true
-		ev := w.record(a, Action{Kind: "borrow_loan", TargetID: lender.ID, Quantity: amt, HouseID: collateral}, "loan_issued", map[string]any{
-			"text":             fmt.Sprintf("%s borrowed %d coins from %s at %d‰/day (due tick %d)", a.Name, amt, lender.Name, spec.DailyLoanInterestPermille, dueTick),
-			"loan_id":          loanID,
-			"lender_id":        lender.ID,
-			"borrower_id":      a.ID,
-			"principal":        int64(amt),
-			"rate_permille":    spec.DailyLoanInterestPermille,
-			"due_tick":         dueTick,
-			"collateral_house": collateral,
-		}, lender)
-		events = append(events, ev)
-	}
+	// Focal actors originate loans only through bilateral character actions.
 
 	return events
 }

@@ -364,11 +364,7 @@ func Options(p sim.Perception) []Option {
 				Kind: "transfer_house", TargetID: b.ID, HouseID: p.CurrentHouse.ID,
 			})
 		}
-		if !p.HasActiveLoan && a.Money < 10 && b.Level >= 1 && (sim.ActorHasTag(b.Tags, "trader") || b.Level >= 2) {
-			add(fmt.Sprintf("Borrow working-capital loan from %s", b.Name), sim.Action{
-				Kind: "borrow_loan", TargetID: b.ID, Quantity: 10,
-			})
-		}
+
 		if !p.Married && eligibleSpouse[b.ID] {
 			add(fmt.Sprintf("Propose marriage alliance to %s", b.Name), sim.Action{
 				Kind: "marry", TargetID: b.ID,
@@ -410,6 +406,29 @@ func Options(p sim.Perception) []Option {
 			}
 		}
 		add(fmt.Sprintf("Reject offer %d (%d %s)", o.ID, o.Quantity, o.Item), sim.Action{Kind: "reject", TargetID: o.Seller, OfferID: o.ID})
+	}
+	for _, action := range sim.ContinuityActions(p) {
+		add(fmt.Sprintf("%s: target=%s recipe=%s item=%s quantity=%d price=%d agreement=%d", action.Kind, action.TargetID, action.RecipeID, action.Item, action.Quantity, action.Price, action.AgreementID), action)
+	}
+	pendingBorrow := false
+	for _, request := range p.LoanRequests {
+		if request.BorrowerID == a.ID {
+			pendingBorrow = true
+			add("Cancel pending loan request to "+request.LenderID, sim.Action{Kind: "cancel_loan", TargetID: request.LenderID})
+		}
+		if request.LenderID == a.ID {
+			for _, nb := range p.Nearby {
+				if nb.ID == request.BorrowerID && !nb.Jailed {
+					add(fmt.Sprintf("Accept loan request from %s: %d coins, interest %d per mille/day, term %d ticks, collateral %s", nb.Name, request.Principal, request.RatePermille, request.TermTicks, request.CollateralHouse), sim.Action{Kind: "accept_loan", TargetID: nb.ID})
+					add("Reject loan request from "+nb.Name, sim.Action{Kind: "reject_loan", TargetID: nb.ID})
+				}
+			}
+		}
+	}
+	if !p.HasActiveLoan && !pendingBorrow && a.Money < 10 {
+		for _, quote := range p.LoanQuotes {
+			add(fmt.Sprintf("Request %d coins from %s: interest %d per mille/day, term %d ticks, collateral %s", quote.Principal, quote.LenderID, quote.RatePermille, quote.TermTicks, quote.CollateralHouse), sim.Action{Kind: "borrow_loan", TargetID: quote.LenderID})
+		}
 	}
 	return options
 }
@@ -509,6 +528,7 @@ func (RuleSelector) Select(ctx context.Context, p sim.Perception, options []Opti
 			a.ProfessionID == desired.ProfessionID &&
 			a.RecipeID == desired.RecipeID &&
 			a.OfferID == desired.OfferID &&
+			a.AgreementID == desired.AgreementID &&
 			(desired.Item == "" || a.Item == desired.Item) &&
 			(a.TargetID == desired.TargetID || a.OfferID != 0) {
 			return o.ID, nil
@@ -522,7 +542,7 @@ func (RuleSelector) Select(ctx context.Context, p sim.Perception, options []Opti
 	return "", fmt.Errorf("no matching offline choice")
 }
 
-// PrimaryTopicItem determines which item a speaker's recent memories or role focus on for stance calculation.
+// PrimaryTopicItem determines which item a speaker's recent memories or role focus on for contextual expression.
 func PrimaryTopicItem(cat sim.Catalog, self sim.Actor, listener sim.Neighbor) string {
 	for i := len(self.Memories) - 1; i >= 0; i-- {
 		m := self.Memories[i]
@@ -541,78 +561,6 @@ func PrimaryTopicItem(cat sim.Catalog, self sim.Actor, listener sim.Neighbor) st
 	return "food"
 }
 
-// CommunicationStance computes candid, conservative, or exaggerate purely from generic catalog
-// supply/demand/authority/trust profiles of both speaker and listener—with zero hardcoded profession names.
-func CommunicationStance(cat sim.Catalog, self sim.Actor, listener sim.Neighbor, item string) (stance string, reason string) {
-	if item == "" {
-		item = PrimaryTopicItem(cat, self, listener)
-	}
-	spec, ok := cat.Items[item]
-	surplus := spec.SurplusThreshold
-	shortage := spec.ShortageThreshold
-	if !ok || surplus <= 0 {
-		surplus = 6
-	}
-	if !ok || shortage <= 0 {
-		shortage = 2
-	}
-
-	selfIdentity := self.IdentityTags()
-	trust := self.Trust[listener.ID]
-	if cat.HasCoercivePower(listener.Tags) && !cat.HasCoercivePower(selfIdentity) {
-		return "conservative", "listener holds armed authority; understate output and stock to avoid exposing wealth"
-	}
-	if cat.HasPublicTrustDuty(selfIdentity) || cat.HasPublicTrustDuty(listener.Tags) {
-		if trust < 0 {
-			return "conservative", "distrusted counterpart in a public-trust interaction; keep claims cautious and understated"
-		}
-		return "candid", "community care role relies on mutual trust; state quantities plainly without exaggeration"
-	}
-
-	speakerProduces := cat.TagsProduce(selfIdentity, item)
-	listenerProduces := cat.TagsProduce(listener.Tags, item)
-
-	if speakerProduces && listenerProduces {
-		if trust < 0 {
-			return "conservative", fmt.Sprintf("rival %s producer with negative trust; guard yield details", item)
-		}
-		return "candid", fmt.Sprintf("fellow %s producers familiar with real yields; report candidly", item)
-	}
-	if speakerProduces && !listenerProduces {
-		if self.Items[item] >= surplus {
-			return "exaggerate", fmt.Sprintf("%s producer with ample surplus (%d) speaking to a potential buyer; amplify output to attract trade", item, self.Items[item])
-		}
-		return "conservative", fmt.Sprintf("%s producer with limited stock (%d) speaking to a buyer; understate yield to protect asking price", item, self.Items[item])
-	}
-	if !speakerProduces && listenerProduces {
-		return "exaggerate", fmt.Sprintf("non-producer speaking to a %s producer; exaggerate supply rumors to discourage high asking prices", item)
-	}
-	if trust > 0 {
-		return "candid", "trusted trade partner; share accurate supply information"
-	}
-	if self.Items[item] <= shortage {
-		return "conservative", fmt.Sprintf("%s-short villager speaking to a competing buyer; downplay supply news so rivals do not buy first", item)
-	}
-	return "exaggerate", fmt.Sprintf("stocked villager speaking to a market peer; amplify %s supply rumors to stir trade", item)
-}
-
-func adjustClaimQuantity(q int, stance string) int {
-	switch stance {
-	case "conservative":
-		if q <= 1 {
-			return 1
-		}
-		return q / 2
-	case "exaggerate":
-		if q <= 0 {
-			return 2
-		}
-		return q * 2
-	default:
-		return q
-	}
-}
-
 func findNeighbor(nearby []sim.Neighbor, id string) (sim.Neighbor, bool) {
 	for _, b := range nearby {
 		if b.ID == id {
@@ -622,21 +570,21 @@ func findNeighbor(nearby []sim.Neighbor, id string) (sim.Neighbor, bool) {
 	return sim.Neighbor{ID: id}, false
 }
 
+// TemplateContent is a deterministic offline fixture, not a simulation of character expression.
+// It preserves witnessed/reported quantities; the content model chooses how a character speaks.
 type TemplateContent struct{}
 
 func (TemplateContent) Generate(_ context.Context, p sim.Perception, a sim.Action) (Content, error) {
 	if a.Kind != "speak" {
 		return Content{}, nil
 	}
-	listener, _ := findNeighbor(p.Nearby, a.TargetID)
 	for i := len(p.Self.Memories) - 1; i >= 0; i-- {
 		m := p.Self.Memories[i]
 		if p.Tick-m.Tick > sim.TicksPerDay {
 			continue
 		}
 		if m.Observation != nil && m.Observation.Kind == "item_produced" {
-			stance, _ := CommunicationStance(p.Catalog, p.Self, listener, m.Observation.Item)
-			q := adjustClaimQuantity(m.Observation.Quantity, stance)
+			q := m.Observation.Quantity
 			return Content{
 				Text:         fmt.Sprintf("I produced %d %s at %s.", q, m.Observation.Item, m.Observation.Location),
 				BasisEventID: m.EventID,
@@ -644,14 +592,7 @@ func (TemplateContent) Generate(_ context.Context, p sim.Perception, a sim.Actio
 			}, nil
 		}
 		if m.Kind == "speech" && m.Source != p.Self.ID && m.Source != a.TargetID && m.Statement != nil {
-			item := m.Statement.Item
-			if item == "" {
-				item = "food"
-			}
-			stance, _ := CommunicationStance(p.Catalog, p.Self, listener, item)
 			v := *m.Statement
-			v.Item = item
-			v.Quantity = adjustClaimQuantity(v.Quantity, stance)
 			return Content{
 				Text:         fmt.Sprintf("%s said %d %s was produced at %s.", m.Source, v.Quantity, v.Item, v.Location),
 				BasisEventID: m.EventID,
