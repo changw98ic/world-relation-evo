@@ -117,6 +117,7 @@ func (w *World) TotalJailed() int {
 
 type placeKey struct {
 	location    string
+	venueID     string
 	insideHouse string
 }
 
@@ -125,7 +126,9 @@ type stepIndex struct {
 	calendar          CalendarState
 	mapSnapshot       WorldMap
 	catalogSnapshot   Catalog
+	politiesSnapshot  *PolityNetwork
 	districtByID      map[string]District
+	venueByID         map[string]Venue
 	districtStates    map[string]DistrictState
 	roadsByDistrict   map[string][]RoadView
 	houseByID         map[string]House
@@ -143,7 +146,9 @@ func (w *World) buildStepIndex() *stepIndex {
 		calendar:          CalendarAt(w.Tick, w.Catalog.Calendar),
 		mapSnapshot:       CloneMap(w.Map),
 		catalogSnapshot:   CloneCatalog(w.Catalog),
+		politiesSnapshot:  ClonePolityNetwork(w.Polities),
 		districtByID:      make(map[string]District, len(w.Map.Districts)),
+		venueByID:         make(map[string]Venue, len(w.Map.Venues)),
 		roadsByDistrict:   make(map[string][]RoadView, len(w.Map.Districts)),
 		houseByID:         make(map[string]House, len(w.Houses)),
 		accessibleByActor: make(map[string][]House, len(w.Actors)),
@@ -180,6 +185,13 @@ func (w *World) buildStepIndex() *stepIndex {
 			}
 			idx.roadsByDistrict[d.ID] = views
 		}
+	}
+	for _, v := range w.Map.Venues {
+		vc := v
+		if v.Features != nil {
+			vc.Features = append([]string(nil), v.Features...)
+		}
+		idx.venueByID[v.ID] = vc
 	}
 
 	for _, h := range w.Houses {
@@ -231,7 +243,11 @@ func (w *World) buildStepIndex() *stepIndex {
 			Jailed:   a.JailedUntil > w.Tick,
 		}
 		if !a.InTransit() {
-			pk := placeKey{location: a.Location, insideHouse: a.InsideHouse}
+			venueBucket := ""
+			if a.InsideHouse == "" {
+				venueBucket = a.VenueID
+			}
+			pk := placeKey{location: a.Location, venueID: venueBucket, insideHouse: a.InsideHouse}
 			idx.placeBuckets[pk] = append(idx.placeBuckets[pk], i)
 		}
 	}
@@ -300,6 +316,16 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 			p.CurrentHouse = &hc
 		}
 	}
+	if a.VenueID != "" {
+		if v, ok := idx.venueByID[a.VenueID]; ok {
+			vc := v
+			if v.Features != nil {
+				vc.Features = append([]string(nil), v.Features...)
+			}
+			p.CurrentVenue = &vc
+		}
+	}
+	p.Polity = buildPolityPerceptionView(p.Map, idx.politiesSnapshot, a)
 	if houses := idx.accessibleByActor[id]; len(houses) > 0 {
 		p.AccessibleHouses = make([]House, len(houses))
 		for i, h := range houses {
@@ -327,10 +353,15 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 				p.Roads[i] = rv
 			}
 		}
+		p.VenueRoutes = buildVenueRouteViews(p.Map, p.Catalog, idx.districtStates, a)
 	}
 
 	if !a.InTransit() {
-		bucket := idx.placeBuckets[placeKey{location: a.Location, insideHouse: a.InsideHouse}]
+		venueBucket := ""
+		if a.InsideHouse == "" {
+			venueBucket = a.VenueID
+		}
+		bucket := idx.placeBuckets[placeKey{location: a.Location, venueID: venueBucket, insideHouse: a.InsideHouse}]
 		if len(bucket) > 1 {
 			if len(bucket)-1 <= MaxNearbyView {
 				p.Nearby = make([]Neighbor, 0, len(bucket)-1)

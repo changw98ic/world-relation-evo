@@ -200,6 +200,9 @@ func (rulesPolicy) Decide(_ context.Context, p sim.Perception) (sim.Action, erro
 				return pi && !pj
 			})
 			for _, itemID := range offerOrder {
+				if p.Polity != nil && sim.ActorHasTag(p.Polity.EmbargoItems, itemID) {
+					continue
+				}
 				spec := p.Catalog.Items[itemID]
 				availQty := availableItemAfterAgreements(p, itemID)
 				if !spec.Tradeable || spec.BatchQty <= 0 || availQty < spec.OfferThreshold {
@@ -915,6 +918,19 @@ func informationAction(p sim.Perception) (sim.Action, bool) {
 					Quantity: m.Observation.Quantity,
 				}
 				text = fmt.Sprintf("I produced %d %s at %s.", claim.Quantity, claim.Item, claim.Location)
+			case "macro_anomaly":
+				mod := m.Observation.Modality
+				if mod == "" {
+					mod = "eyewitness"
+				}
+				claim = sim.Statement{
+					Topic:     "macro_anomaly",
+					SubjectID: m.Observation.SubjectID,
+					Item:      m.Observation.Item,
+					Location:  m.Observation.Location,
+					Quantity:  m.Observation.Quantity,
+				}
+				text = fmt.Sprintf("I observed %s (%s) at %s (intensity %d).", claim.SubjectID, mod, claim.Location, claim.Quantity)
 			case "corruption":
 				if m.Observation.SubjectID == "" || m.Observation.SubjectID == a.ID || a.IllicitGain > 0 {
 					continue
@@ -944,7 +960,7 @@ func informationAction(p sim.Perception) (sim.Action, bool) {
 			default:
 				continue
 			}
-		} else if m.Kind == "speech" && m.Source != a.ID && m.Statement != nil {
+		} else if (m.Kind == "speech" || m.Kind == "channel_message") && m.Source != a.ID && m.Statement != nil {
 			claim = *m.Statement
 			if claim.Item == "" && (claim.Topic == "item_produced" || claim.Topic == "supply") {
 				claim.Item = "food"

@@ -4,6 +4,8 @@ package sim
 type District struct {
 	ID                 string           `json:"id"`
 	Name               string           `json:"name"`
+	GeoRegionID        string           `json:"geo_region_id,omitempty"`
+	PolityID           string           `json:"polity_id,omitempty"`
 	Terrain            string           `json:"terrain,omitempty"`
 	Features           []string         `json:"features,omitempty"`
 	ResourceCapacities map[string]int64 `json:"resource_capacities,omitempty"`
@@ -23,10 +25,14 @@ type Road struct {
 	CarrierTag         string `json:"carrier_tag,omitempty"`
 }
 
-// WorldMap defines all connected village districts and road segments.
+// WorldMap defines all connected village districts, roads, natural geography regions/flows, and sub-district venues.
 type WorldMap struct {
-	Districts []District `json:"districts"`
-	Roads     []Road     `json:"roads"`
+	Districts   []District    `json:"districts"`
+	Roads       []Road        `json:"roads"`
+	GeoRegions  []GeoRegion   `json:"geo_regions,omitempty"`
+	GeoFlows    []GeoFlowEdge `json:"geo_flows,omitempty"`
+	Venues      []Venue       `json:"venues,omitempty"`
+	VenueRoutes []VenueRoute  `json:"venue_routes,omitempty"`
 }
 
 func DefaultMap() WorldMap {
@@ -212,6 +218,38 @@ func CloneMap(m WorldMap) WorldMap {
 			}
 		}
 		out.Districts[i] = dc
+	}
+	if m.GeoRegions != nil {
+		out.GeoRegions = make([]GeoRegion, len(m.GeoRegions))
+		for i, r := range m.GeoRegions {
+			rc := r
+			if r.Resources != nil {
+				rc.Resources = make(map[string]int64, len(r.Resources))
+				for k, v := range r.Resources {
+					rc.Resources[k] = v
+				}
+			}
+			if r.AmbientFields != nil {
+				rc.AmbientFields = cloneIntMap(r.AmbientFields)
+			}
+			out.GeoRegions[i] = rc
+		}
+	}
+	if m.GeoFlows != nil {
+		out.GeoFlows = append([]GeoFlowEdge(nil), m.GeoFlows...)
+	}
+	if m.Venues != nil {
+		out.Venues = make([]Venue, len(m.Venues))
+		for i, v := range m.Venues {
+			vc := v
+			if v.Features != nil {
+				vc.Features = append([]string(nil), v.Features...)
+			}
+			out.Venues[i] = vc
+		}
+	}
+	if m.VenueRoutes != nil {
+		out.VenueRoutes = append([]VenueRoute(nil), m.VenueRoutes...)
 	}
 	return out
 }

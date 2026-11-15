@@ -179,12 +179,15 @@ type Catalog struct {
 	Diseases               []DiseaseSpec                 `json:"diseases,omitempty"`
 	Lifecycle              LifecycleSpec                 `json:"lifecycle"`
 	Governance             GovernanceSpec                `json:"governance,omitempty"`
+	LocomotionModes        map[string]LocomotionSpec     `json:"locomotion_modes,omitempty"`
+	SensoryModes           map[string]SensorySpec        `json:"sensory_modes,omitempty"`
+	CommChannels           map[string]CommChannelSpec    `json:"comm_channels,omitempty"`
 }
 
 func DefaultCatalog() Catalog {
 	return Catalog{
 		TagActions: map[string][]string{
-			"resident": {"start_plan", "abandon_plan", "wait", "move", "enter_house", "leave_house", "sleep", "eat", "drink", "relieve", "medicate", "speak", "repair_house", "transfer_house", "upgrade_house", "maintain_infra", "join_faction", "join_profession", "marry", "swear_bond", "mediate_feud"},
+			"resident": {"start_plan", "abandon_plan", "wait", "move", "move_venue", "enter_house", "leave_house", "sleep", "eat", "drink", "relieve", "medicate", "speak", "repair_house", "transfer_house", "upgrade_house", "maintain_infra", "join_faction", "join_profession", "marry", "swear_bond", "mediate_feud"},
 			"trader":   {"propose_agreement", "accept_agreement", "reject_agreement", "fulfill_agreement", "accept_loan", "reject_loan", "cancel_loan", "offer", "accept", "reject", "borrow_loan", "repay_loan", "foreclose_collateral"},
 			"fighter":  {"attack", "avenge_feud", "claim_turf"},
 			"healer":   {"heal"},
@@ -196,6 +199,7 @@ func DefaultCatalog() Catalog {
 			"law":      {"arrest", "hunt_threat", "audit_corruption", "claim_turf", "frame_suspect"},
 			"censor":   {"audit_corruption", "file_appeal"},
 			"ritual":   {"perform_ritual"},
+			"ruler":    {"issue_decree"},
 		},
 		LevelThresholds:        []int{0, 8, 20, 40, 70, 110},
 		FactionLevelThresholds: []int{0, 30, 90, 200, 360},
@@ -859,6 +863,27 @@ func (c Catalog) Capabilities(a Actor) map[string]bool {
 			}
 		}
 	}
+	if result["move"] {
+		result["move_venue"] = true
+	}
+	for _, execTag := range []string{"ruler", "governor", "magistrate", "sect_master", "commander", "polity_leader"} {
+		if ActorHasTag(idTags, execTag) {
+			result["issue_decree"] = true
+			break
+		}
+	}
+	for _, ch := range c.CommChannels {
+		if len(ch.GrantedByTags) == 0 {
+			result["transmit_message"] = true
+			break
+		}
+		for _, gt := range ch.GrantedByTags {
+			if ActorHasTag(idTags, gt) {
+				result["transmit_message"] = true
+				break
+			}
+		}
+	}
 	return result
 }
 
@@ -1163,6 +1188,42 @@ func CloneCatalog(c Catalog) Catalog {
 	}
 	if c.Diseases != nil {
 		out.Diseases = append([]DiseaseSpec(nil), c.Diseases...)
+	}
+	if c.LocomotionModes != nil {
+		out.LocomotionModes = make(map[string]LocomotionSpec, len(c.LocomotionModes))
+		for k, lm := range c.LocomotionModes {
+			lc := lm
+			if lm.GrantedByTags != nil {
+				lc.GrantedByTags = append([]string(nil), lm.GrantedByTags...)
+			}
+			if lm.AllowedMediums != nil {
+				lc.AllowedMediums = append([]string(nil), lm.AllowedMediums...)
+			}
+			out.LocomotionModes[k] = lc
+		}
+	}
+	if c.SensoryModes != nil {
+		out.SensoryModes = make(map[string]SensorySpec, len(c.SensoryModes))
+		for k, sm := range c.SensoryModes {
+			sc := sm
+			if sm.GrantedByTags != nil {
+				sc.GrantedByTags = append([]string(nil), sm.GrantedByTags...)
+			}
+			out.SensoryModes[k] = sc
+		}
+	}
+	if c.CommChannels != nil {
+		out.CommChannels = make(map[string]CommChannelSpec, len(c.CommChannels))
+		for k, cc := range c.CommChannels {
+			cp := cc
+			if cc.GrantedByTags != nil {
+				cp.GrantedByTags = append([]string(nil), cc.GrantedByTags...)
+			}
+			if cc.ReceiverTags != nil {
+				cp.ReceiverTags = append([]string(nil), cc.ReceiverTags...)
+			}
+			out.CommChannels[k] = cp
+		}
 	}
 	return out
 }

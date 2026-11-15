@@ -54,14 +54,20 @@ func (p Pipeline) Decide(ctx context.Context, view sim.Perception) (sim.Action, 
 	if selected == nil {
 		return sim.Action{}, fmt.Errorf("selector returned unavailable option %q", id)
 	}
-	if selected.Kind != "speak" {
+	if selected.Kind != "speak" && selected.Kind != "transmit_message" && selected.Kind != "issue_decree" {
 		return *selected, nil
 	}
 	content, err := p.Generator.Generate(ctx, view, *selected)
 	if err != nil {
 		return sim.Action{}, err
 	}
-	// Content cannot replace the selected behavior, target, route, house, profession, guild, recipe, or trade terms.
+	// Content cannot replace the selected behavior, target, route, house, profession, guild, recipe, decree parameters, or trade terms.
+	if selected.Kind == "issue_decree" {
+		if content.Text != "" {
+			selected.Text = content.Text
+		}
+		return *selected, nil
+	}
 	selected.Text = content.Text
 	selected.Statement = content.Statement
 	selected.BasisEventID = content.BasisEventID
@@ -144,7 +150,7 @@ func Options(p sim.Perception) []Option {
 			}
 		}
 		for _, h := range p.AccessibleHouses {
-			if h.District == a.Location {
+			if h.District == a.Location && (h.VenueID == "" || a.VenueID == "" || h.VenueID == a.VenueID) {
 				add(fmt.Sprintf("Enter %s (level %d, comfort %d, condition %d/100)", h.Name, h.Level, h.Comfort, h.Condition), sim.Action{Kind: "enter_house", HouseID: h.ID})
 			}
 		}
@@ -158,6 +164,56 @@ func Options(p sim.Perception) []Option {
 			}
 			label += ")"
 			add(label, sim.Action{Kind: "move", Location: r.To})
+		}
+		for _, vr := range p.VenueRoutes {
+			if a.Energy < vr.EnergyCost {
+				continue
+			}
+			modeLabel := vr.ModeID
+			if modeLabel == "" {
+				modeLabel = "walk"
+			}
+			label := fmt.Sprintf("Travel (%s) to venue %s (%dm, -%d energy", modeLabel, vr.ToVenue, vr.Ticks*15, vr.EnergyCost)
+			if len(vr.LeadsToward) > 0 {
+				label += "; leads toward " + strings.Join(vr.LeadsToward, ", ")
+			}
+			label += ")"
+			add(label, sim.Action{Kind: "move_venue", Location: vr.ToVenue, Channel: vr.ModeID})
+		}
+		if p.Polity != nil && p.Polity.LedPolityID != "" && a.Energy >= 4 &&
+			(p.Polity.LedPolitySeatVenue == "" || a.VenueID == "" || a.VenueID == p.Polity.LedPolitySeatVenue) {
+			pid := p.Polity.LedPolityID
+			pname := p.Polity.LedPolityName
+			if p.Polity.LedPolityMarketTax != 50 {
+				add(fmt.Sprintf("Promulgate 5%% market tax decree in %s (-4 energy)", pname),
+					sim.Action{Kind: "issue_decree", FactionID: pid, Item: "market_tax", Quantity: 50})
+			}
+			if p.Polity.LedPolityMarketTax > 0 {
+				add(fmt.Sprintf("Abolish market tax decree in %s (-4 energy)", pname),
+					sim.Action{Kind: "issue_decree", FactionID: pid, Item: "market_tax", Quantity: -1})
+			}
+			if !p.Polity.LedPolityCurfew {
+				add(fmt.Sprintf("Enact night curfew decree across %s (-4 energy)", pname),
+					sim.Action{Kind: "issue_decree", FactionID: pid, Item: "curfew_on", Quantity: 1})
+			} else {
+				add(fmt.Sprintf("Lift night curfew decree across %s (-4 energy)", pname),
+					sim.Action{Kind: "issue_decree", FactionID: pid, Item: "curfew_off", Quantity: 0})
+			}
+			if p.Polity.LedPolityTreasury >= 10 {
+				grant := 20
+				if int64(grant) > p.Polity.LedPolityTreasury {
+					grant = int(p.Polity.LedPolityTreasury)
+				}
+				add(fmt.Sprintf("Promulgate treasury disaster/livelihood relief grant (%d coins) in %s (-4 energy)", grant, pname),
+					sim.Action{Kind: "issue_decree", FactionID: pid, Item: "relief_grant", Quantity: grant})
+			}
+			for _, id := range sortedItemIDs(p.Catalog.Items) {
+				spec := p.Catalog.Items[id]
+				if spec.Tradeable && (spec.CombatBonus > 0 || spec.Tier >= 4) {
+					add(fmt.Sprintf("Promulgate contraband embargo on %s across %s (-4 energy)", id, pname),
+						sim.Action{Kind: "issue_decree", FactionID: pid, Item: "embargo:" + id, Quantity: 1})
+				}
+			}
 		}
 	}
 
@@ -281,8 +337,17 @@ func Options(p sim.Perception) []Option {
 		}
 	}
 
+	embargoed := map[string]bool{}
+	if p.Polity != nil {
+		for _, emb := range p.Polity.EmbargoItems {
+			embargoed[emb] = true
+		}
+	}
 	var surplusItems []sim.ItemSpec
 	for _, itemID := range itemKeys {
+		if embargoed[itemID] {
+			continue
+		}
 		spec := p.Catalog.Items[itemID]
 		if spec.Tradeable && spec.BatchQty > 0 && a.Items[itemID] >= spec.OfferThreshold {
 			surplusItems = append(surplusItems, spec)
@@ -434,6 +499,60 @@ func Options(p sim.Perception) []Option {
 			add(fmt.Sprintf("Request %d coins from %s: interest %d per mille/day, term %d ticks, collateral %s", quote.Principal, quote.LenderID, quote.RatePermille, quote.TermTicks, quote.CollateralHouse), sim.Action{Kind: "borrow_loan", TargetID: quote.LenderID})
 		}
 	}
+	if len(p.Catalog.CommChannels) > 0 {
+		chKeys := make([]string, 0, len(p.Catalog.CommChannels))
+		for k := range p.Catalog.CommChannels {
+			chKeys = append(chKeys, k)
+		}
+		sort.Strings(chKeys)
+		tags := a.IdentityTags()
+		for _, chID := range chKeys {
+			ch := p.Catalog.CommChannels[chID]
+			if a.Energy < ch.EnergyCost {
+				continue
+			}
+			if len(ch.GrantedByTags) > 0 {
+				granted := false
+				for _, gt := range ch.GrantedByTags {
+					if sim.ActorHasTag(tags, gt) {
+						granted = true
+						break
+					}
+				}
+				if !granted {
+					continue
+				}
+			}
+			if ch.Broadcast {
+				add(fmt.Sprintf("Broadcast message over %s (range %dkm, -%d energy)", ch.Name, ch.RangeKm, ch.EnergyCost),
+					sim.Action{Kind: "transmit_message", Channel: ch.ID})
+			} else {
+				peerSet := map[string]bool{}
+				for peerID := range a.Trust {
+					if peerID != "" && peerID != a.ID {
+						peerSet[peerID] = true
+					}
+				}
+				for _, m := range a.Memories {
+					if m.Source != "" && m.Source != "world" && m.Source != a.ID {
+						peerSet[m.Source] = true
+					}
+					if m.TargetID != "" && m.TargetID != a.ID {
+						peerSet[m.TargetID] = true
+					}
+				}
+				peers := make([]string, 0, len(peerSet))
+				for pid := range peerSet {
+					peers = append(peers, pid)
+				}
+				sort.Strings(peers)
+				for _, pid := range peers {
+					add(fmt.Sprintf("Transmit message to %s via %s (-%d energy)", pid, ch.Name, ch.EnergyCost),
+						sim.Action{Kind: "transmit_message", Channel: ch.ID, TargetID: pid})
+				}
+			}
+		}
+	}
 	return options
 }
 
@@ -526,6 +645,7 @@ func (RuleSelector) Select(ctx context.Context, p sim.Perception, options []Opti
 	for _, o := range options {
 		a := o.Action
 		if a.Kind == desired.Kind &&
+			(desired.Channel == "" || a.Channel == desired.Channel) &&
 			a.Location == desired.Location &&
 			a.HouseID == desired.HouseID &&
 			a.FactionID == desired.FactionID &&
@@ -579,16 +699,27 @@ func findNeighbor(nearby []sim.Neighbor, id string) (sim.Neighbor, bool) {
 type TemplateContent struct{}
 
 func (TemplateContent) Generate(_ context.Context, p sim.Perception, a sim.Action) (Content, error) {
-	if a.Kind != "speak" {
+	if a.Kind == "issue_decree" {
+		polName := a.FactionID
+		if p.Polity != nil && p.Polity.LedPolityName != "" {
+			polName = p.Polity.LedPolityName
+		}
+		return Content{
+			Text: fmt.Sprintf("Proclamation of %s by %s: enact %s (%d).", polName, p.Self.Name, a.Item, a.Quantity),
+		}, nil
+	}
+	if a.Kind != "speak" && a.Kind != "transmit_message" {
 		return Content{}, nil
 	}
 	alreadyToldTarget := func(rootID int64) bool {
-		if rootID == 0 || a.TargetID == "" {
+		if rootID == 0 {
 			return false
 		}
 		for _, past := range p.Self.Memories {
-			if past.Kind == "speech" && past.Source == p.Self.ID && past.TargetID == a.TargetID && past.RootEventID == rootID {
-				return true
+			if (past.Kind == "speech" || past.Kind == "channel_message") && past.Source == p.Self.ID && past.RootEventID == rootID {
+				if a.TargetID == "" || past.TargetID == a.TargetID {
+					return true
+				}
 			}
 		}
 		return false
@@ -606,6 +737,22 @@ func (TemplateContent) Generate(_ context.Context, p sim.Perception, a sim.Actio
 					Text:         fmt.Sprintf("I produced %d %s at %s.", q, m.Observation.Item, m.Observation.Location),
 					BasisEventID: m.EventID,
 					Statement:    &sim.Statement{Topic: "item_produced", Item: m.Observation.Item, Location: m.Observation.Location, Quantity: q},
+				}, nil
+			case "macro_anomaly":
+				mod := m.Observation.Modality
+				if mod == "" {
+					mod = "eyewitness"
+				}
+				return Content{
+					Text:         fmt.Sprintf("I observed %s (%s) at %s (intensity %d).", m.Observation.SubjectID, mod, m.Observation.Location, m.Observation.Quantity),
+					BasisEventID: m.EventID,
+					Statement: &sim.Statement{
+						Topic:     "macro_anomaly",
+						SubjectID: m.Observation.SubjectID,
+						Item:      m.Observation.Item,
+						Location:  m.Observation.Location,
+						Quantity:  m.Observation.Quantity,
+					},
 				}, nil
 			case "corruption":
 				if m.Observation.SubjectID == "" || m.Observation.SubjectID == p.Self.ID || m.Observation.SubjectID == a.TargetID || p.Self.IllicitGain > 0 {
@@ -641,12 +788,18 @@ func (TemplateContent) Generate(_ context.Context, p sim.Perception, a sim.Actio
 				}, nil
 			}
 		}
-		if m.Kind == "speech" && m.Source != p.Self.ID && m.Source != a.TargetID && m.Statement != nil {
+		if (m.Kind == "speech" || m.Kind == "channel_message") && m.Source != p.Self.ID && m.Source != a.TargetID && m.Statement != nil {
 			v := *m.Statement
 			if v.SubjectID != "" && v.SubjectID == a.TargetID {
 				continue
 			}
 			switch v.Topic {
+			case "macro_anomaly":
+				return Content{
+					Text:         fmt.Sprintf("%s reported anomaly %s at %s (intensity %d).", m.Source, v.SubjectID, v.Location, v.Quantity),
+					BasisEventID: m.EventID,
+					Statement:    &v,
+				}, nil
 			case "corruption":
 				return Content{
 					Text:         fmt.Sprintf("%s said %s took illicit bribes (%d coins) at %s.", m.Source, v.SubjectID, v.Quantity, v.Location),

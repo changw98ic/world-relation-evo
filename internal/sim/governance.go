@@ -158,9 +158,14 @@ func (w *World) debitTreasury(amount int64, category string) int64 {
 	return paid
 }
 
-// TotalCoins returns the exact total coin supply across living Actors, PopulationCohorts, and PublicTreasury.
+// TotalCoins returns the exact total coin supply across living Actors, PopulationCohorts, PublicTreasury, and PolityNode treasuries.
 func (w *World) TotalCoins() int64 {
 	total := w.PublicTreasury
+	if w.Polities != nil {
+		for i := range w.Polities.Nodes {
+			total += w.Polities.Nodes[i].Treasury
+		}
+	}
 	for i := range w.Actors {
 		if !w.Actors[i].Dead {
 			total += int64(w.Actors[i].Money)
@@ -315,7 +320,11 @@ func (w *World) stepCohortDailyTaxation() []Event {
 		if taxable <= 0 {
 			continue
 		}
-		assessed := (taxable * int64(gov.DailyPollTaxPermille)) / 1000
+		pollPermille, targetPolity := w.EffectivePollTaxPermille(c.District, gov.DailyPollTaxPermille)
+		if pollPermille <= 0 {
+			continue
+		}
+		assessed := (taxable * int64(pollPermille)) / 1000
 		if w.JusticeRevolt != nil && w.JusticeRevolt.IsDistrictTaxStriking(c.District, w.Tick) {
 			assessed /= 4
 		}
@@ -351,13 +360,50 @@ func (w *World) stepCohortDailyTaxation() []Event {
 		}
 
 		c.MoneyPool -= totalDue
-		netT, skimmed := w.collectTaxWithSkim(c.District, assessed)
+		var netT, skimmed int64
+		if targetPolity != nil {
+			targetPolity.Ledger.TaxAssessedGross += assessed
+			if collector != nil {
+				corr := 15
+				if w.DistrictStates != nil {
+					if ds, ok := w.DistrictStates[c.District]; ok {
+						corr = ds.Corruption
+					}
+				}
+				skimPermille := gov.TaxSkimBasePermille + corr*2
+				if skimPermille > 280 {
+					skimPermille = 280
+				}
+				skimmed = (assessed * int64(skimPermille)) / 1000
+				if skimmed > 0 {
+					collector.MoneyPool += skimmed
+					collector.IllicitWealth += skimmed
+					targetPolity.Ledger.TaxSkimmed += skimmed
+				}
+			}
+			netT = assessed - skimmed
+			if netT > 0 {
+				targetPolity.Treasury += netT
+				targetPolity.Ledger.TaxToTreasury += netT
+			}
+		} else {
+			netT, skimmed = w.collectTaxWithSkim(c.District, assessed)
+		}
 		if surcharge > 0 && collector != nil {
 			collector.MoneyPool += surcharge
 			collector.IllicitWealth += surcharge
-			w.TreasuryLedger.TaxSurcharge += surcharge
+			if targetPolity != nil {
+				targetPolity.Ledger.TaxSurcharge += surcharge
+			} else {
+				w.TreasuryLedger.TaxSurcharge += surcharge
+			}
 		} else if surcharge > 0 {
-			w.creditTreasury(surcharge, "tax")
+			if targetPolity != nil {
+				targetPolity.Treasury += surcharge
+				targetPolity.Ledger.TaxToTreasury += surcharge
+			} else {
+				w.creditTreasury(surcharge, "tax")
+			}
 			netT += surcharge
 		}
 		totalAssessed += assessed

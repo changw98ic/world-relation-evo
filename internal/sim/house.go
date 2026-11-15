@@ -44,16 +44,18 @@ func ClockAt(tick int64) Clock {
 	}
 }
 
-// House is an independent property asset anchored at a village district.
+// House is an independent property asset anchored at a village district (and optional sub-district Venue).
 type House struct {
 	ID         string   `json:"id"`
 	Name       string   `json:"name"`
 	District   string   `json:"district"`
+	VenueID    string   `json:"venue_id,omitempty"`
 	OwnerID    string   `json:"owner_id,omitempty"`
 	Residents  []string `json:"residents,omitempty"`
 	Level      int      `json:"level"`
 	Comfort    int      `json:"comfort"`
 	Condition  int      `json:"condition"`
+	Shielding  int      `json:"shielding,omitempty"`
 	Facilities []string `json:"facilities,omitempty"`
 }
 

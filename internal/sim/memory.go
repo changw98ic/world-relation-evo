@@ -70,16 +70,16 @@ func RecallMemories(a Actor, cues MemoryCues, limit int) []Memory {
 				(m.Statement != nil && (peerSet[m.Statement.SubjectID] || peerSet[m.Statement.ObjectID])) {
 				score += 6
 			}
-			if (m.Observation != nil && (m.Observation.Kind == "corruption" || m.Observation.Kind == "wrongful_conviction")) ||
-				(m.Statement != nil && (m.Statement.Topic == "corruption" || m.Statement.Topic == "wrongful_conviction")) {
+			if (m.Observation != nil && (m.Observation.Kind == "corruption" || m.Observation.Kind == "wrongful_conviction" || m.Observation.Kind == "macro_anomaly")) ||
+				(m.Statement != nil && (m.Statement.Topic == "corruption" || m.Statement.Topic == "wrongful_conviction" || m.Statement.Topic == "macro_anomaly")) {
 				score += 5
 			}
-			content := strings.ToLower(m.Kind + " " + m.Text)
+			content := strings.ToLower(m.Kind + " " + m.Channel + " " + m.Text)
 			if m.Observation != nil {
-				content += " " + strings.ToLower(m.Observation.Kind+" "+m.Observation.Item+" "+m.Observation.Location)
+				content += " " + strings.ToLower(m.Observation.Kind+" "+m.Observation.Modality+" "+m.Observation.SubjectID+" "+m.Observation.Item+" "+m.Observation.Location)
 			}
 			if m.Statement != nil {
-				content += " " + strings.ToLower(m.Statement.Topic+" "+m.Statement.Item+" "+m.Statement.Location)
+				content += " " + strings.ToLower(m.Statement.Topic+" "+m.Statement.SubjectID+" "+m.Statement.Item+" "+m.Statement.Location)
 			}
 			for _, term := range uniqueTerms {
 				if strings.Contains(content, term) {

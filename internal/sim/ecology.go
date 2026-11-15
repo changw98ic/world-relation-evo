@@ -1057,6 +1057,8 @@ func (w *World) stepWorldEnvironment() []Event {
 					},
 				}
 				w.NextID++
+				witnesses := w.distributeAnomalyObservations(ev, dis.ID, "disaster", w.Map.GeoRegionIDForLocation(dID, ""), dID, maxInt(20, dmgScalePct))
+				ev.Payload["witnesses"] = witnesses
 				events = append(events, ev)
 			}
 
@@ -1097,6 +1099,8 @@ func (w *World) stepWorldEnvironment() []Event {
 						},
 					}
 					w.NextID++
+					witnesses := w.distributeAnomalyObservations(ev, enc.ID, enc.Category, w.Map.GeoRegionIDForLocation(dID, ""), dID, maxInt(25, act))
+					ev.Payload["witnesses"] = witnesses
 					events = append(events, ev)
 					act = enc.SurgeThreshold - 10
 				}

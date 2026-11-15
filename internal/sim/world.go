@@ -10,9 +10,10 @@ import (
 	"sync"
 )
 
-// Observation is a first-hand material outcome witnessed by the acting character or co-located observer.
+// Observation is a first-hand material outcome witnessed by the acting character, co-located observer, or bounded sensory scan.
 type Observation struct {
 	Kind      string `json:"kind"`
+	Modality  string `json:"modality,omitempty"`
 	SubjectID string `json:"subject_id,omitempty"`
 	ObjectID  string `json:"object_id,omitempty"`
 	CaseID    int64  `json:"case_id,omitempty"`
@@ -38,6 +39,7 @@ type Memory struct {
 	Observation  *Observation `json:"observation,omitempty"`
 	Statement    *Statement   `json:"statement,omitempty"`
 	Kind         string       `json:"kind"`
+	Channel      string       `json:"channel,omitempty"`
 	Tick         int64        `json:"tick"`
 	EventID      int64        `json:"event_id"`
 	Source       string       `json:"source"`
@@ -82,6 +84,7 @@ type Actor struct {
 	Guilds          []string          `json:"guilds,omitempty"`
 	GuildLevels     map[string]int    `json:"guild_levels,omitempty"`
 	Location        string            `json:"location"`
+	VenueID         string            `json:"venue_id,omitempty"`
 	InsideHouse     string            `json:"inside_house,omitempty"`
 	HomeID          string            `json:"home_id,omitempty"`
 	AgeYears        int               `json:"age_years,omitempty"`
@@ -119,18 +122,25 @@ func (a Actor) IdentityTags() []string {
 }
 
 func (a Actor) InTransit() bool {
-	return a.Task != nil && a.Task.Action.Kind == "move"
+	return a.Task != nil && (a.Task.Action.Kind == "move" || a.Task.Action.Kind == "move_venue")
 }
 
 func SamePlace(a, b Actor) bool {
 	if a.Dead || b.Dead || a.InTransit() || b.InTransit() {
 		return false
 	}
-	return a.Location == b.Location && a.InsideHouse == b.InsideHouse
+	if a.Location != b.Location || a.InsideHouse != b.InsideHouse {
+		return false
+	}
+	if a.InsideHouse == "" && (a.VenueID != "" || b.VenueID != "") {
+		return a.VenueID == b.VenueID
+	}
+	return true
 }
 
 type World struct {
 	Continuity       *ContinuityState         `json:"continuity,omitempty"`
+	Polities         *PolityNetwork           `json:"polities,omitempty"`
 	ID               string                   `json:"id"`
 	Tick             int64                    `json:"tick"`
 	NextID           int64                    `json:"next_id"`
@@ -157,6 +167,7 @@ type Action struct {
 	BasisEventID int64      `json:"basis_event_id,omitempty"`
 	Statement    *Statement `json:"statement,omitempty"`
 	Kind         string     `json:"kind"`
+	Channel      string     `json:"channel,omitempty"`
 	TargetID     string     `json:"target_id,omitempty"`
 	Location     string     `json:"location,omitempty"`
 	HouseID      string     `json:"house_id,omitempty"`
@@ -217,14 +228,17 @@ type Perception struct {
 	Tick                int64          `json:"tick"`
 	Clock               Clock          `json:"clock"`
 	Calendar            CalendarState  `json:"calendar"`
-	Self                Actor          `json:"self"`
-	CurrentDistrict     District       `json:"current_district"`
-	DistrictState       *DistrictState `json:"district_state,omitempty"`
-	CurrentHouse        *House         `json:"current_house,omitempty"`
-	AccessibleHouses    []House        `json:"accessible_houses,omitempty"`
-	Factions            []FactionView  `json:"factions,omitempty"`
-	Roads               []RoadView     `json:"roads,omitempty"`
-	Nearby              []Neighbor     `json:"nearby,omitempty"`
+	Self                Actor                 `json:"self"`
+	CurrentDistrict     District              `json:"current_district"`
+	CurrentVenue        *Venue                `json:"current_venue,omitempty"`
+	DistrictState       *DistrictState        `json:"district_state,omitempty"`
+	CurrentHouse        *House                `json:"current_house,omitempty"`
+	AccessibleHouses    []House               `json:"accessible_houses,omitempty"`
+	Factions            []FactionView         `json:"factions,omitempty"`
+	Roads               []RoadView            `json:"roads,omitempty"`
+	VenueRoutes         []VenueRouteView      `json:"venue_routes,omitempty"`
+	Polity              *PolityPerceptionView `json:"polity,omitempty"`
+	Nearby              []Neighbor            `json:"nearby,omitempty"`
 	Offers              []Offer        `json:"offers,omitempty"`
 	SpotlightSalience   int            `json:"spotlight_salience,omitempty"`
 	HasActiveLoan       bool           `json:"has_active_loan,omitempty"`
@@ -672,7 +686,11 @@ func CheckRecipe(cat Catalog, worldMap WorldMap, currentHouse *House, a Actor, r
 		if a.InsideHouse != "" {
 			return false, "recipe " + r.ID + " requires stepping outside to district with " + r.NodeFeature
 		}
-		if !worldMap.DistrictHasFeature(a.Location, r.NodeFeature) {
+		if a.VenueID != "" {
+			if !worldMap.VenueOrDistrictHasFeature(a.VenueID, a.Location, r.NodeFeature) {
+				return false, "recipe " + r.ID + " requires venue/district feature: " + r.NodeFeature
+			}
+		} else if !worldMap.DistrictHasFeature(a.Location, r.NodeFeature) {
 			return false, "recipe " + r.ID + " requires district feature: " + r.NodeFeature
 		}
 	}
@@ -782,6 +800,16 @@ func (w *World) View(id string) Perception {
 			p.CurrentHouse = &hc
 		}
 	}
+	if a.VenueID != "" {
+		if v, ok := w.Map.VenueByID(a.VenueID); ok {
+			vc := v
+			if v.Features != nil {
+				vc.Features = append([]string(nil), v.Features...)
+			}
+			p.CurrentVenue = &vc
+		}
+	}
+	p.Polity = buildPolityPerceptionView(p.Map, ClonePolityNetwork(w.Polities), a)
 	for _, h := range w.Houses {
 		if h.CanAccess(id) {
 			p.AccessibleHouses = append(p.AccessibleHouses, CloneHouse(h))
@@ -810,6 +838,7 @@ func (w *World) View(id string) Perception {
 				LeadsToward: w.Map.LeadsToward(a.Location, r.To),
 			})
 		}
+		p.VenueRoutes = buildVenueRouteViews(p.Map, p.Catalog, w.DistrictStates, a)
 	}
 
 	for _, b := range w.Actors {
@@ -1206,7 +1235,7 @@ func (w *World) awakeSamePlaceObservers(placeActor Actor, excludeIDs ...string) 
 }
 
 func isRelocationAction(kind string) bool {
-	return kind == "move" || kind == "leave_house" || kind == "enter_house"
+	return kind == "move" || kind == "move_venue" || kind == "leave_house" || kind == "enter_house"
 }
 
 // Step evaluates decisions concurrently for all idle actors against the same snapshot,
@@ -1557,6 +1586,9 @@ func (w *World) markDeadIfZero(target *Actor, killer *Actor, x Action, cause str
 		}
 	}
 	w.Offers = filtered
+	if len(w.Offers) == 0 {
+		w.Offers = nil
+	}
 	canon := canonicalDeathCause(cause)
 	w.recordDeathCause(canon, 1)
 	killerID := ""
@@ -1642,9 +1674,16 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 	switch x.Kind {
 	case "move":
 		a.Location = x.Location
+		if a.VenueID != "" {
+			if v, ok := w.Map.VenueByID(a.VenueID); !ok || (v.DistrictID != "" && v.DistrictID != x.Location) {
+				a.VenueID = w.Map.DefaultVenueForDistrict(x.Location)
+			}
+		}
 		return []Event{w.record(a, x, "moved", map[string]any{
 			"text": a.Name + " walked along the road to " + x.Location,
 		})}
+	case "move_venue":
+		return w.finishMoveVenue(a, t)
 	case "craft":
 		r, ok := w.Catalog.RecipeByID(x.RecipeID)
 		if !ok {
@@ -1975,8 +2014,14 @@ func (w *World) Apply(id string, x Action) []Event {
 		if h == nil || h.District != a.Location {
 			return fail("house is not in current district")
 		}
+		if h.VenueID != "" && a.VenueID != "" && h.VenueID != a.VenueID {
+			return fail("house is in a different venue")
+		}
 		if !h.CanAccess(a.ID) {
 			return fail("actor does not have access to house " + h.ID)
+		}
+		if a.VenueID == "" && h.VenueID != "" {
+			a.VenueID = h.VenueID
 		}
 		a.InsideHouse = h.ID
 		return emit("entered_house", a.Name+" entered "+h.Name)
@@ -1989,9 +2034,21 @@ func (w *World) Apply(id string, x Action) []Event {
 		name := a.InsideHouse
 		if h != nil {
 			name = h.Name
+			if h.VenueID != "" {
+				a.VenueID = h.VenueID
+			}
 		}
 		a.InsideHouse = ""
 		return emit("left_house", a.Name+" stepped outside from "+name)
+
+	case "move_venue":
+		return w.applyMoveVenue(a, x)
+
+	case "issue_decree":
+		return w.applyIssueDecree(a, x)
+
+	case "transmit_message":
+		return w.applyTransmitMessage(a, x)
 
 	case "move":
 		if a.InsideHouse != "" {
@@ -2603,6 +2660,9 @@ func (w *World) Apply(id string, x Action) []Event {
 			stealth += 4
 		}
 		vigilance := b.Attributes.Insight + b.Professions["constable"]*3 + b.Professions["chief_constable"]*4 + b.Professions["martial_artist"]*2 + b.Professions["guard"]*2
+		if ClockAt(w.Tick).IsNight && w.IsCurfewActiveAt(a.Location, a.VenueID) {
+			vigilance += 8
+		}
 		if stealth >= vigilance && (b.Money > 0 || len(b.Items) > 0) {
 			maxCoins := 2 + a.Professions["thief"] + a.Professions["master_thief"]*2
 			stolenCoins := b.Money
@@ -2974,6 +3034,9 @@ func (w *World) Apply(id string, x Action) []Event {
 					}
 				}
 				w.Offers = filtered
+	if len(w.Offers) == 0 {
+		w.Offers = nil
+	}
 			}
 			ev := w.record(a, x, "arrested", map[string]any{
 				"text":         fmt.Sprintf("%s arrested outlaw %s, imprisoning until tick %d, confiscating %d coins and claiming %d bounty (%d damage)", a.Name, b.Name, b.JailedUntil, confiscated, bounty, dmg),
@@ -3081,6 +3144,9 @@ func (w *World) Apply(id string, x Action) []Event {
 		if !ok || !spec.Tradeable {
 			return fail("item is not tradeable: " + x.Item)
 		}
+		if w.IsItemEmbargoedAt(a.Location, a.VenueID, x.Item) {
+			return fail("item is embargoed by local polity decree: " + x.Item)
+		}
 		if x.Quantity <= 0 || x.Price < 0 || a.Items[x.Item] < x.Quantity {
 			return fail("invalid offer or insufficient item stock")
 		}
@@ -3107,22 +3173,50 @@ func (w *World) Apply(id string, x Action) []Event {
 			x.TargetID = o.Seller
 			if x.Kind == "reject" {
 				w.Offers = append(w.Offers[:i], w.Offers[i+1:]...)
+			if len(w.Offers) == 0 {
+				w.Offers = nil
+			}
+				if len(w.Offers) == 0 {
+					w.Offers = nil
+				}
 				return emit("trade_rejected", a.Name+" rejected offer", seller)
 			}
 			if o.Expires < w.Tick || seller == nil || !SamePlace(*a, *seller) || seller.Items[o.Item] < o.Quantity || a.Money < o.Price {
 				return fail("offer cannot settle")
+			}
+			if w.IsItemEmbargoedAt(a.Location, a.VenueID, o.Item) {
+				return fail("item is embargoed by local polity decree: " + o.Item)
 			}
 			seller.Items[o.Item] -= o.Quantity
 			if seller.Items[o.Item] == 0 {
 				delete(seller.Items, o.Item)
 			}
 			a.Items[o.Item] += o.Quantity
+			taxCoins := 0
+			if taxPermille := w.EffectiveMarketTaxPermille(a.Location, a.VenueID); taxPermille > 0 && o.Price > 0 {
+				taxCoins = (o.Price * taxPermille) / 1000
+				if taxCoins > o.Price {
+					taxCoins = o.Price
+				}
+			}
 			a.Money -= o.Price
-			seller.Money += o.Price
+			seller.Money += (o.Price - taxCoins)
+			if taxCoins > 0 {
+				if pol := w.EffectiveGoverningPolity(a.Location, a.VenueID); pol != nil {
+					pol.Treasury += int64(taxCoins)
+					pol.Ledger.TaxAssessedGross += int64(taxCoins)
+					pol.Ledger.TaxToTreasury += int64(taxCoins)
+				} else {
+					w.creditTreasury(int64(taxCoins), "tax")
+				}
+			}
 			a.Trust[seller.ID]++
 			seller.Trust[a.ID]++
 			w.Offers = append(w.Offers[:i], w.Offers[i+1:]...)
-			events := []Event{w.record(a, x, "trade_completed", map[string]any{"text": fmt.Sprintf("%s bought %d %s from %s for %d coins", a.Name, o.Quantity, o.Item, seller.Name, o.Price), "item": o.Item, "quantity": o.Quantity, "seller_id": seller.ID}, seller)}
+			if len(w.Offers) == 0 {
+				w.Offers = nil
+			}
+			events := []Event{w.record(a, x, "trade_completed", map[string]any{"text": fmt.Sprintf("%s bought %d %s from %s for %d coins", a.Name, o.Quantity, o.Item, seller.Name, o.Price), "item": o.Item, "quantity": o.Quantity, "seller_id": seller.ID, "market_tax": taxCoins}, seller)}
 			tier := w.Catalog.Items[o.Item].Tier
 			if tier < 1 {
 				tier = 1
