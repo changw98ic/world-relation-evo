@@ -12,25 +12,25 @@ export WRE_DB_PASSWORD=local-development-password
 # Uses the official PostgreSQL image; data persists in a named volume.
 docker compose up -d
 export DATABASE_URL="postgres://wre:${WRE_DB_PASSWORD}@localhost:5432/wre?sslmode=disable"
-go run ./cmd/wre -decider rules -world village-30 -steps 168 -pace 0s
+go run ./cmd/wre -decider rules -world village-30 -steps 672 -pace 0s
+# Run a 1,000,000-population multi-resolution world with event compaction:
+go run ./cmd/wre -decider rules -world prefecture-1m -pop 1000000 -compact-events -steps 96 -pace 0s
 # Resume the same world continuously; Ctrl-C stops it.
 go run ./cmd/wre -decider rules -world village-30 -steps 0 -pace 1s
 ```
 
-The first run creates 30 named villagers. Each tick is one simulated hour.
-JSON events are written to stdout **after** the corresponding state and events commit. Status goes to stderr. PostgreSQL stores the complete snapshot and append-only action events together; a restart resumes the saved tick. Different world IDs are separate simulations. One runner holds a PostgreSQL advisory lock for each active world.
+The first run creates 30 named villagers and 16 standalone houses across 7 road-connected districts. Each tick is 15 simulated minutes (`96` ticks per day, starting at Day 1 `06:00`).
+JSON events are written to stdout **after** the corresponding state and events commit. Status goes to stderr. PostgreSQL stores the complete snapshot and append-only action events together; a restart resumes the saved tick and any in-progress multi-tick tasks. Different world IDs are separate simulations. One runner holds a PostgreSQL advisory lock for each active world.
 
 ## Decision modes
 
-`-decider rules` is a deterministic offline baseline for exercising the engine. It models subsistence, surplus trade and direct speech, **not open-ended AI intelligence**. Farmers harvest 2 food per work action, other villagers can gather 1. The initial economy has finite coins, no minting or scripted disasters. Characters sleep/wait, eat, work, travel, make trade offers, accept/reject and speak. The offline policy also retells recent observed/heard food-production news and uses trusted reports to choose where to seek food. It uses explicit structured claims, not general natural-language understanding. Social sharing is scheduled at three-hour intervals so it does not displace all subsistence work.
+`-decider rules` is a deterministic, profession-agnostic offline baseline for exercising the engine. It plans over the declarative `World.Catalog` (`Items`, `Recipes`, `TagProfiles`), navigates multi-hop roads via shortest travel time, maintains standalone `House` assets with planks, eats edible items when hungry, sleeps in its home during its circadian window or when low on energy, trades surplus goods at `market_street`, and relays or acts on item supply reports.
 
 The production pipeline (`-decider jev`, the default) is:
 
-**identity tags → system-defined behavior/target candidates → Jev choice → independent LLM content → system settlement → events/state.**
+**identity tags + catalog → system-defined behavior/target candidates → Jev choice → independent LLM speech content (`speak` only) → system settlement → events/state.**
 
-Jev selects only a candidate ID. Its official typed Choice request does not generate prose. The content model receives the already-selected action and target and returns only words, assertions and memory references. It cannot change behavior, target, movement destination, price, transferred quantities, damage or healing.
-
-Tag grants: `resident` permits waiting, moving, eating and talking; `farmer`/`gatherer` permit work; `trader` permits selling proposals and buying/rejecting offers; `fighter` permits attacks; `healer` permits treatment. The seed includes a healer and a fighter. The system calculates fixed initial food yields, sale terms (2 food/2 coins), attack damage (10), treatment (15 health, consumes one medicine), hunger and trade effects. These are prototype world rules, not model outputs.
+Jev selects only a candidate ID for idle characters (`Task == nil`); characters mid-way through a multi-tick road walk, craft recipe, house repair, or sleep advance deterministically without redundant model calls. Only `speak` invokes the content model, which receives the fixed listener, citable memory IDs, and the dyadic supply/demand/authority stance (`candid`, `conservative`, or `exaggerate`), returning only words, assertions, and memory references. It cannot change behavior, target, movement route, house ownership, recipe, price, transferred quantities, damage, or healing.
 
 Configure Jev and a separate content model:
 
@@ -44,22 +44,19 @@ export WRE_MODEL_KEY=your-key
 go run ./cmd/wre -world model-village -decider jev -steps 24 -pace 0s
 ```
 
-Endpoint/model are explicit; the engine never silently substitutes a model or falls back to rules. Four decisions run concurrently from the same starting snapshot, then actions settle in stable character order. A failed model request stops the step before state changes. One full simulated day makes 720 Jev selections and up to 720 independent content-generation calls (waiting skips generation), so start with a few steps when testing providers. Official Jev contract: [System One](https://docs.typesafe.ai/api/system-one), [Choice](https://docs.typesafe.ai/primitives/choice).
+Endpoint and model are explicit; the engine never silently substitutes a model or falls back to rules. Up to four idle decisions run concurrently from the same starting snapshot, then ongoing tasks and newly chosen actions settle in stable character order. Nearby villagers are ordered deterministically per `(viewer, tick)` so candidates do not crowd low actor IDs. A failed model request stops the step before state changes. Official Jev contract: [System One](https://docs.typesafe.ai/api/system-one), [Choice](https://docs.typesafe.ai/primitives/choice).
 
-A character sees its own state, goals, personality, trust, last 32 memories, nearby identities and its trade offers, not everyone else's inventory or global history. Full memories remain in the saved world. This first slice has recent-memory context, not semantic long-term retrieval.
+## World mechanics and semantics
 
-## Semantics
-
-- Actions are intentions. Only the resolver changes world state.
-- Selling requires an offer and a separate buyer acceptance. An offer alone transfers nothing.
-- Speech records exactly what was said, who said it and to whom. It creates a heard-memory for the listener, not a new objective fact. Third parties do not automatically learn it.
-- A direct `observation` is separate from a speaker's `statement`. A statement's location/quantity records the speaker's assertion; it never overwrites production or inventory. The speaker chooses the wording and any exaggeration, with no automatic distortion parameter.
-- `basis_event_id` references a memory actually available to the acting character. Each resulting event/memory keeps its root event ID and direct source; following event links reconstructs the whole transmission chain. Root provenance does not certify truth. Movement candidates do not infer causal sources merely because a message mentions the destination; the offline behavior test uses a with/without-message comparison instead. A listener sees the immediate message, not the original world's fact payload.
-- The multi-hop test traces A's harvest → A tells B → B tells C → C exaggerates to D → D seeks food at the fields. It verifies exact speakers, times, changed quantities, causal links and ignorance of an uninvolved villager.
-- Events retain their initiating action and actor. Background hunger accumulation advances physiology, not fabricated plot events.
-- Trade updates directed trust independently of money and food. Other relationship types and explicit beliefs are not yet implemented.
-- Travel takes one tick between the four abstract locations; this is a small village, not geographic simulation.
-- The offline policy uses simple preferences. Jev selects supported behaviors/targets and the independent model writes content. Complex negotiation, farming seasons, detailed injury physiology, reproduction and organizations are later scope.
+- **Physical road topology & indoor privacy**: Districts (`west_cottages`, `creek_well`, `south_fields`, `crossroads`, `market_street`, `east_lane`, `north_woods`) are linked by explicit road segments with travel duration (`15m`–`30m`) and energy cost. Houses are anchored in distinct districts; entering a house isolates perception, speech, and trade to co-occupants of that specific house.
+- **Standalone house assets & asset levels**: Houses (`World.Houses`) carry `OwnerID`, `Residents`, asset `Level` (`1–3`), `Comfort` (`1–3`), structural `Condition` (`0–100`, weathering `-2`/day), and indoor `Facilities` (`compost_pit`, `carpentry_bench`, `forge`, `herb_rack`). Residents repair worn houses using `plank`s (`repair_house`), owners with carpenter level `>= 2` can renovate houses to higher asset levels (`upgrade_house`), and owners can transfer property deeds (`transfer_house`).
+- **Energy & heterogeneous sleep quality**: Road travel, crafting, repairs, and combat spend `Energy` (`0–100`). Multi-tick `sleep` computes per-tick recovery from four factors: house asset level, comfort, and roof condition (vs. rough outdoor exposure), personal `SleepTrait` (`deep_sleeper`, `light_sleeper`, `early_bird`, `night_owl`) and time of day, physiological `Hunger` and injury pain (`Health < 100`), and food/coin scarcity plus temperament anxiety.
+- **Factions, multi-profession character levels, item tiers & career progression**:
+  - **Factions (`World.Factions`)**: Six village guilds (`farmers_guild` 农会, `artisans_guild` 匠作行, `healers_guild` 药行, `merchants_guild` 商帮, `watch_guild` 巡守, `scholars_guild` 书院) are anchored at their hall districts and level up via member production influence.
+  - **Base & advanced professions + rank progression**: `Catalog.Professions` defines both Tier-1 base professions (e.g., `scholar` 读书人, `blacksmith` 铁匠, `carpenter` 木匠, `farmer` 农夫) and Tier-2 advanced professions unlocked by parent profession mastery and attributes (e.g., `scholar` 读书人 → `xiucai` 秀才, `blacksmith` 铁匠 → `master_smith` 匠师, `carpenter` → `master_carpenter` 大木匠师, `farmer` → `agronomist` 农师, `herbalist` → `alchemist` 丹药师, `peddler` → `merchant_chief` 大掌柜, `guard` → `captain` 都头). Each profession also advances through stage titles as its level grows (e.g., `锻造学徒` → `初级铁匠` → `匠师`).
+  - **Character level & scaling yields**: A character's `Level` equals the sum of all held profession levels (`Professions`). Higher profession levels and advanced career promotions directly raise crafting output yields (`Catalog.RecipeYield`), merchant sale margins (`Catalog.SalePrice`), and house repair restoration. Items carry grades (`Tier 1–5`) that scale crafting XP and guild influence.
+- **Epistemic separation & causal lineage**: Completed production records a first-hand `Observation`, while `speak` records a private `Statement` for speaker and listener only. `basis_event_id` must reference an actual `Memory.EventID` held by the actor; each settled event/memory propagates `root_event_id` without certifying truth or auto-attaching causes to movement options.
+- **Million-scale multi-resolution population (`LargeWorld` & `PopulationCohort`)**: Worlds scale from 30 villagers up to 1,000,000–3,000,000+ inhabitants via `sim.LargeWorld(id, pop)`, combining an $O(1)$ spatially indexed active `Actor` core (with attention-capped `MaxNearbyView = 32` perception), `agent.TieredDecider` cognitive LOD budgeting (`-focal-limit`), vectorized `PopulationCohort` production/promotion/market clearing, bidirectional `HydrateActor` / `DehydrateActor` conservation, and multi-row batched PostgreSQL event persistence (`-compact-events`).
 
 ## Tests
 
@@ -71,13 +68,11 @@ go vet ./...
 WRE_TEST_DATABASE_URL="$DATABASE_URL" go test ./internal/store -v
 ```
 
-Tests cover bilateral trades, private speech, perception isolation, decision failure, seven virtual days with 30 villagers, relationship-dependent decisions and separate mock HTTP Jev/content providers. Tests also verify tag grants and that content cannot supply actions or state fields. These do not establish real-model emergent behavior; run and inspect a model-backed world separately.
-
 ## Layout
 
-- `internal/sim`: world data, local perception, action settlement, simulation clock
-- `internal/agent`: candidate builder, Jev selector, content generator, and explicit offline equivalents
-- `internal/store`: PostgreSQL snapshots, events and per-world runner lock
-- `cmd/wre`: background runner and JSON event output
+- `internal/sim`: declarative item/recipe/profile catalog, district road graph, standalone house assets & sleep physiology, local perception, multi-tick settlement
+- `internal/agent`: catalog-driven candidate builder, Jev selector, dyadic content generator, and profession-agnostic offline baseline
+- `internal/store`: PostgreSQL snapshots, events, and per-world session-pinned advisory lock
+- `cmd/wre`: runner CLI and committed NDJSON event stream
 
 No license has been selected yet.

@@ -1,3 +1,4 @@
 .env
 /wre
 *.out
+.codegraph/
