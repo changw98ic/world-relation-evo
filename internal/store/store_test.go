@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/changw98ic/world-relation-evo/internal/agent"
 	"github.com/changw98ic/world-relation-evo/internal/sim"
 )
 
@@ -256,4 +258,95 @@ func TestPostgresCheckpointsDecisionLogsAndLoadEvents(t *testing.T) {
 	if len(loaded) != 2 || loaded[1].Action.Text != "hi" {
 		t.Fatalf("unexpected loaded events: %+v", loaded)
 	}
+}
+
+func TestPostgresCheckpointReplayFirstStepDecision(t *testing.T) {
+	dsn := os.Getenv("WRE_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set WRE_TEST_DATABASE_URL to run PostgreSQL integration test")
+	}
+	ctx := context.Background()
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	id := fmt.Sprintf("cp-replay-%d", time.Now().UnixNano())
+	defer func() {
+		s.db.ExecContext(ctx, `DELETE FROM world_decision_logs WHERE world_id=$1`, id)
+		s.db.ExecContext(ctx, `DELETE FROM world_checkpoints WHERE world_id=$1`, id)
+		s.db.ExecContext(ctx, `DELETE FROM world_events WHERE world_id=$1`, id)
+		s.db.ExecContext(ctx, `DELETE FROM worlds WHERE id=$1`, id)
+	}()
+
+	w := sim.Village(id)
+	d := agent.Offline()
+	if err := s.SaveCheckpoint(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+
+	verifyReplayRange := func(expectedCPTick, targetTick int64) {
+		t.Helper()
+		cp, cpRaw, err := s.LoadNearestCheckpoint(ctx, id, targetTick)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cp.Tick != expectedCPTick {
+			t.Fatalf("expected checkpoint tick %d, got %d", expectedCPTick, cp.Tick)
+		}
+		logs, err := s.LoadDecisionLogs(ctx, id, cp.Tick, targetTick-1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		replayed, _, err := sim.ReplayFromCheckpoint(cpRaw, logs, targetTick)
+		if err != nil {
+			t.Fatalf("ReplayFromCheckpoint(%d->%d): %v", cp.Tick, targetTick, err)
+		}
+		raw, err := json.Marshal(w)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var expected sim.World
+		if err := json.Unmarshal(raw, &expected); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(&expected, replayed) {
+			t.Fatalf("tick %d replay diverged from live run", targetTick)
+		}
+	}
+
+	for step := 0; step < 4; step++ {
+		_, tickLog, err := w.StepRecorded(ctx, d)
+		if err != nil {
+			t.Fatalf("StepRecorded tick %d: %v", w.Tick, err)
+		}
+		if step == 0 && len(tickLog.Decisions) == 0 {
+			t.Fatalf("expected actor decisions at tick 0")
+		}
+		if err := s.SaveDecisionLog(ctx, id, tickLog); err != nil {
+			t.Fatal(err)
+		}
+	}
+	verifyReplayRange(0, 4)
+
+	// Save mid-run checkpoint at tick 4 and step to tick 8.
+	if err := s.SaveCheckpoint(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	for step := 4; step < 8; step++ {
+		_, tickLog, err := w.StepRecorded(ctx, d)
+		if err != nil {
+			t.Fatalf("StepRecorded tick %d: %v", w.Tick, err)
+		}
+		if step == 4 && len(tickLog.Decisions) == 0 {
+			t.Fatalf("expected actor decisions at tick 4")
+		}
+		if err := s.SaveDecisionLog(ctx, id, tickLog); err != nil {
+			t.Fatal(err)
+		}
+	}
+	verifyReplayRange(4, 8)
 }

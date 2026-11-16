@@ -164,6 +164,14 @@ func runSim(args []string, stdout, stderr io.Writer) error {
 			}
 		} else if err != nil {
 			return err
+		} else if *checkpointEvery > 0 {
+			if _, _, cpErr := db.LoadNearestCheckpoint(ctx, w.ID, w.Tick); errors.Is(cpErr, sql.ErrNoRows) {
+				if err = db.SaveCheckpoint(ctx, w); err != nil {
+					return err
+				}
+			} else if cpErr != nil {
+				return cpErr
+			}
 		}
 	} else {
 		if loadedPack != nil {
@@ -480,6 +488,26 @@ type replayOutput struct {
 	Events     []sim.Event `json:"events"`
 }
 
+type replaySource interface {
+	LoadNearestCheckpoint(ctx context.Context, worldID string, maxTick int64) (*sim.World, []byte, error)
+	LoadDecisionLogs(ctx context.Context, worldID string, fromTick, toTick int64) ([]sim.TickDecisionLog, error)
+}
+
+func loadCheckpointAndLogsFromStore(ctx context.Context, src replaySource, worldID string, toTick int64) ([]byte, []sim.TickDecisionLog, error) {
+	cpWorld, raw, err := src.LoadNearestCheckpoint(ctx, worldID, toTick)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load nearest checkpoint for %q <= %d: %w", worldID, toTick, err)
+	}
+	var logs []sim.TickDecisionLog
+	if toTick > cpWorld.Tick {
+		logs, err = src.LoadDecisionLogs(ctx, worldID, cpWorld.Tick, toTick-1)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	return raw, logs, nil
+}
+
 func runReplay(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("replay", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -526,16 +554,9 @@ func runReplay(args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 		defer db.Close()
-		cpWorld, raw, err := db.LoadNearestCheckpoint(ctx, *worldID, *toTick)
+		cpRaw, logs, err = loadCheckpointAndLogsFromStore(ctx, db, *worldID, *toTick)
 		if err != nil {
-			return fmt.Errorf("load nearest checkpoint for %q <= %d: %w", *worldID, *toTick, err)
-		}
-		cpRaw = raw
-		if *toTick > cpWorld.Tick {
-			logs, err = db.LoadDecisionLogs(ctx, *worldID, cpWorld.Tick+1, *toTick)
-			if err != nil {
-				return err
-			}
+			return err
 		}
 	}
 
