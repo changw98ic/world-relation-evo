@@ -100,6 +100,17 @@ func Options(p sim.Perception) []Option {
 		}
 	}
 
+	for _, n := range p.EnergyNodes {
+		if n.Source != nil && n.Source.FuelItem != "" && a.Items[n.Source.FuelItem] > 0 {
+			qty := min(int64(a.Items[n.Source.FuelItem]), n.Source.UnitsPerCycle)
+			add(fmt.Sprintf("Refuel %s with %d %s", n.ID, qty, n.Source.FuelItem), sim.Action{Kind: "refuel", TargetID: n.ID, Quantity: int(qty)})
+		}
+	}
+	for _, g := range p.Growth {
+		if g.Ready && g.District == a.Location && (g.VenueID == "" || g.VenueID == a.VenueID) {
+			add(fmt.Sprintf("Harvest %d %s", g.Quantity, g.Item), sim.Action{Kind: "harvest", TargetID: fmt.Sprint(g.ID)})
+		}
+	}
 	add("Wait 15m and catch breath (+1 energy)", sim.Action{Kind: "wait"})
 
 	if a.InsideHouse != "" {
@@ -310,6 +321,10 @@ func Options(p sim.Perception) []Option {
 	}
 
 	for _, r := range p.Catalog.Recipes {
+		if r.ResourcePool != "" && (p.DistrictState == nil || p.DistrictState.AvailableResource(r.ResourcePool) < int64(max(1, r.ResourceDraw))) {
+			continue
+		}
+
 		if blocked, _ := sim.IsRecipeBlockedByWorldLaw(p.WorldLaws, r); blocked {
 			continue
 		}
@@ -326,8 +341,12 @@ func Options(p sim.Perception) []Option {
 					mastery = fmt.Sprintf(", %s lv%d", r.Profession, a.Professions[r.Profession])
 				}
 			}
-			add(fmt.Sprintf("%s (%dm, -%d energy%s, tier %d, expect %d %s, you hold %d)",
-				r.Label, r.Ticks*15, r.EnergyCost, mastery, tier, expected, r.OutputItem, a.Items[r.OutputItem]),
+			duration := fmt.Sprintf("%dm work", r.Ticks*15)
+			if r.Growth != nil {
+				duration += fmt.Sprintf(", %dm maturation, care every %dm", r.Growth.DurationTicks*15, r.Growth.MaintenanceIntervalTicks*15)
+			}
+			add(fmt.Sprintf("%s (%s, -%d energy%s, tier %d, expect %d %s, you hold %d)",
+				r.Label, duration, r.EnergyCost, mastery, tier, expected, r.OutputItem, a.Items[r.OutputItem]),
 				sim.Action{Kind: "craft", RecipeID: r.ID})
 		}
 	}
@@ -354,7 +373,7 @@ func Options(p sim.Perception) []Option {
 				continue
 			}
 			spec := p.Catalog.Items[itemID]
-			if spec.Tradeable && spec.BatchQty > 0 && a.Items[itemID] >= spec.OfferThreshold {
+			if spec.Tradeable && spec.BatchQty > 0 && a.Items[itemID] >= spec.OfferThreshold && a.Items[itemID] >= spec.BatchQty {
 				surplusItems = append(surplusItems, spec)
 				surplusPrices = append(surplusPrices, p.Catalog.SalePrice(a, spec.ID))
 			}
@@ -861,26 +880,15 @@ func holdsAllItems(inv map[string]int, req map[string]int) bool {
 }
 
 func canDrawFreeWater(p sim.Perception) bool {
-	a := p.Self
-	nearWell := a.InsideHouse != "" ||
-		p.Map.DistrictHasFeature(a.Location, "water_source") ||
-		p.Map.DistrictHasFeature(a.Location, "canal_wharf")
-	if !nearWell {
+	if p.DistrictState == nil {
 		return false
 	}
-	if a.InsideHouse == "" && p.DistrictState != nil {
-		for resID, rs := range p.Catalog.Resources {
-			if rs.PotableWater {
-				if maxCap := p.DistrictState.MaxResources[resID]; maxCap > 0 {
-					if p.DistrictState.Resources[resID] <= maxCap/20 {
-						return false
-					}
-				}
-				break
-			}
+	for id, spec := range p.Catalog.Resources {
+		if spec.PotableWater && p.DistrictState.AvailableResource(id) > 0 {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 func cheapestMedicinalItem(cat sim.Catalog, a sim.Actor, itemKeys []string) string {

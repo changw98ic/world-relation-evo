@@ -51,6 +51,52 @@ func (rulesPolicy) Decide(_ context.Context, p sim.Perception) (sim.Action, erro
 		}
 	}
 
+	for _, g := range p.Growth {
+		needsCare := !g.Ready && g.ProgressTicks >= g.CareUntil
+		if !g.Ready && !needsCare {
+			continue
+		}
+		if needsCare {
+			supplied := true
+			for item, qty := range g.Rule.Supplies {
+				if int64(a.Items[item]) >= int64(qty)*g.Batches {
+					continue
+				}
+				supplied = false
+				for _, r := range p.Catalog.Recipes {
+					if r.OutputItem == item && canPractice(p.Catalog, a, r) {
+						if act, ok := resolveRecipe(p, r, 0); ok {
+							return act, nil
+						}
+					}
+				}
+			}
+			if !supplied {
+				continue
+			}
+		}
+		if g.District != a.Location {
+			if step, ok := stepTowardDistrict(p, g.District, 0); ok {
+				return step, nil
+			}
+			continue
+		}
+		if g.VenueID != "" && g.VenueID != a.VenueID {
+			if route, _, mode, ok := p.Map.NextVenueHopForActor(p.Catalog, nil, a, a.VenueID, g.VenueID); ok {
+				return sim.Action{Kind: "move_venue", Location: route.ToVenue, Channel: mode}, nil
+			}
+			continue
+		}
+		if g.Ready {
+			return sim.Action{Kind: "harvest", TargetID: fmt.Sprint(g.ID)}, nil
+		}
+	}
+
+	for _, n := range p.EnergyNodes {
+		if n.StoredEnergy == 0 && n.FuelStock == 0 && n.Source != nil && n.Source.FuelItem != "" && a.Items[n.Source.FuelItem] > 0 {
+			return sim.Action{Kind: "refuel", TargetID: n.ID, Quantity: int(min(int64(a.Items[n.Source.FuelItem]), n.Source.UnitsPerCycle))}, nil
+		}
+	}
 	// 1c. Sanitation & nightsoil collection: relieve waste before discomfort or disease risk builds.
 	if a.Waste >= 3 {
 		return sim.Action{Kind: "relieve"}, nil
@@ -205,7 +251,7 @@ func (rulesPolicy) Decide(_ context.Context, p sim.Perception) (sim.Action, erro
 				}
 				spec := p.Catalog.Items[itemID]
 				availQty := availableItemAfterAgreements(p, itemID)
-				if !spec.Tradeable || spec.BatchQty <= 0 || availQty < spec.OfferThreshold {
+				if !spec.Tradeable || spec.BatchQty <= 0 || availQty < spec.OfferThreshold || availQty < spec.BatchQty {
 					continue
 				}
 				if !p.Catalog.TagsProduce(a.IdentityTags(), itemID) && availQty < desiredBuyerStock(p, itemID)+spec.BatchQty {
@@ -825,6 +871,22 @@ func resolveRecipe(p sim.Perception, r sim.Recipe, depth int) (sim.Action, bool)
 	if blocked, _ := sim.IsRecipeBlockedByWorldLaw(p.WorldLaws, r); blocked {
 		return sim.Action{}, false
 	}
+	if r.Growth != nil {
+		target := max(r.OutputQty, desiredBuyerStock(p, r.OutputItem))
+		if p.Self.Plan != nil && p.Self.Plan.Status == "active" && p.Self.Plan.RecipeID == r.ID {
+			target = max(r.OutputQty, p.Self.Plan.Quantity-p.Self.Plan.Produced)
+		}
+		var pending int64
+		for _, g := range p.Growth {
+			if g.RecipeID == r.ID {
+				pending += g.Quantity
+			}
+		}
+		if pending >= int64(target) {
+			return sim.Action{}, false
+		}
+	}
+
 	a := p.Self
 
 	// Check required inputs in deterministic key order; recursively produce missing inputs if capable.

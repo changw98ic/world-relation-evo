@@ -73,6 +73,7 @@ type Task struct {
 }
 
 type Actor struct {
+	DigestedFood    int64             `json:"digested_food,omitempty"`
 	Plan            *PersonalPlan     `json:"plan,omitempty"`
 	ID              string            `json:"id"`
 	Name            string            `json:"name"`
@@ -145,6 +146,8 @@ func SamePlace(a, b Actor) bool {
 }
 
 type World struct {
+	Growth           []GrowthBatch            `json:"growth,omitempty"`
+	Shipments        []Shipment               `json:"shipments,omitempty"`
 	Continuity       *ContinuityState         `json:"continuity,omitempty"`
 	Polities         *PolityNetwork           `json:"polities,omitempty"`
 	ID               string                   `json:"id"`
@@ -244,6 +247,8 @@ type CohortView struct {
 }
 
 type Perception struct {
+	EnergyNodes         []FlowNode            `json:"energy_nodes,omitempty"`
+	Growth              []GrowthBatch         `json:"growth,omitempty"`
 	Continuity          ContinuityView        `json:"continuity"`
 	LoanRequests        []LoanRequest         `json:"loan_requests,omitempty"`
 	LoanQuotes          []LoanRequest         `json:"loan_quotes,omitempty"`
@@ -626,6 +631,8 @@ func Village(id string) *World {
 	for i := range w.Actors {
 		w.refreshActor(&w.Actors[i])
 	}
+	w.InitEcology(len(w.Actors))
+	w.InitLedgerAudit()
 	return w
 }
 
@@ -726,7 +733,7 @@ func CheckRecipe(cat Catalog, worldMap WorldMap, currentHouse *House, a Actor, r
 	if a.Money < r.MoneyCost {
 		return false, "insufficient money for " + r.ID
 	}
-	for item, qty := range r.Inputs {
+	for item, qty := range recipeStartRequirements(r) {
 		if a.Items[item] < qty {
 			return false, fmt.Sprintf("recipe %s requires %d %s", r.ID, qty, item)
 		}
@@ -789,6 +796,8 @@ func (w *World) View(id string) Perception {
 		dist.Features = append([]string(nil), dist.Features...)
 	}
 	p := Perception{
+		EnergyNodes:     w.localEnergyNodes(a),
+		Growth:          w.visibleGrowth(a),
 		Tick:            w.Tick,
 		Clock:           ClockAt(w.Tick),
 		Calendar:        CalendarAt(w.Tick, w.Catalog.Calendar),
@@ -1318,7 +1327,7 @@ func (w *World) Step(ctx context.Context, d Decider) ([]Event, error) {
 		}
 	}
 
-	var events []Event
+	events := w.stepFlowGrid()
 	for i := range w.Actors {
 		if w.Actors[i].Dead {
 			continue
@@ -1350,17 +1359,12 @@ func (w *World) Step(ctx context.Context, d Decider) ([]Event, error) {
 	}
 	events = append(events, w.StepMarketAndCredit(w.ensureMarketCredit())...)
 	if len(w.Cohorts) > 0 {
-		var beforeMacro map[string]int64
-		if w.LedgerAudit != nil {
-			beforeMacro = w.snapshotCombinedItemTotals()
-		}
 		events = append(events, w.stepCohorts()...)
-		if w.LedgerAudit != nil {
-			w.recordItemSnapshotDelta(beforeMacro, w.snapshotCombinedItemTotals())
-		}
 	}
 
 	w.Tick++
+	events = append(events, w.settleShipments()...)
+	events = append(events, w.AdvanceGrowth()...)
 	events = append(events, w.stepActiveEffects()...)
 	events = append(events, w.AdvanceContinuity()...)
 	// Physiological hunger accumulates once every 6 hours (24 quarter-hour ticks),
@@ -1388,17 +1392,9 @@ func (w *World) Step(ctx context.Context, d Decider) ([]Event, error) {
 		}
 	}
 	// Advance regional ecology/weather/disasters/encounters/rituals and actor lifecycle/physiology.
-	var beforeEnv map[string]int64
-	if w.LedgerAudit != nil && len(w.Cohorts) > 0 {
-		beforeEnv = w.snapshotCombinedItemTotals()
-	}
 	events = append(events, w.stepWorldEnvironment()...)
-	if w.LedgerAudit != nil && len(w.Cohorts) > 0 {
-		w.recordItemSnapshotDelta(beforeEnv, w.snapshotCombinedItemTotals())
-	}
 	events = append(events, w.stepAdoptedFacilities()...)
 	events = append(events, w.stepStateSlotsAndForms()...)
-	events = append(events, w.stepFlowGrid()...)
 	events = append(events, w.stepActorPhysiologyAndLifecycle()...)
 	// Release prisoners who have completed their Yamen jail sentence.
 	for i := range w.Actors {
@@ -1767,8 +1763,24 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 		if !ok {
 			return nil
 		}
-		if r.ResourcePool != "" {
-			w.drawDistrictResource(a.Location, r.ResourcePool, int64(maxInt(1, r.ResourceDraw)))
+		if r.Growth != nil {
+			parents := map[string]int64{}
+			for item, qty := range r.Growth.Parents {
+				if a.Items[item] < qty {
+					return []Event{w.record(a, x, "action_failed", map[string]any{"text": "breeding stock no longer available"})}
+				}
+			}
+			for item, qty := range r.Growth.Parents {
+				a.Items[item] -= qty
+				parents[item] = int64(qty)
+				if a.Items[item] == 0 {
+					delete(a.Items, item)
+				}
+			}
+			if len(parents) == 0 {
+				parents = nil
+			}
+			return []Event{w.startGrowth(a.ID, a.Location, a.VenueID, false, r, 1, int64(t.Yield), parents)}
 		}
 		a.Items[r.OutputItem] += t.Yield
 		w.recordLedgerItemProduced(r.OutputItem, int64(t.Yield))
@@ -2036,6 +2048,35 @@ func (w *World) Apply(id string, x Action) []Event {
 	b := w.actor(x.TargetID)
 
 	switch x.Kind {
+	case "refuel":
+		if w.FlowGrid != nil {
+			for i := range w.FlowGrid.Nodes {
+				n := &w.FlowGrid.Nodes[i]
+				if n.ID != x.TargetID {
+					continue
+				}
+				if n.Kind != "generator" || n.Source == nil || n.Source.FuelItem == "" || n.DistrictID != a.Location || (n.VenueID != "" && n.VenueID != a.VenueID) {
+					return fail("generator is not locally accessible")
+				}
+				if x.Quantity <= 0 || a.Items[n.Source.FuelItem] < x.Quantity {
+					return fail("insufficient declared generator fuel")
+				}
+				a.Items[n.Source.FuelItem] -= x.Quantity
+				n.FuelStock += int64(x.Quantity)
+				if a.Items[n.Source.FuelItem] == 0 {
+					delete(a.Items, n.Source.FuelItem)
+				}
+				return emit("generator_refueled", fmt.Sprintf("transferred %d %s into %s", x.Quantity, n.Source.FuelItem, n.ID))
+			}
+		}
+		return fail("unknown generator")
+	case "harvest":
+		for i, g := range w.Growth {
+			if fmt.Sprint(g.ID) == x.TargetID && !g.Cohort && g.OwnerID == a.ID && g.Ready && w.growthOwnerPresent(g) {
+				return w.harvestGrowth(i)
+			}
+		}
+		return fail("no mature owned crop or stock at this location")
 	case "wait":
 		if a.Energy < MaxEnergy {
 			a.Energy++
@@ -2240,29 +2281,21 @@ func (w *World) Apply(id string, x Action) []Event {
 		}
 		a.Hunger -= relief
 		a.Waste++
+		a.DigestedFood++
 		return emit("ate", fmt.Sprintf("%s ate 1 %s", a.Name, itemID))
 
 	case "drink":
 		if a.Thirst <= 0 {
 			return nil
 		}
-		nearWell := a.InsideHouse != "" ||
-			w.Map.DistrictHasFeature(a.Location, "water_source") ||
-			w.Map.DistrictHasFeature(a.Location, "canal_wharf")
-		if nearWell && x.Item == "" {
-			canDraw := true
-			if w.DistrictStates != nil {
-				if ds, ok := w.DistrictStates[a.Location]; ok {
-					if pID := w.potablePoolID(ds); pID != "" && ds.Resources[pID] <= ds.MaxResources[pID]/20 && a.InsideHouse == "" {
-						canDraw = false
-					}
-				}
-			}
-			if canDraw {
+		if x.Item == "" {
+			ds := w.DistrictStates[a.Location]
+			if pool := w.potablePoolID(ds); pool != "" && w.drawDistrictResource(a.Location, pool, 1) == 1 {
 				a.Thirst = 0
 				return emit("drank", fmt.Sprintf("%s drank fresh water at %s", a.Name, a.Location))
 			}
 		}
+
 		itemID := x.Item
 		if itemID == "" {
 			for k, spec := range w.Catalog.Items {
@@ -2307,12 +2340,17 @@ func (w *World) Apply(id string, x Action) []Event {
 				}
 			}
 		}
-		wasteAmt := a.Waste
+		wasteAmt := int64(0)
+		if divisor := w.Catalog.Lifecycle.WastePerFoodDivisor; divisor > 0 && w.Catalog.Lifecycle.WasteItem != "" {
+			wasteAmt = a.DigestedFood / divisor
+			a.DigestedFood -= wasteAmt * divisor
+		}
 		a.Waste = 0
 		if w.DistrictStates != nil {
 			if ds, ok := w.DistrictStates[a.Location]; ok {
 				if cleanLatrine {
 					ds.NightsoilPool += int64(wasteAmt)
+					w.recordLedgerItemProduced(w.Catalog.Lifecycle.WasteItem, int64(wasteAmt))
 				} else if ds.Sanitation > 10 {
 					ds.Sanitation--
 				}
@@ -2403,6 +2441,13 @@ func (w *World) Apply(id string, x Action) []Event {
 		if w.isVenuePowerBlocked(venueID) {
 			return fail("venue lacks power: " + venueID)
 		}
+		if r.ResourcePool != "" {
+			draw := int64(maxInt(1, r.ResourceDraw))
+			if w.availableDistrictResource(a.Location, r.ResourcePool) < draw {
+				return fail("insufficient ecological resource: " + r.ResourcePool)
+			}
+			w.drawDistrictResource(a.Location, r.ResourcePool, draw)
+		}
 		a.Energy -= r.EnergyCost
 		a.Money -= r.MoneyCost
 		if r.MoneyCost > 0 {
@@ -2442,6 +2487,9 @@ func (w *World) Apply(id string, x Action) []Event {
 			if yield < 1 {
 				yield = 1
 			}
+		}
+		if r.Growth != nil {
+			yield = r.OutputQty
 		}
 		ticks := r.Ticks
 		if ticks < 1 {
@@ -3198,9 +3246,9 @@ func (w *World) Apply(id string, x Action) []Event {
 					}
 				}
 				w.Offers = filtered
-	if len(w.Offers) == 0 {
-		w.Offers = nil
-	}
+				if len(w.Offers) == 0 {
+					w.Offers = nil
+				}
 			}
 			ev := w.record(a, x, "arrested", map[string]any{
 				"text":         fmt.Sprintf("%s arrested outlaw %s, imprisoning until tick %d, confiscating %d coins and claiming %d bounty (%d damage)", a.Name, b.Name, b.JailedUntil, confiscated, bounty, dmg),

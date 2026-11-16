@@ -73,6 +73,9 @@ func (p *WorldPack) Validate() error {
 		return fmt.Errorf("world pack %q must define at least one district", p.ID)
 	}
 
+	if err := normalizeCatalog(p.Catalog).ValidatePhysicalRules(p.FlowGrid); err != nil {
+		return err
+	}
 	geoRegions := make(map[string]bool, len(p.Map.GeoRegions))
 	for i, r := range p.Map.GeoRegions {
 		if r.ID == "" {
@@ -760,7 +763,7 @@ func normalizeCatalog(cat sim.Catalog) sim.Catalog {
 	if len(cat.FactionLevelThresholds) == 0 {
 		cat.FactionLevelThresholds = append([]int(nil), def.FactionLevelThresholds...)
 	}
-	if cat.Calendar.DaysPerSeason <= 0 && len(cat.Calendar.Seasons) == 0 {
+	if len(cat.Calendar.Seasons) == 0 {
 		cat.Calendar = sim.DefaultCalendarSpec()
 	}
 	if len(cat.Weathers) == 0 {

@@ -210,6 +210,9 @@ func TestReferencePackDomainCapabilities(t *testing.T) {
 	if wsWorld.FlowGrid == nil || len(wsWorld.FlowGrid.Nodes) < 2 {
 		t.Fatalf("wasteland_sector missing FlowGrid")
 	}
+	if _, err := wsWorld.Step(context.Background(), agent.Offline()); err != nil {
+		t.Fatal(err)
+	}
 	for _, node := range wsWorld.FlowGrid.Nodes {
 		if !node.Powered {
 			t.Fatalf("expected wasteland_sector FlowGrid node %q to be powered, got %+v", node.ID, node)

@@ -56,15 +56,13 @@ func initCohortAgePyramid(cat Catalog, c *PopulationCohort) {
 }
 
 func (w *World) potablePoolID(ds DistrictState) string {
-	for poolID, spec := range w.Catalog.Resources {
-		if spec.PotableWater && ds.MaxResources[poolID] > 0 {
-			return poolID
+	chosen := ""
+	for id, spec := range w.Catalog.Resources {
+		if spec.PotableWater && ds.AvailableResource(id) > 0 && (chosen == "" || id < chosen) {
+			chosen = id
 		}
 	}
-	if ds.MaxResources["water_table"] > 0 {
-		return "water_table"
-	}
-	return ""
+	return chosen
 }
 
 func (w *World) sanitationInfraCondition(ds DistrictState) (int, bool) {
@@ -262,24 +260,11 @@ func (w *World) stepActorPhysiologyAndLifecycle() []Event {
 		if sixHour && !jailed {
 			a.Thirst++
 
-			// Low-friction drinking when indoors at home, at a water_source/canal_wharf/residential well, or holding potable water
-			nearWaterFacility := a.InsideHouse != "" ||
-				w.Map.DistrictHasFeature(a.Location, "water_source") ||
-				w.Map.DistrictHasFeature(a.Location, "canal_wharf") ||
-				(w.DistrictStates == nil && w.Map.DistrictHasFeature(a.Location, "residential"))
-			if nearWaterFacility {
-				canDraw := true
-				if w.DistrictStates != nil {
-					if ds, ok := w.DistrictStates[a.Location]; ok {
-						if pID := w.potablePoolID(ds); pID != "" && ds.Resources[pID] <= ds.MaxResources[pID]/20 && a.InsideHouse == "" {
-							canDraw = false
-						}
-					}
-				}
-				if canDraw {
-					a.Thirst = 0
-				}
+			// Automatic drinking uses the same finite source as an explicit drink action.
+			if pool := w.potablePoolID(w.DistrictStates[a.Location]); pool != "" && w.drawDistrictResource(a.Location, pool, 1) == 1 {
+				a.Thirst = 0
 			}
+
 			if a.Thirst >= 2 {
 				// Drink carried potable item automatically before thirst becomes severe
 				for itemID, qty := range a.Items {
@@ -320,7 +305,13 @@ func (w *World) stepActorPhysiologyAndLifecycle() []Event {
 				if cleanLatrine {
 					if w.DistrictStates != nil {
 						if ds, ok := w.DistrictStates[a.Location]; ok {
-							ds.NightsoilPool += int64(a.Waste)
+							if divisor := w.Catalog.Lifecycle.WastePerFoodDivisor; divisor > 0 && w.Catalog.Lifecycle.WasteItem != "" {
+								waste := a.DigestedFood / divisor
+								a.DigestedFood -= waste * divisor
+								ds.NightsoilPool += waste
+								w.recordLedgerItemProduced(w.Catalog.Lifecycle.WasteItem, waste)
+							}
+
 							w.DistrictStates[a.Location] = ds
 						}
 					}
@@ -596,37 +587,34 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 			// Potable water draw from local water_table or ItemPool["water"]
 			c.AvgThirst++
 			waterNeed := int64(maxInt(1, c.Population/2))
-			satisfiedWater := false
-			if w.DistrictStates != nil {
-				if ds, ok := w.DistrictStates[c.District]; ok && ds.Resources != nil {
-					if pID := w.potablePoolID(ds); pID != "" && ds.Resources[pID] > ds.MaxResources[pID]/12 {
-						draw := waterNeed / 4
-						w.drawDistrictResource(c.District, pID, draw)
-						satisfiedWater = true
-					}
+			remainingWater := waterNeed
+			for remainingWater > 0 {
+				pool := w.potablePoolID(w.DistrictStates[c.District])
+				if pool == "" {
+					break
 				}
-			} else if w.Map.DistrictHasFeature(c.District, "water_source") || w.Map.DistrictHasFeature(c.District, "residential") {
-				satisfiedWater = true
+				remainingWater -= w.drawDistrictResource(c.District, pool, remainingWater)
 			}
-			if !satisfiedWater {
-				for itemID, spec := range w.Catalog.Items {
-					if spec.Potable && c.ItemPool[itemID] > 0 {
-						use := waterNeed
-						if use > c.ItemPool[itemID] {
-							use = c.ItemPool[itemID]
-						}
-						c.ItemPool[itemID] -= use
-						if c.ItemPool[itemID] <= 0 {
-							delete(c.ItemPool, itemID)
-						}
-						if use >= waterNeed/2 {
-							satisfiedWater = true
-							break
-						}
-					}
+			waterItems := make([]string, 0)
+			for itemID, spec := range w.Catalog.Items {
+				if spec.Potable {
+					waterItems = append(waterItems, itemID)
 				}
 			}
-			if satisfiedWater && c.AvgThirst > 0 {
+			sort.Strings(waterItems)
+			for _, itemID := range waterItems {
+				use := min(remainingWater, c.ItemPool[itemID])
+				if use <= 0 {
+					continue
+				}
+				c.ItemPool[itemID] -= use
+				w.recordLedgerItemConsumed(itemID, use)
+				remainingWater -= use
+				if c.ItemPool[itemID] == 0 {
+					delete(c.ItemPool, itemID)
+				}
+			}
+			if remainingWater == 0 {
 				c.AvgThirst--
 			}
 
@@ -646,7 +634,7 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 						}
 						for di := range w.Cohorts {
 							donor := &w.Cohorts[di]
-							if donor.ID == c.ID || donor.Population <= 0 {
+							if donor.District != c.District || donor.ID == c.ID || donor.Population <= 0 {
 								continue
 							}
 							if donor.ItemPool[itemID] <= int64(donor.Population)*7 {
@@ -739,7 +727,7 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 						ID: w.NextID, Tick: w.Tick, ActorID: c.ID, Kind: "cohort_famine_deaths",
 						Action: Action{Kind: "wait", Location: c.District},
 						Payload: map[string]any{
-							"text": fmt.Sprintf("%s suffered %d starvation deaths (%d weakened) in %s", c.Name, dead, cw, c.District),
+							"text":      fmt.Sprintf("%s suffered %d starvation deaths (%d weakened) in %s", c.Name, dead, cw, c.District),
 							"cohort_id": c.ID, "wounded": cw, "deaths": dead, "cause": "starvation",
 						},
 					}
@@ -755,7 +743,7 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 						ID: w.NextID, Tick: w.Tick, ActorID: c.ID, Kind: "cohort_dehydration_deaths",
 						Action: Action{Kind: "wait", Location: c.District},
 						Payload: map[string]any{
-							"text": fmt.Sprintf("%s suffered %d dehydration deaths (%d weakened) in %s", c.Name, dead, cw, c.District),
+							"text":      fmt.Sprintf("%s suffered %d dehydration deaths (%d weakened) in %s", c.Name, dead, cw, c.District),
 							"cohort_id": c.ID, "wounded": cw, "deaths": dead, "cause": "dehydration",
 						},
 					}
@@ -764,9 +752,12 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 				}
 			}
 
-			// Metabolic excretion generates nightsoil proportional to fed population
-			if c.AvgHunger <= 2 {
-				nightsoilByDistrict[c.District] += int64(maxInt(1, c.Population/4))
+			// Excretion comes from food actually consumed, including the retained fractional remainder.
+			if divisor := w.Catalog.Lifecycle.WastePerFoodDivisor; divisor > 0 && w.Catalog.Lifecycle.WasteItem != "" {
+				waste := c.DigestedFood / divisor
+				c.DigestedFood -= waste * divisor
+				nightsoilByDistrict[c.District] += waste
+				w.recordLedgerItemProduced(w.Catalog.Lifecycle.WasteItem, waste)
 			}
 		}
 
@@ -778,11 +769,8 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 			}
 			sort.Strings(distKeys)
 
-			compostItem := w.Catalog.Lifecycle.CompostItem
-			if compostItem == "" {
-				compostItem = "compost"
-			}
-			var totalCompostConverted int64
+			wasteItem := w.Catalog.Lifecycle.WasteItem
+
 			for _, dID := range distKeys {
 				ds := w.DistrictStates[dID]
 				ns := nightsoilByDistrict[dID] + ds.NightsoilPool
@@ -793,34 +781,23 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 					collectionPct = 96
 				}
 				collected := (ns * int64(collectionPct)) / 100
-				compostYield := collected / 3
-				if compostYield > 0 {
-					// Deliver converted organic compost to compostItem-consuming agricultural/bio cohorts!
-					delivered := false
+				w.recordLedgerItemConsumed(wasteItem, ns-collected)
+				delivered := false
+				if wasteItem != "" && collected > 0 {
 					for ci := range w.Cohorts {
 						c := &w.Cohorts[ci]
-						if c.Population > 0 && c.District == dID && w.Catalog.TagsConsume(cohortIdentityTags(w.Catalog, c.Profession), compostItem) {
+						if c.Population > 0 && c.District == dID && w.Catalog.TagsConsume(cohortIdentityTags(w.Catalog, c.Profession), wasteItem) {
 							if c.ItemPool == nil {
 								c.ItemPool = map[string]int64{}
 							}
-							c.ItemPool[compostItem] += compostYield
+							c.ItemPool[wasteItem] += collected
 							delivered = true
 							break
 						}
 					}
-					if !delivered {
-						for ci := range w.Cohorts {
-							c := &w.Cohorts[ci]
-							if c.Population > 0 && w.Catalog.TagsConsume(cohortIdentityTags(w.Catalog, c.Profession), compostItem) {
-								if c.ItemPool == nil {
-									c.ItemPool = map[string]int64{}
-								}
-								c.ItemPool[compostItem] += compostYield
-								break
-							}
-						}
-					}
-					totalCompostConverted += compostYield
+				}
+				if !delivered {
+					ds.NightsoilPool = collected
 				}
 
 				// Sanitation balance: crowding & uncollected waste vs latrine & clean water recovery
@@ -840,22 +817,6 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 				w.DistrictStates[dID] = ds
 			}
 
-			if totalCompostConverted > 0 {
-				ev := Event{
-					ID:      w.NextID,
-					Tick:    w.Tick,
-					ActorID: "world",
-					Kind:    "nightsoil_composted",
-					Action:  Action{Kind: "craft", Item: compostItem, Quantity: int(totalCompostConverted)},
-					Payload: map[string]any{
-						"text":              fmt.Sprintf("Sanitation facilities recycled organic waste into +%d %s for producers", totalCompostConverted, compostItem),
-						"compost_generated": totalCompostConverted,
-						"item":              compostItem,
-					},
-				}
-				w.NextID++
-				events = append(events, ev)
-			}
 		}
 	}
 
@@ -881,7 +842,6 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 
 		// Gather district healer medicine capacity for public epidemic relief
 		healerMedByDist := map[string]*PopulationCohort{}
-		var anyHealer *PopulationCohort
 		for i := range w.Cohorts {
 			c := &w.Cohorts[i]
 			if c.EffectivePopulation() <= 0 {
@@ -889,9 +849,6 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 			}
 			if prof, ok := w.Catalog.ProfessionByID(c.Profession); ok && (ActorHasTag(prof.Grants, "healer") || w.Catalog.Capabilities(Actor{Tags: prof.Grants})["heal"]) {
 				healerMedByDist[c.District] = c
-				if anyHealer == nil {
-					anyHealer = c
-				}
 			}
 		}
 
@@ -924,6 +881,7 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 							need = c.ItemPool[itemID]
 						}
 						c.ItemPool[itemID] -= need
+						w.recordLedgerItemConsumed(itemID, need)
 						if c.ItemPool[itemID] <= 0 {
 							delete(c.ItemPool, itemID)
 						}
@@ -940,9 +898,7 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 					maxClinicCure := maxInt(1, ((c.Sick-cured)*25)/100)
 					clinicCured := 0
 					hc := healerMedByDist[c.District]
-					if hc == nil {
-						hc = anyHealer
-					}
+
 					if hc != nil && hc.ID != c.ID {
 						for _, itemID := range itemIDs {
 							spec := w.Catalog.Items[itemID]
@@ -966,6 +922,7 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 									continue
 								}
 								hc.ItemPool[itemID] -= need
+								w.recordLedgerItemConsumed(itemID, need)
 								dailyMedUsed += need
 								h := int(need) * spec.DiseaseCure * 2
 								if h > rem {
@@ -1300,6 +1257,7 @@ func (w *World) settleDailyCivicPayrollAndRetailUpkeep(cal CalendarState) []Even
 			}
 			if wear > 0 {
 				c.ItemPool[itemID] -= wear
+				w.recordLedgerItemConsumed(itemID, wear)
 				if c.ItemPool[itemID] <= 0 {
 					delete(c.ItemPool, itemID)
 				}
@@ -1333,51 +1291,42 @@ func (w *World) settleDailyCivicPayrollAndRetailUpkeep(cal CalendarState) []Even
 			}
 			batchQty := int64(maxInt(1, spec.BatchQty))
 			unitPrice := int64(maxInt(1, spec.BatchPrice))
-			retailCoins := ((retailQty + batchQty - 1) / batchQty) * unitPrice
 
-			// Collect retail payment from prosperous non-merchant household cohorts
-			var collected int64
+			// Settle each household purchase as a transfer of both coins and goods.
+			remaining := retailQty
 			for hi := range w.Cohorts {
-				if hi == mi || collected >= retailCoins {
+				if hi == mi || remaining < batchQty {
 					continue
 				}
 				h := &w.Cohorts[hi]
-				if h.Population <= 0 {
+				if h.District != m.District || h.Population <= 0 {
 					continue
 				}
 				if hp, ok := w.Catalog.ProfessionByID(h.Profession); ok && hp.TradeMargin {
 					continue
 				}
-				surplusCoins := h.MoneyPool - int64(h.Population)*12
-				if surplusCoins <= 0 {
+				surplus := h.MoneyPool - int64(h.Population)*12
+				if surplus <= 0 {
 					continue
 				}
-				take := retailCoins - collected
-				if take > surplusCoins/10+1 {
-					take = surplusCoins/10 + 1
+				budget := min(surplus, surplus/10+1)
+				batches := min(remaining/batchQty, budget/unitPrice)
+				if batches == 0 {
+					continue
 				}
-				if take > surplusCoins {
-					take = surplusCoins
+				qty, cost := batches*batchQty, batches*unitPrice
+				h.MoneyPool -= cost
+				if h.ItemPool == nil {
+					h.ItemPool = map[string]int64{}
 				}
-				h.MoneyPool -= take
-				collected += take
+				h.ItemPool[itemID] += qty
+				m.ItemPool[itemID] -= qty
+				remaining -= qty
+				tax := cost * int64(gov.MarketTaxPermille) / 1000
+				w.collectTaxWithSkim(m.District, tax)
+				m.MoneyPool += cost - tax
 			}
-			if collected > 0 {
-				actualSold := (retailQty * collected) / retailCoins
-				if actualSold < 1 {
-					actualSold = 1
-				}
-				if actualSold > m.ItemPool[itemID] {
-					actualSold = m.ItemPool[itemID]
-				}
-				m.ItemPool[itemID] -= actualSold
-				if m.ItemPool[itemID] <= 0 {
-					delete(m.ItemPool, itemID)
-				}
-				retailTax := (collected * int64(gov.MarketTaxPermille)) / 1000
-				w.collectTaxWithSkim(m.District, retailTax)
-				m.MoneyPool += (collected - retailTax)
-			}
+
 		}
 	}
 	return events

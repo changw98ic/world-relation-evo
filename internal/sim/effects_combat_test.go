@@ -581,8 +581,8 @@ func TestCrossPhase_ActionSpecSynergiesAndConservation(t *testing.T) {
 		"qi": {ID: "qi", Name: "Spiritual Qi", Min: 0, Max: 100, Default: 50},
 	}
 	cat.Forms = map[string]sim.FormSpec{
-		"mortal":      {ID: "mortal", Name: "Mortal"},
-		"ascended":    {ID: "ascended", Name: "Ascended", InnateTags: []string{"immortal"}},
+		"mortal":   {ID: "mortal", Name: "Mortal"},
+		"ascended": {ID: "ascended", Name: "Ascended", InnateTags: []string{"immortal"}},
 	}
 	cat.Transitions = map[string]sim.TransitionSpec{
 		"breakthrough": {
@@ -642,7 +642,7 @@ func TestCrossPhase_ActionSpecSynergiesAndConservation(t *testing.T) {
 		},
 		FlowGrid: &sim.FlowGridState{
 			Nodes: []sim.FlowNode{
-				{ID: "gen", VenueID: "altar", DistrictID: "peak", Kind: "generator", Generation: 50, Active: false},
+				{ID: "gen", VenueID: "altar", DistrictID: "peak", Kind: "generator", Generation: 50, EnergyCapacity: 50, StoredEnergy: 50, Active: false},
 				{ID: "altar_node", VenueID: "altar", DistrictID: "peak", Kind: "consumer", Demand: 20, Active: true},
 			},
 			Edges: []sim.FlowEdge{

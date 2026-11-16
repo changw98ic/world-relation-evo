@@ -478,7 +478,7 @@ func (w *World) districtRouteDisruptionPermille(districtID string, cal CalendarS
 		capBatches, _, _, hazardPermille, medium, _ := w.edgeEffectiveLogistics(r, cal)
 		nomCap := r.FreightCapacity
 		if nomCap <= 0 {
-			nomCap = 400000
+			continue
 		}
 		edgeShock := 0
 		if capBatches < nomCap {

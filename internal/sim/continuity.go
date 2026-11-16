@@ -276,7 +276,7 @@ func (w *World) ObserveContinuity(e Event) {
 			s.DialogueByActor[e.TargetID] = append(s.DialogueByActor[e.TargetID], turn)
 		}
 	}
-	if e.Kind != "crafted" && e.Kind != "trade_completed" && e.Kind != "agreement_fulfilled" && e.Kind != "actor_died" {
+	if e.Kind != "crafted" && e.Kind != "harvested" && e.Kind != "trade_completed" && e.Kind != "agreement_fulfilled" && e.Kind != "actor_died" {
 		return
 	}
 	owner := e.ActorID
@@ -294,7 +294,7 @@ func (w *World) ObserveContinuity(e Event) {
 		return
 	}
 	quantity := payloadQuantity(e.Payload["quantity"])
-	if e.Kind == "crafted" && e.Action.RecipeID == p.RecipeID {
+	if (e.Kind == "crafted" || e.Kind == "harvested") && e.Action.RecipeID == p.RecipeID {
 		p.Produced += quantity
 		if p.Produced >= p.Quantity {
 			p.Stage = "sell"

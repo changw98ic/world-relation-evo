@@ -565,9 +565,9 @@ func TestMultiGenre_SciFiFlowGrid_PowerCutoffAndGeneralizedConservation(t *testi
 		},
 		FlowGrid: &sim.FlowGridState{
 			Nodes: []sim.FlowNode{
-				{ID: "gen_reactor", VenueID: "reactor_bay", DistrictID: "habitat_dome", Kind: "generator", Generation: 100, Active: true},
-				{ID: "relay_bus", DistrictID: "habitat_dome", Kind: "relay"},
-				{ID: "node_lab", VenueID: "habitat_lab", DistrictID: "habitat_dome", Kind: "consumer", Demand: 30},
+				{ID: "gen_reactor", VenueID: "reactor_bay", DistrictID: "habitat_dome", Kind: "generator", Generation: 100, EnergyCapacity: 100 * sim.TicksPerDay, StoredEnergy: 100 * sim.TicksPerDay, Active: true},
+				{ID: "relay_bus", DistrictID: "habitat_dome", Kind: "relay", Active: true},
+				{ID: "node_lab", VenueID: "habitat_lab", DistrictID: "habitat_dome", Kind: "consumer", Demand: 30, Active: true},
 			},
 			Edges: []sim.FlowEdge{
 				{ID: "edge_gen_relay", FromNodeID: "gen_reactor", ToNodeID: "relay_bus", Capacity: 80, LossPermille: 100},
@@ -739,6 +739,18 @@ func TestPhase3_DefaultCatalogNilPreservationAndOfflineTicks(t *testing.T) {
 	for _, a := range w.Actors {
 		if a.StateSlots != nil || a.Currencies != nil || a.FormID != "" {
 			t.Fatalf("expected default actor Phase 3 maps/form to stay nil/empty, got %+v", a)
+		}
+	}
+}
+
+func TestMillionResourceAccounting(t *testing.T) {
+	w := sim.LargeWorld("million-resource-accounting", 1000000)
+	for step := 0; step < 96; step++ {
+		if _, err := w.Step(context.Background(), agent.Offline()); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.VerifyLedgerConservation(); err != nil {
+			t.Fatalf("tick %d: %v", w.Tick, err)
 		}
 	}
 }

@@ -61,6 +61,7 @@ func PrefectureFactions() []Faction {
 }
 
 type freightRoutePlan struct {
+	ticks          int64
 	edges          []Road
 	edgeKeys       []string
 	feePermille    int
@@ -83,13 +84,8 @@ func (w *World) edgeEffectiveLogistics(r Road, cal CalendarState) (capBatches in
 		medium = "land"
 	}
 	capBatches = r.FreightCapacity
-	if capBatches <= 0 {
-		capBatches = 400000
-	}
 	feePermille = r.FreightFeePermille
-	if feePermille <= 0 {
-		feePermille = 35
-	}
+
 	lossPermille = r.BaseLossPermille
 	carrier = r.CarrierTag
 	if carrier == "" {
@@ -98,7 +94,7 @@ func (w *World) edgeEffectiveLogistics(r Road, cal CalendarState) (capBatches in
 
 	if cal.SeasonIndex >= 0 && cal.SeasonIndex < len(w.Catalog.Calendar.Seasons) {
 		season := w.Catalog.Calendar.Seasons[cal.SeasonIndex]
-		if rPct := season.RouteCapacityPct[medium]; rPct > 0 {
+		if rPct, ok := season.RouteCapacityPct[medium]; ok {
 			capBatches = (capBatches * int64(rPct)) / 100
 		} else if medium == "waterway" && season.CanalCapacityPct > 0 {
 			capBatches = (capBatches * int64(season.CanalCapacityPct)) / 100
@@ -108,7 +104,7 @@ func (w *World) edgeEffectiveLogistics(r Road, cal CalendarState) (capBatches in
 		for _, ep := range []string{r.From, r.To} {
 			if ds, ok := w.DistrictStates[ep]; ok {
 				if ws, hasW := w.Catalog.Weathers[ds.Weather]; hasW {
-					if rPct := ws.RouteCapacityPct[medium]; rPct > 0 {
+					if rPct, ok := ws.RouteCapacityPct[medium]; ok {
 						capBatches = (capBatches * int64(rPct)) / 100
 					}
 					if h := ws.RouteHazardPermille[medium]; h > hazardPermille {
@@ -119,9 +115,7 @@ func (w *World) edgeEffectiveLogistics(r Road, cal CalendarState) (capBatches in
 		}
 	}
 	lossPermille += hazardPermille / 3
-	if capBatches < 1000 {
-		capBatches = 1000
-	}
+
 	return capBatches, feePermille, lossPermille, hazardPermille, medium, carrier
 }
 
@@ -159,7 +153,10 @@ func (w *World) planFreightRoute(from, to string, cal CalendarState) (freightRou
 		}
 		visited[u] = true
 		for _, edge := range w.Map.NeighborsOf(u) {
-			_, fee, _, _, _, _ := w.edgeEffectiveLogistics(edge, cal)
+			capacity, fee, _, _, _, _ := w.edgeEffectiveLogistics(edge, cal)
+			if capacity <= 0 || edge.Ticks <= 0 {
+				continue
+			}
 			if cost[u]+fee < cost[edge.To] {
 				cost[edge.To] = cost[u] + fee
 				prevEdge[edge.To] = edge
@@ -181,8 +178,8 @@ func (w *World) planFreightRoute(from, to string, cal CalendarState) (freightRou
 		cur = e.From
 	}
 	plan := freightRoutePlan{
-		edges:       make([]Road, len(rev)),
-		edgeKeys:    make([]string, len(rev)),
+		edges:         make([]Road, len(rev)),
+		edgeKeys:      make([]string, len(rev)),
 		primaryMedium: "land",
 		carrierTag:    "land_carrier",
 	}
@@ -190,6 +187,8 @@ func (w *World) planFreightRoute(from, to string, cal CalendarState) (freightRou
 	for i := range rev {
 		edge := rev[len(rev)-1-i]
 		plan.edges[i] = edge
+		ticks, _ := w.effectiveRoadCost(edge)
+		plan.ticks += int64(ticks)
 		plan.edgeKeys[i] = canonicalEdgeKey(edge.From, edge.To)
 		_, fee, loss, haz, med, car := w.edgeEffectiveLogistics(edge, cal)
 		plan.feePermille += fee

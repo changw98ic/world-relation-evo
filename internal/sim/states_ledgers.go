@@ -66,6 +66,12 @@ type CurrencySpec struct {
 
 // FlowNode represents a node in the topological power/energy/leyline FlowGrid.
 type FlowNode struct {
+	EnergyCapacity int64         `json:"energy_capacity"`
+	Source         *EnergySource `json:"source,omitempty"`
+	StoredEnergy   int64         `json:"stored_energy"`
+	FuelStock      int64         `json:"fuel_stock,omitempty"`
+	NextSupplyTick int64         `json:"next_supply_tick,omitempty"`
+
 	ID         string `json:"id"`
 	VenueID    string `json:"venue_id,omitempty"`
 	DistrictID string `json:"district_id,omitempty"`
@@ -100,6 +106,12 @@ func CloneFlowGridState(g *FlowGridState) *FlowGridState {
 	out := &FlowGridState{}
 	if g.Nodes != nil {
 		out.Nodes = append([]FlowNode(nil), g.Nodes...)
+		for i := range out.Nodes {
+			if g.Nodes[i].Source != nil {
+				source := *g.Nodes[i].Source
+				out.Nodes[i].Source = &source
+			}
+		}
 	}
 	if g.Edges != nil {
 		out.Edges = append([]FlowEdge(nil), g.Edges...)
@@ -117,8 +129,10 @@ type ResourceLedgerTotals struct {
 // LedgerAuditState tracks Initial, Produced, and Consumed totals per currency and per item
 // so generalized conservation (Initial + Produced - Consumed == CurrentTotalHeld) can be verified.
 type LedgerAuditState struct {
-	Currencies map[string]ResourceLedgerTotals `json:"currencies,omitempty"`
-	Items      map[string]ResourceLedgerTotals `json:"items,omitempty"`
+	Energy     ResourceLedgerTotals                       `json:"energy"`
+	Ecology    map[string]map[string]ResourceLedgerTotals `json:"ecology,omitempty"`
+	Currencies map[string]ResourceLedgerTotals            `json:"currencies,omitempty"`
+	Items      map[string]ResourceLedgerTotals            `json:"items,omitempty"`
 }
 
 // CloneLedgerAuditState returns a deep copy of s while preserving nil maps and pointers.
@@ -126,7 +140,16 @@ func CloneLedgerAuditState(s *LedgerAuditState) *LedgerAuditState {
 	if s == nil {
 		return nil
 	}
-	out := &LedgerAuditState{}
+	out := &LedgerAuditState{Energy: s.Energy}
+	if s.Ecology != nil {
+		out.Ecology = make(map[string]map[string]ResourceLedgerTotals, len(s.Ecology))
+		for district, pools := range s.Ecology {
+			out.Ecology[district] = make(map[string]ResourceLedgerTotals, len(pools))
+			for pool, entry := range pools {
+				out.Ecology[district][pool] = entry
+			}
+		}
+	}
 	if s.Currencies != nil {
 		out.Currencies = make(map[string]ResourceLedgerTotals, len(s.Currencies))
 		for k, v := range s.Currencies {
@@ -745,9 +768,9 @@ func (w *World) RecomputeFlowGrid() {
 
 // recomputeFlowGrid solves deterministic flow from active generators across un-severed edges,
 // respecting edge Capacity and LossPermille, and updates Powered on every FlowNode.
-func recomputeFlowGrid(g *FlowGridState) {
+func recomputeFlowGrid(g *FlowGridState) map[string]int64 {
 	if g == nil || len(g.Nodes) == 0 {
-		return
+		return nil
 	}
 	nodeIdx := make(map[string]int, len(g.Nodes))
 	adj := make(map[string][]int, len(g.Nodes))
@@ -760,11 +783,7 @@ func recomputeFlowGrid(g *FlowGridState) {
 		if e.Severed {
 			continue
 		}
-		if e.Capacity > 0 {
-			remCap[ei] = e.Capacity
-		} else {
-			remCap[ei] = 1 << 30
-		}
+		remCap[ei] = e.Capacity
 		adj[e.FromNodeID] = append(adj[e.FromNodeID], ei)
 	}
 
@@ -775,9 +794,9 @@ func recomputeFlowGrid(g *FlowGridState) {
 		n := &g.Nodes[i]
 		switch n.Kind {
 		case "generator":
-			if n.Active && n.Generation > 0 {
+			if n.Active && n.Generation > 0 && n.StoredEnergy > 0 {
 				n.Powered = true
-				remGen[n.ID] = n.Generation
+				remGen[n.ID] = int(min(int64(n.Generation), n.StoredEnergy))
 				genIDs = append(genIDs, n.ID)
 			}
 		case "consumer":
@@ -813,7 +832,7 @@ func recomputeFlowGrid(g *FlowGridState) {
 		if need <= 0 {
 			need = 1
 		}
-		for received[cid] < need {
+		for cNode.Active && received[cid] < need {
 			// BFS from all generators with remaining supply to target consumer cid.
 			parentEdge := make(map[string]int)
 			parentNode := make(map[string]string)
@@ -835,7 +854,7 @@ func recomputeFlowGrid(g *FlowGridState) {
 					break
 				}
 				for _, ei := range adj[u] {
-					if remCap[ei] <= 0 {
+					if remCap[ei] <= 0 || !g.Nodes[nodeIdx[g.Edges[ei].ToNodeID]].Active {
 						continue
 					}
 					v := g.Edges[ei].ToNodeID
@@ -939,7 +958,7 @@ func recomputeFlowGrid(g *FlowGridState) {
 	for head := 0; head < len(rQueue); head++ {
 		u := rQueue[head]
 		for _, ei := range adj[u] {
-			if remCap[ei] <= 0 && !relayReached[g.Edges[ei].ToNodeID] {
+			if !g.Nodes[nodeIdx[g.Edges[ei].ToNodeID]].Active || (remCap[ei] <= 0 && !relayReached[g.Edges[ei].ToNodeID]) {
 				continue
 			}
 			v := g.Edges[ei].ToNodeID
@@ -963,9 +982,15 @@ func recomputeFlowGrid(g *FlowGridState) {
 			if need <= 0 {
 				need = 1
 			}
-			n.Powered = received[n.ID] >= need
+			n.Powered = n.Active && received[n.ID] >= need
 		}
 	}
+	used := map[string]int64{}
+	for _, id := range genIDs {
+		n := g.Nodes[nodeIdx[id]]
+		used[id] = min(int64(n.Generation), n.StoredEnergy) - int64(remGen[id])
+	}
+	return used
 }
 
 func snapshotFlowPowered(g *FlowGridState) map[string]bool {
@@ -984,7 +1009,16 @@ func (w *World) stepFlowGrid() []Event {
 		return nil
 	}
 	prev := snapshotFlowPowered(w.FlowGrid)
-	recomputeFlowGrid(w.FlowGrid)
+	w.supplyEnergy()
+	used := recomputeFlowGrid(w.FlowGrid)
+	for i := range w.FlowGrid.Nodes {
+		n := &w.FlowGrid.Nodes[i]
+		amount := used[n.ID]
+		n.StoredEnergy -= amount
+		if w.LedgerAudit != nil {
+			w.LedgerAudit.Energy.Consumed += amount
+		}
+	}
 	var events []Event
 	for _, n := range w.FlowGrid.Nodes {
 		if n.Kind != "consumer" {
@@ -1156,6 +1190,33 @@ func (w *World) totalItemHeld(itemID string) int64 {
 	if w.MarketCredit != nil {
 		total += w.TotalHoardedStock(w.MarketCredit, itemID)
 	}
+	for _, shipment := range w.Shipments {
+		if shipment.Item == itemID {
+			total += shipment.Quantity
+		}
+	}
+
+	for _, g := range w.Growth {
+		total += g.Parents[itemID]
+		if g.Ready && g.Item == itemID {
+			total += g.Quantity
+		}
+	}
+
+	if w.FlowGrid != nil {
+		for _, n := range w.FlowGrid.Nodes {
+			if n.Source != nil && n.Source.FuelItem == itemID {
+				total += n.FuelStock
+			}
+		}
+	}
+
+	if itemID != "" && itemID == w.Catalog.Lifecycle.WasteItem {
+		for _, ds := range w.DistrictStates {
+			total += ds.NightsoilPool
+		}
+	}
+
 	return total
 }
 
@@ -1229,6 +1290,31 @@ func (w *World) allHeldItems() []string {
 			}
 		}
 	}
+	for _, shipment := range w.Shipments {
+		seen[shipment.Item] = true
+	}
+
+	for _, g := range w.Growth {
+		for item := range g.Parents {
+			seen[item] = true
+		}
+		if g.Ready {
+			seen[g.Item] = true
+		}
+	}
+
+	if w.FlowGrid != nil {
+		for _, n := range w.FlowGrid.Nodes {
+			if n.Source != nil && n.Source.FuelItem != "" {
+				seen[n.Source.FuelItem] = true
+			}
+		}
+	}
+
+	if waste := w.Catalog.Lifecycle.WasteItem; waste != "" {
+		seen[waste] = true
+	}
+
 	if w.LedgerAudit != nil {
 		for k := range w.LedgerAudit.Items {
 			seen[k] = true
@@ -1259,6 +1345,16 @@ func (w *World) InitLedgerAudit() {
 			Initial: w.totalItemHeld(it),
 		}
 	}
+	if len(w.DistrictStates) > 0 {
+		la.Ecology = make(map[string]map[string]ResourceLedgerTotals, len(w.DistrictStates))
+		for district, ds := range w.DistrictStates {
+			la.Ecology[district] = map[string]ResourceLedgerTotals{}
+			for pool, amount := range ds.Resources {
+				la.Ecology[district][pool] = ResourceLedgerTotals{Initial: amount}
+			}
+		}
+	}
+	la.Energy.Initial = w.storedEnergy()
 	w.LedgerAudit = la
 }
 
@@ -1286,6 +1382,26 @@ func (w *World) VerifyLedgerConservation() error {
 				it, entry.Initial, entry.Produced, entry.Consumed, expected, actual)
 		}
 	}
+	for district, ds := range w.DistrictStates {
+		for pool, amount := range ds.Resources {
+			entry := w.LedgerAudit.Ecology[district][pool]
+			if expected := entry.Initial + entry.Produced - entry.Consumed; amount != expected {
+				return fmt.Errorf("ecology %s/%s accounting error: expected=%d actual=%d", district, pool, expected, amount)
+			}
+		}
+	}
+	for district, pools := range w.LedgerAudit.Ecology {
+		for pool, entry := range pools {
+			if actual := w.DistrictStates[district].Resources[pool]; actual != entry.Initial+entry.Produced-entry.Consumed {
+				return fmt.Errorf("ecology %s/%s accounting error: expected=%d actual=%d", district, pool, entry.Initial+entry.Produced-entry.Consumed, actual)
+			}
+		}
+	}
+
+	if e := w.LedgerAudit.Energy; w.storedEnergy() != e.Initial+e.Produced-e.Consumed {
+		return fmt.Errorf("stored energy accounting mismatch")
+	}
+
 	return nil
 }
 
@@ -1343,51 +1459,22 @@ func (w *World) recordLedgerCurrencyConsumed(currency string, amt int64) {
 	w.LedgerAudit.Currencies[currency] = t
 }
 
-func (w *World) snapshotCombinedItemTotals() map[string]int64 {
-	totals := make(map[string]int64)
-	for i := range w.Actors {
-		for k, v := range w.Actors[i].Items {
-			if v != 0 {
-				totals[k] += int64(v)
-			}
-		}
-	}
-	for i := range w.Cohorts {
-		for k, v := range w.Cohorts[i].ItemPool {
-			if v != 0 {
-				totals[k] += v
-			}
-		}
-	}
-	if w.MarketCredit != nil {
-		for _, bag := range w.MarketCredit.HoardedStock {
-			for k, v := range bag {
-				if v != 0 {
-					totals[k] += v
-				}
-			}
-		}
-	}
-	return totals
-}
-
-func (w *World) recordItemSnapshotDelta(before, after map[string]int64) {
-	if w.LedgerAudit == nil {
+// Record the amount settled by extraction, regeneration, or disaster loss.
+func (w *World) recordEcologicalChange(district, pool string, delta int64) {
+	if w.LedgerAudit == nil || delta == 0 {
 		return
 	}
-	seen := make(map[string]bool, len(before)+len(after))
-	for k := range before {
-		seen[k] = true
+	if w.LedgerAudit.Ecology == nil {
+		w.LedgerAudit.Ecology = map[string]map[string]ResourceLedgerTotals{}
 	}
-	for k := range after {
-		seen[k] = true
+	if w.LedgerAudit.Ecology[district] == nil {
+		w.LedgerAudit.Ecology[district] = map[string]ResourceLedgerTotals{}
 	}
-	for k := range seen {
-		d := after[k] - before[k]
-		if d > 0 {
-			w.recordLedgerItemProduced(k, d)
-		} else if d < 0 {
-			w.recordLedgerItemConsumed(k, -d)
-		}
+	entry := w.LedgerAudit.Ecology[district][pool]
+	if delta > 0 {
+		entry.Produced += delta
+	} else {
+		entry.Consumed -= delta
 	}
+	w.LedgerAudit.Ecology[district][pool] = entry
 }

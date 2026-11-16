@@ -436,14 +436,14 @@ func (w *World) stepCohortDailyTaxation() []Event {
 		Kind:    "cohort_tax_collected",
 		Action:  Action{Kind: "wait", Price: int(totalNetTreasury)},
 		Payload: map[string]any{
-			"text":              fmt.Sprintf("Prefecture daily fiscal levy across %d guilds (%d taxpayers): %d official tax assessed (%d remitted to treasury, %d skimmed by collectors) + %d corrupt surcharge extorted", taxedCohorts, taxedPopulation, totalAssessed, totalNetTreasury, totalSkimmed, totalSurcharge),
-			"taxed_cohorts":     taxedCohorts,
-			"taxed_population":  taxedPopulation,
-			"gross_tax":         totalAssessed,
-			"net_treasury":      totalNetTreasury,
-			"tax_skimmed":       totalSkimmed,
-			"surcharge_coins":   totalSurcharge,
-			"treasury_balance":  w.PublicTreasury,
+			"text":             fmt.Sprintf("Prefecture daily fiscal levy across %d guilds (%d taxpayers): %d official tax assessed (%d remitted to treasury, %d skimmed by collectors) + %d corrupt surcharge extorted", taxedCohorts, taxedPopulation, totalAssessed, totalNetTreasury, totalSkimmed, totalSurcharge),
+			"taxed_cohorts":    taxedCohorts,
+			"taxed_population": taxedPopulation,
+			"gross_tax":        totalAssessed,
+			"net_treasury":     totalNetTreasury,
+			"tax_skimmed":      totalSkimmed,
+			"surcharge_coins":  totalSurcharge,
+			"treasury_balance": w.PublicTreasury,
 		},
 	}
 	w.NextID++
@@ -595,6 +595,7 @@ func (w *World) stepCohortProtectionRackets() []Event {
 						primaryGang.ItemPool = map[string]int64{}
 					}
 					primaryGang.ItemPool[smashedItem] += smashedQty / 2 // half looted, half ruined in stall smash
+					w.recordLedgerItemConsumed(smashedItem, smashedQty-smashedQty/2)
 				}
 			}
 

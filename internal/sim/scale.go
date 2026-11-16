@@ -17,6 +17,7 @@ const MaxNearbyView = 32
 // advance in profession XP/level/rank, promote into Tier-2 professions, and can dynamically
 // hydrate/dehydrate individual Actors on demand.
 type PopulationCohort struct {
+	DigestedFood       int64            `json:"digested_food,omitempty"`
 	ID                 string           `json:"id"`
 	Name               string           `json:"name"`
 	District           string           `json:"district"`
@@ -357,6 +358,8 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 		dist.Features = append([]string(nil), dist.Features...)
 	}
 	p := Perception{
+		EnergyNodes:     w.localEnergyNodes(a),
+		Growth:          w.visibleGrowth(a),
 		Tick:            w.Tick,
 		Clock:           idx.clock,
 		Calendar:        idx.calendar,
@@ -866,6 +869,7 @@ func LargeWorld(id string, targetPopulation int) *World {
 		InitialTreasury: w.PublicTreasury,
 	}
 	w.InitEcology(targetPopulation)
+	w.InitLedgerAudit()
 	return w
 }
 
@@ -923,6 +927,8 @@ func (w *World) HydrateActor(cohortID string) (*Actor, error) {
 	if len(c.Currencies) == 0 {
 		c.Currencies = nil
 	}
+	digestedShare := c.DigestedFood / int64(oldPop)
+	c.DigestedFood -= digestedShare
 	c.Population--
 	reconcileCohortAgeBrackets(c)
 
@@ -997,7 +1003,7 @@ func (w *World) HydrateActor(cohortID string) (*Actor, error) {
 		}
 	}
 
-	a := Actor{
+	a := Actor{DigestedFood: digestedShare,
 		ID:           actorID,
 		Name:         fmt.Sprintf("%s·%d", c.Name, c.HydratedSeq),
 		Role:         baseRole,
@@ -1075,14 +1081,7 @@ func (w *World) DehydrateActor(actorID string) error {
 			break
 		}
 	}
-	if target == nil {
-		for i := range w.Cohorts {
-			if w.Cohorts[i].Profession == profID {
-				target = &w.Cohorts[i]
-				break
-			}
-		}
-	}
+
 	if target == nil {
 		prof, _ := w.Catalog.ProfessionByID(profID)
 		tier := prof.Tier
@@ -1123,6 +1122,13 @@ func (w *World) DehydrateActor(actorID string) error {
 		}
 	}
 	w.rebindDehydratedActorContracts(actorID, target.ID, a.Money)
+	for i := range w.Growth {
+		if !w.Growth[i].Cohort && w.Growth[i].OwnerID == actorID {
+			w.Growth[i].OwnerID = target.ID
+			w.Growth[i].Cohort = true
+		}
+	}
+
 	for item, qty := range a.Items {
 		if qty > 0 {
 			target.ItemPool[item] += int64(qty)
@@ -1219,6 +1225,8 @@ func (w *World) stepCohorts() []Event {
 					use = avail
 				}
 				c.ItemPool[edID] -= use
+				c.DigestedFood += use
+				w.recordLedgerItemConsumed(edID, use)
 				if c.ItemPool[edID] <= 0 {
 					delete(c.ItemPool, edID)
 				}
@@ -1309,6 +1317,22 @@ func (w *World) stepCohorts() []Event {
 
 func (w *World) selectCohortRecipe(c *PopulationCohort, prof Profession, guildLevel int, batches int64) *Recipe {
 	canUse := func(r *Recipe) bool {
+		if r.NodeFeature != "" && !w.Map.DistrictHasFeature(c.District, r.NodeFeature) {
+			return false
+		}
+		if r.HouseFacility != "" {
+			available := false
+			for _, h := range w.Houses {
+				if h.District == c.District && h.HasFacility(r.HouseFacility) && !w.isVenuePowerBlocked(h.VenueID) {
+					available = true
+					break
+				}
+			}
+			if !available {
+				return false
+			}
+		}
+
 		if r.Profession != c.Profession && (prof.ParentProfession == "" || r.Profession != prof.ParentProfession) {
 			return false
 		}
@@ -1319,16 +1343,9 @@ func (w *World) selectCohortRecipe(c *PopulationCohort, prof Profession, guildLe
 		return c.ProfLevel >= reqLv && (r.MinFactionLevel == 0 || guildLevel >= r.MinFactionLevel)
 	}
 	hasInputs := func(r *Recipe) bool {
-		if r.MoneyCost > 0 && c.MoneyPool < int64(r.MoneyCost)*batches {
-			return false
-		}
-		for inItem, inQty := range r.Inputs {
-			if c.ItemPool[inItem] < int64(inQty)*batches {
-				return false
-			}
-		}
-		return true
+		return w.cohortRecipeBatches(c, *r, batches) > 0
 	}
+
 	findOutputRecipe := func(item string) *Recipe {
 		for idx := range w.Catalog.Recipes {
 			r := &w.Catalog.Recipes[idx]
@@ -1347,7 +1364,7 @@ func (w *World) selectCohortRecipe(c *PopulationCohort, prof Profession, guildLe
 			continue
 		}
 		// Skip pure intermediate input recipes (seeds, compost, herb) as top-level targets when final product recipes exist
-		if r.ID == "buy_seeds" || r.ID == "make_compost" || r.ID == "gather_herbs" {
+		if r.ID == "save_seeds" || r.ID == "make_compost" || r.ID == "gather_herbs" {
 			continue
 		}
 		outSpec := w.Catalog.Items[r.OutputItem]
@@ -1398,7 +1415,7 @@ func (w *World) selectCohortRecipe(c *PopulationCohort, prof Profession, guildLe
 		}
 	}
 
-	// Resolve missing required inputs first (e.g. buy_seeds, make_compost, gather_herbs, brew_medicine, forge_tools, transcribe_scroll)
+	// Resolve missing required inputs first (e.g. save_seeds, make_compost, gather_herbs, brew_medicine, forge_tools, transcribe_scroll)
 	inKeys := make([]string, 0, len(target.Inputs))
 	for k := range target.Inputs {
 		inKeys = append(inKeys, k)
@@ -1428,12 +1445,28 @@ func (w *World) selectCohortRecipe(c *PopulationCohort, prof Profession, guildLe
 	return nil
 }
 
+// cohortRecipeBatches limits work to complete batches funded by existing stocks.
+func (w *World) cohortRecipeBatches(c *PopulationCohort, r Recipe, requested int64) int64 {
+	batches := requested
+	if r.MoneyCost > 0 {
+		batches = min(batches, c.MoneyPool/int64(r.MoneyCost))
+	}
+	for item, qty := range recipeStartRequirements(r) {
+		if qty > 0 {
+			batches = min(batches, c.ItemPool[item]/int64(qty))
+		}
+	}
+	if r.ResourcePool != "" {
+		batches = min(batches, w.availableDistrictResource(c.District, r.ResourcePool)/int64(maxInt(1, r.ResourceDraw)))
+	}
+	return batches
+}
+
 func (w *World) runCohortProduction(c *PopulationCohort) []Event {
 	prof, ok := w.Catalog.ProfessionByID(c.Profession)
 	if !ok {
 		return nil
 	}
-	var events []Event
 	f := w.faction(c.FactionID)
 	guildLevel := 1
 	if f != nil {
@@ -1441,6 +1474,11 @@ func (w *World) runCohortProduction(c *PopulationCohort) []Event {
 	}
 
 	eff := c.EffectivePopulation()
+	for _, g := range w.Growth {
+		if g.Cohort && g.OwnerID == c.ID && w.Tick < g.PreparationUntil {
+			eff -= g.Workers
+		}
+	}
 	if eff <= 0 {
 		return nil
 	}
@@ -1455,17 +1493,12 @@ func (w *World) runCohortProduction(c *PopulationCohort) []Event {
 		batches = 1
 	}
 
-	// Replenish potable water input for water-consuming professions when local water source is available
-	for itemID, spec := range w.Catalog.Items {
-		if spec.Potable && w.Catalog.TagsConsume([]string{c.Profession}, itemID) && c.ItemPool[itemID] < int64(c.Population)*2 {
-			c.ItemPool[itemID] += batches * 2
-		}
-	}
-
+	nominalBatches := batches
 	chosen := w.selectCohortRecipe(c, prof, guildLevel, batches)
 	if chosen == nil {
 		return nil
 	}
+	batches = w.cohortRecipeBatches(c, *chosen, batches)
 
 	if chosen.MoneyCost > 0 {
 		spent := int64(chosen.MoneyCost) * batches
@@ -1474,6 +1507,7 @@ func (w *World) runCohortProduction(c *PopulationCohort) []Event {
 	}
 	for inItem, inQty := range chosen.Inputs {
 		c.ItemPool[inItem] -= int64(inQty) * batches
+		w.recordLedgerItemConsumed(inItem, int64(inQty)*batches)
 		if c.ItemPool[inItem] <= 0 {
 			delete(c.ItemPool, inItem)
 		}
@@ -1488,6 +1522,7 @@ func (w *World) runCohortProduction(c *PopulationCohort) []Event {
 		unitYield += chosen.BonusOutput
 		if !chosen.DurableBonus {
 			c.ItemPool[chosen.BonusInput] -= batches
+			w.recordLedgerItemConsumed(chosen.BonusInput, batches)
 			if c.ItemPool[chosen.BonusInput] <= 0 {
 				delete(c.ItemPool, chosen.BonusInput)
 			}
@@ -1505,6 +1540,7 @@ func (w *World) runCohortProduction(c *PopulationCohort) []Event {
 					wear = c.ItemPool[toolID]
 				}
 				c.ItemPool[toolID] -= wear
+				w.recordLedgerItemConsumed(toolID, wear)
 				if c.ItemPool[toolID] <= 0 {
 					delete(c.ItemPool, toolID)
 				}
@@ -1522,88 +1558,25 @@ func (w *World) runCohortProduction(c *PopulationCohort) []Event {
 	if chosen.ResourcePool != "" {
 		w.drawDistrictResource(c.District, chosen.ResourcePool, batches*int64(maxInt(1, chosen.ResourceDraw)))
 	}
-	c.ItemPool[chosen.OutputItem] += produced
-	c.AvgEnergy -= chosen.EnergyCost / 2
-	if c.AvgEnergy < 10 {
-		c.AvgEnergy = 10
-	}
-
-	tier := w.Catalog.Items[chosen.OutputItem].Tier
-	if tier < 1 {
-		tier = 1
-	}
-
-	craftEv := Event{
-		ID:      w.NextID,
-		Tick:    w.Tick,
-		ActorID: c.ID,
-		Kind:    "cohort_crafted",
-		Action:  Action{Kind: "craft", RecipeID: chosen.ID, ProfessionID: c.Profession, Item: chosen.OutputItem, Quantity: int(produced)},
-		Payload: map[string]any{
-			"text":       fmt.Sprintf("%s (%d batches) completed %s (+%d %s)", c.Name, batches, chosen.ID, produced, chosen.OutputItem),
-			"cohort_id":  c.ID,
-			"recipe_id":  chosen.ID,
-			"item":       chosen.OutputItem,
-			"tier":       tier,
-			"batches":    batches,
-			"quantity":   produced,
-			"population": c.Population,
-		},
-	}
-	w.NextID++
-	events = append(events, craftEv)
-	c.AvgXP += w.Catalog.CraftXP(*chosen)
-	newLevel := w.Catalog.ProfessionLevel(c.AvgXP)
-	if newLevel > prof.MaxLevel {
-		newLevel = prof.MaxLevel
-	}
-	if newLevel > c.ProfLevel {
-		oldRank := c.Rank
-		c.ProfLevel = newLevel
-		c.Rank = prof.RankTitle(newLevel)
-		e := Event{
-			ID:      w.NextID,
-			Tick:    w.Tick,
-			ActorID: c.ID,
-			Kind:    "cohort_leveled",
-			Action:  Action{Kind: "craft", RecipeID: chosen.ID, ProfessionID: c.Profession},
-			Payload: map[string]any{
-				"text":          fmt.Sprintf("%s (%d villagers) advanced %s to level %d (%s)", c.Name, c.Population, c.Profession, c.ProfLevel, c.Rank),
-				"cohort_id":     c.ID,
-				"population":    c.Population,
-				"profession":    c.Profession,
-				"level":         c.ProfLevel,
-				"rank":          c.Rank,
-				"previous_rank": oldRank,
-			},
-		}
-		w.NextID++
-		events = append(events, e)
-	}
-
-	if f != nil {
-		f.Influence += tier * c.ProfLevel
-		if next := w.Catalog.FactionLevel(f.Influence); next > f.Level {
-			f.Level = next
-			e := Event{
-				ID:      w.NextID,
-				Tick:    w.Tick,
-				ActorID: c.ID,
-				Kind:    "faction_leveled",
-				Action:  Action{Kind: "craft", FactionID: f.ID},
-				Payload: map[string]any{
-					"text":       fmt.Sprintf("%s now stands at level %d", f.Name, next),
-					"faction_id": f.ID,
-					"level":      next,
-					"influence":  f.Influence,
-				},
+	parents := map[string]int64{}
+	if chosen.Growth != nil {
+		produced = int64(chosen.OutputQty) * batches
+		for item, qty := range chosen.Growth.Parents {
+			amount := int64(qty) * batches
+			c.ItemPool[item] -= amount
+			parents[item] = amount
+			if c.ItemPool[item] == 0 {
+				delete(c.ItemPool, item)
 			}
-			w.NextID++
-			events = append(events, e)
 		}
 	}
-
-	return events
+	if len(parents) == 0 {
+		parents = nil
+	}
+	c.AvgEnergy -= chosen.EnergyCost / 2
+	event := w.startGrowth(c.ID, c.District, "", true, *chosen, batches, produced, parents)
+	w.Growth[len(w.Growth)-1].Workers = int(int64(eff) * batches / nominalBatches)
+	return []Event{event}
 }
 
 func (w *World) effectiveCohortTradeUnitBatchPrice(districtID, itemID string, basePrice int) int {
@@ -1643,7 +1616,7 @@ func (w *World) clearRegionalCohortMarket() []Event {
 		var buyerCohort *PopulationCohort
 		for i := range w.Cohorts {
 			c := &w.Cohorts[i]
-			if c.Population <= 0 || c.MoneyPool < int64(o.Price) {
+			if c.District != seller.Location || c.Population <= 0 || c.MoneyPool < int64(o.Price) {
 				continue
 			}
 			if w.Catalog.TagsConsume([]string{"resident", c.Profession}, o.Item) && !w.Catalog.TagsProduce([]string{c.Profession}, o.Item) {
@@ -1695,11 +1668,7 @@ func (w *World) clearRegionalCohortMarket() []Event {
 	edgeRem := make(map[string]int64, len(w.Map.Roads))
 	for _, r := range w.Map.Roads {
 		capBatches, _, _, _, _, _ := w.edgeEffectiveLogistics(r, cal)
-		perHourCap := capBatches / 6
-		if perHourCap < 500 {
-			perHourCap = 500
-		}
-		edgeRem[canonicalEdgeKey(r.From, r.To)] = perHourCap
+		edgeRem[canonicalEdgeKey(r.From, r.To)] = capBatches
 	}
 	routeCache := make(map[string]freightRoutePlan, 64)
 	routeValid := make(map[string]bool, 64)
@@ -1767,7 +1736,7 @@ func (w *World) clearRegionalCohortMarket() []Event {
 							want = (want*int64(panicPermille) + 500) / 1000
 						}
 					}
-					deficit := want - buyer.ItemPool[itemID]
+					deficit := want - buyer.ItemPool[itemID] - w.incomingStock(buyer.ID, itemID)
 					if deficit <= 0 {
 						continue
 					}
@@ -1865,6 +1834,7 @@ func (w *World) clearRegionalCohortMarket() []Event {
 						}
 					}
 
+					w.recordLedgerItemConsumed(itemID, lossQty)
 					deliveredQty := qty - lossQty
 					if deliveredQty < 0 {
 						deliveredQty = 0
@@ -1877,7 +1847,12 @@ func (w *World) clearRegionalCohortMarket() []Event {
 						buyer.ItemPool = map[string]int64{}
 					}
 					if deliveredQty > 0 {
-						buyer.ItemPool[itemID] += deliveredQty
+						if pass == 0 {
+							buyer.ItemPool[itemID] += deliveredQty
+						} else {
+							w.Shipments = append(w.Shipments, Shipment{ID: w.NextID, BuyerID: buyer.ID, Item: itemID, Quantity: deliveredQty, From: seller.District, To: buyer.District, ArrivalTick: w.Tick + plan.ticks})
+							w.NextID++
+						}
 					}
 					gov := w.Catalog.EffectiveGovernance()
 					taxPermille := gov.MarketTaxPermille
@@ -2019,6 +1994,9 @@ func (w *World) clearFocalActorCohortTrades() []Event {
 				var sellerCohort *PopulationCohort
 				for ci := range w.Cohorts {
 					c := &w.Cohorts[ci]
+					if c.District != a.Location {
+						continue
+					}
 					if c.Population <= 0 || c.ItemPool[k] <= int64(c.Population)*3+int64(sp.BatchQty) {
 						continue
 					}
@@ -2056,6 +2034,9 @@ func (w *World) clearFocalActorCohortTrades() []Event {
 					}
 					for ci := range w.Cohorts {
 						c := &w.Cohorts[ci]
+						if c.District != a.Location {
+							continue
+						}
 						if c.Population > 0 && c.ItemPool[k] > int64(c.Population)*5 {
 							price := int64(w.effectiveCohortTradeUnitBatchPrice(c.District, k, maxInt(1, sp.BatchPrice)))
 							if paid := w.debitTreasury(price, "relief"); paid >= price {
@@ -2091,6 +2072,9 @@ func (w *World) clearFocalActorCohortTrades() []Event {
 				}
 				for ci := range w.Cohorts {
 					c := &w.Cohorts[ci]
+					if c.District != a.Location {
+						continue
+					}
 					if c.Population > 0 && c.ItemPool[k] > int64(maxInt(10, c.Population/2)) {
 						a.Money -= price
 						if a.Items == nil {
@@ -2134,6 +2118,9 @@ func (w *World) clearFocalActorCohortTrades() []Event {
 			var buyerCohort *PopulationCohort
 			for ci := range w.Cohorts {
 				c := &w.Cohorts[ci]
+				if c.District != a.Location {
+					continue
+				}
 				if c.Population <= 0 || c.MoneyPool < int64(price) {
 					continue
 				}
@@ -2399,6 +2386,7 @@ func (w *World) stepCohortRecuperation() []Event {
 					need = avail
 				}
 				c.ItemPool[medID] -= need
+				w.recordLedgerItemConsumed(medID, need)
 				if c.ItemPool[medID] <= 0 {
 					delete(c.ItemPool, medID)
 				}
@@ -2846,6 +2834,7 @@ func (w *World) stepCohortConflicts() []Event {
 			writNeed := int64(maxInt(1, patrolSize/8))
 			if constables.ItemPool["bounty_writ"] >= writNeed {
 				constables.ItemPool["bounty_writ"] -= writNeed
+				w.recordLedgerItemConsumed("bounty_writ", writNeed)
 				if constables.ItemPool["bounty_writ"] <= 0 {
 					delete(constables.ItemPool, "bounty_writ")
 				}
@@ -3070,7 +3059,7 @@ func (s *ScaleSummary) RecordEvents(events []Event) {
 	for _, e := range events {
 		s.EventCounts[e.Kind]++
 		switch e.Kind {
-		case "crafted":
+		case "crafted", "harvested":
 			s.CraftBatches++
 			qty := payloadInt64(e.Payload, "quantity")
 			if qty <= 0 {

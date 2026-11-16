@@ -188,6 +188,9 @@ func runSim(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 
+	if err := w.Catalog.ValidatePhysicalRules(w.FlowGrid); err != nil {
+		return err
+	}
 	if *outCheckpoint != "" {
 		if err := writeJSONFile(*outCheckpoint, w); err != nil {
 			return fmt.Errorf("write checkpoint file: %w", err)
@@ -220,6 +223,9 @@ func runSim(args []string, stdout, stderr io.Writer) error {
 				return nil
 			}
 			return err
+		}
+		if err := w.VerifyLedgerConservation(); err != nil {
+			return fmt.Errorf("world %q tick %d accounting: %w", w.ID, w.Tick, err)
 		}
 		if *outDecisions != "" {
 			recordedLogs = append(recordedLogs, tickLog)

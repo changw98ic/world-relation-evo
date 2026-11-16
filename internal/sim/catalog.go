@@ -133,6 +133,7 @@ func (f *Faction) HasMember(id string) bool {
 
 // Recipe defines a production action with profession, guild, and location requirements.
 type Recipe struct {
+	Growth             *GrowthRule    `json:"growth,omitempty"`
 	ID                 string         `json:"id"`
 	Label              string         `json:"label"`
 	Profession         string         `json:"profession,omitempty"`
@@ -199,7 +200,7 @@ type Catalog struct {
 func DefaultCatalog() Catalog {
 	return Catalog{
 		TagActions: map[string][]string{
-			"resident": {"start_plan", "abandon_plan", "wait", "move", "move_venue", "enter_house", "leave_house", "sleep", "eat", "drink", "relieve", "medicate", "speak", "repair_house", "transfer_house", "upgrade_house", "maintain_infra", "join_faction", "join_profession", "marry", "swear_bond", "mediate_feud"},
+			"resident": {"refuel", "harvest", "start_plan", "abandon_plan", "wait", "move", "move_venue", "enter_house", "leave_house", "sleep", "eat", "drink", "relieve", "medicate", "speak", "repair_house", "transfer_house", "upgrade_house", "maintain_infra", "join_faction", "join_profession", "marry", "swear_bond", "mediate_feud"},
 			"trader":   {"propose_agreement", "accept_agreement", "reject_agreement", "fulfill_agreement", "accept_loan", "reject_loan", "cancel_loan", "offer", "accept", "reject", "borrow_loan", "repay_loan", "foreclose_collateral"},
 			"fighter":  {"attack", "avenge_feud", "claim_turf"},
 			"healer":   {"heal"},
@@ -227,9 +228,14 @@ func DefaultCatalog() Catalog {
 		Lifecycle:              DefaultLifecycleSpec(),
 		Governance:             DefaultGovernanceSpec(),
 		Items: map[string]ItemSpec{
+			"nightsoil": {ID: "nightsoil", Name: "collected organic waste", Tier: 1},
+			"paper":     {ID: "paper", Name: "paper sheets", Tier: 1, Tradeable: true, BatchQty: 1, BatchPrice: 1},
+			"ink":       {ID: "ink", Name: "writing ink", Tier: 1, Tradeable: true, BatchQty: 1, BatchPrice: 1},
+			"calf":      {ID: "calf", Name: "cattle calf", Tier: 1, Tradeable: true, BatchQty: 1, BatchPrice: 2},
+
 			"food": {ID: "food", Name: "grain rations", Tier: 1, Edible: true, HungerRelief: 1,
 				Tradeable: true, BatchQty: 2, BatchPrice: 2, OfferThreshold: 6, SurplusThreshold: 8, ShortageThreshold: 4},
-			"seeds": {ID: "seeds", Name: "crop seeds", Tier: 1,
+			"seeds": {ID: "seeds", Name: "wheat seeds", Tier: 1,
 				Tradeable: true, BatchQty: 3, BatchPrice: 1, OfferThreshold: 6, SurplusThreshold: 6, ShortageThreshold: 1},
 			"water": {ID: "water", Name: "well water", Tier: 1, Potable: true, ThirstRelief: 2,
 				Tradeable: true, BatchQty: 2, BatchPrice: 1, OfferThreshold: 6, SurplusThreshold: 5, ShortageThreshold: 1},
@@ -263,7 +269,7 @@ func DefaultCatalog() Catalog {
 				Tradeable: true, BatchQty: 1, BatchPrice: 5, OfferThreshold: 2, SurplusThreshold: 2, ShortageThreshold: 1},
 			"bounty_writ": {ID: "bounty_writ", Name: "yamen bounty writ", Tier: 3,
 				Tradeable: true, BatchQty: 1, BatchPrice: 5, OfferThreshold: 2, SurplusThreshold: 2, ShortageThreshold: 1},
-			"livestock": {ID: "livestock", Name: "pasture livestock", Tier: 2,
+			"livestock": {ID: "livestock", Name: "adult cattle", Tier: 2,
 				Tradeable: true, BatchQty: 1, BatchPrice: 5, OfferThreshold: 3, SurplusThreshold: 4, ShortageThreshold: 1},
 			"meat": {ID: "meat", Name: "cured meat", Tier: 2, Edible: true, HungerRelief: 2,
 				Tradeable: true, BatchQty: 2, BatchPrice: 4, OfferThreshold: 4, SurplusThreshold: 5, ShortageThreshold: 2},
@@ -321,11 +327,17 @@ func DefaultCatalog() Catalog {
 			{ID: "gang_boss", Name: "帮主", Tier: 2, Guild: "gang_guild", ParentProfession: "gangster", MinParentLevel: 2, Requirements: map[string]int{"strength": 10, "insight": 8, "spirit": 9}, MaxLevel: 6, YieldEvery: 2, BaseYieldBonus: 1, CombatBonusPerLevel: 3, Grants: []string{"fighter", "outlaw", "gang"}, Ranks: []string{"分堂舵主", "双花大红棍", "帮派龙头"}},
 		},
 		Recipes: []Recipe{
+			{ID: "compost_waste", Label: "Mature collected organic waste into compost", Profession: "farmer", MinProfessionLevel: 1, HouseFacility: "compost_pit", Ticks: 2, EnergyCost: 6, Inputs: map[string]int{"nightsoil": 3}, OutputItem: "compost", OutputQty: 1, Growth: &GrowthRule{DurationTicks: 60 * TicksPerDay, MaintenanceIntervalTicks: TicksPerDay, Supplies: map[string]int{"water": 1}, Source: "UMN Extension: well-managed warm-season compost 2-4 months; preset uses 60 days"}},
+
+			{ID: "make_paper", Label: "Prepare paper from timber pulp", Profession: "scholar", MinProfessionLevel: 1, NodeFeature: "academy", Ticks: 3, EnergyCost: 8, Inputs: map[string]int{"timber": 1, "water": 1}, OutputItem: "paper", OutputQty: 1},
+			{ID: "make_ink", Label: "Prepare writing ink from plant pigment", Profession: "scholar", MinProfessionLevel: 1, NodeFeature: "academy", Ticks: 3, EnergyCost: 8, Inputs: map[string]int{"herb": 1, "water": 1}, OutputItem: "ink", OutputQty: 1},
+			{ID: "raise_livestock", Label: "Raise juvenile stock to breeding maturity", Profession: "herder", MinProfessionLevel: 1, NodeFeature: "pasture", Ticks: 3, EnergyCost: 11, Inputs: map[string]int{"calf": 1}, Growth: &GrowthRule{DurationTicks: 450 * TicksPerDay, MaintenanceIntervalTicks: TicksPerDay, Supplies: map[string]int{"water": 1}, ResourcePool: "pasture_grass", ResourceDraw: 2, Source: "Penn State Extension: heifers ready for breeding at 13-15 months; preset uses 450 days"}, OutputItem: "livestock", OutputQty: 1},
+
 			{
-				ID: "buy_seeds", Label: "Buy 3 crop seeds for 1 coin",
-				Profession: "farmer", MinProfessionLevel: 1, NodeFeature: "market",
-				Ticks: 1, EnergyCost: 2, MoneyCost: 1,
-				OutputItem: "seeds", OutputQty: 3,
+				ID: "save_seeds", Label: "Select crop seed from stored grain",
+				Profession: "farmer", MinProfessionLevel: 1,
+				Ticks: 1, EnergyCost: 2, Inputs: map[string]int{"food": 1},
+				OutputItem: "seeds", OutputQty: 1,
 			},
 			{
 				ID: "fetch_water", Label: "Draw 2 buckets of water at the creek well",
@@ -337,7 +349,8 @@ func DefaultCatalog() Catalog {
 			{
 				ID: "make_compost", Label: "Turn 2 compost in the yard compost pit",
 				Profession: "farmer", MinProfessionLevel: 1, HouseFacility: "compost_pit",
-				Ticks: 2, EnergyCost: 6,
+				Ticks: 2, EnergyCost: 6, Inputs: map[string]int{"food": 2},
+				Growth:     &GrowthRule{DurationTicks: 60 * TicksPerDay, MaintenanceIntervalTicks: TicksPerDay, Supplies: map[string]int{"water": 1}, Source: "UMN Extension: well-managed warm-season compost 2-4 months; preset uses 60 days"},
 				OutputItem: "compost", OutputQty: 2,
 			},
 			{
@@ -348,13 +361,14 @@ func DefaultCatalog() Catalog {
 				Inputs:     map[string]int{"seeds": 1, "water": 1},
 				BonusInput: "compost", BonusOutput: 1,
 				OutputItem: "food", OutputQty: 2,
+				Growth: &GrowthRule{DurationTicks: 120 * TicksPerDay, MaintenanceIntervalTicks: TicksPerDay, Supplies: map[string]int{"water": 1}, Source: "FAO crop water needs: wheat 120-150 days; preset uses 120 days"},
 			},
 			{
 				ID: "thresh_choice_grain", Label: "Thresh 2 choice grain for the guild stores",
 				Profession: "farmer", MinProfessionLevel: 2, MinFactionLevel: 2, NodeFeature: "farmland",
-				ResourcePool: "soil_fertility", ResourceDraw: 2,
+
 				Ticks: 4, EnergyCost: 14,
-				Inputs:     map[string]int{"seeds": 1, "water": 1, "compost": 1},
+				Inputs:     map[string]int{"food": 2},
 				OutputItem: "choice_grain", OutputQty: 2,
 			},
 			{
@@ -449,6 +463,7 @@ func DefaultCatalog() Catalog {
 				Profession: "scholar", MinProfessionLevel: 1, NodeFeature: "academy",
 				Ticks: 3, EnergyCost: 8,
 				OutputItem: "scroll", OutputQty: 1,
+				Inputs: map[string]int{"paper": 1, "ink": 1},
 			},
 			{
 				ID: "compile_classic", Label: "Compile 1 annotated classic treatise as a xiucai",
@@ -463,6 +478,7 @@ func DefaultCatalog() Catalog {
 				Ticks: 3, EnergyCost: 10,
 				BonusInput: "weapon", BonusOutput: 1, DurableBonus: true,
 				OutputItem: "martial_manual", OutputQty: 1,
+				Inputs: map[string]int{"paper": 1, "ink": 1},
 			},
 			{
 				ID: "temper_weapon", Label: "Temper 1 steel blade from ore and timber at the martial hall",
@@ -477,13 +493,7 @@ func DefaultCatalog() Catalog {
 				Ticks: 3, EnergyCost: 9,
 				BonusInput: "scroll", BonusOutput: 1,
 				OutputItem: "bounty_writ", OutputQty: 1,
-			},
-			{
-				ID: "pillage_supplies", Label: "Raid mountain trails and stockpile 2 rations at bandit camp",
-				Profession: "bandit", MinProfessionLevel: 1, NodeFeature: "bandit_camp",
-				Ticks: 3, EnergyCost: 11,
-				BonusInput: "weapon", BonusOutput: 1, DurableBonus: true,
-				OutputItem: "food", OutputQty: 2,
+				Inputs: map[string]int{"paper": 1, "ink": 1},
 			},
 			{
 				ID: "graze_livestock", Label: "Graze and breed 1 pasture livestock herd",
@@ -491,7 +501,8 @@ func DefaultCatalog() Catalog {
 				ResourcePool: "pasture_grass", ResourceDraw: 2,
 				Ticks: 3, EnergyCost: 11,
 				BonusInput: "water", BonusOutput: 1,
-				OutputItem: "livestock", OutputQty: 1,
+				OutputItem: "calf", OutputQty: 1,
+				Growth: &GrowthRule{DurationTicks: 283 * TicksPerDay, MaintenanceIntervalTicks: TicksPerDay, Supplies: map[string]int{"water": 1}, ResourcePool: "pasture_grass", ResourceDraw: 2, Parents: map[string]int{"livestock": 2}, Source: "UNL Beef: cattle gestation typically 283 days; breeding pair and care inputs declared by this preset"},
 			},
 			{
 				ID: "butcher_stock", Label: "Dress 1 livestock into 3 cured meat rations",
@@ -561,12 +572,12 @@ func DefaultCatalog() Catalog {
 			},
 			"farmer": {
 				Produces:    []string{"food", "choice_grain"},
-				Consumes:    []string{"seeds", "water", "compost", "tools"},
+				Consumes:    []string{"nightsoil", "seeds", "water", "compost", "tools"},
 				TargetStock: map[string]int{"food": 12, "choice_grain": 4},
 			},
 			"agronomist": {
 				Produces:    []string{"food", "choice_grain"},
-				Consumes:    []string{"seeds", "water", "compost", "tools"},
+				Consumes:    []string{"nightsoil", "seeds", "water", "compost", "tools"},
 				TargetStock: map[string]int{"food": 14, "choice_grain": 6},
 			},
 			"gatherer": {
@@ -619,13 +630,13 @@ func DefaultCatalog() Catalog {
 				PublicTrustDuty: true,
 			},
 			"herder": {
-				Produces:    []string{"livestock", "meat", "hide"},
-				Consumes:    []string{"water", "food"},
+				Produces:    []string{"calf", "livestock", "meat", "hide"},
+				Consumes:    []string{"calf", "water", "food"},
 				TargetStock: map[string]int{"livestock": 3, "meat": 6, "hide": 3, "food": 6},
 			},
 			"ranch_master": {
-				Produces:    []string{"livestock", "meat", "hide"},
-				Consumes:    []string{"water", "food"},
+				Produces:    []string{"calf", "livestock", "meat", "hide"},
+				Consumes:    []string{"calf", "water", "food"},
 				TargetStock: map[string]int{"livestock": 4, "meat": 8, "hide": 4, "food": 6},
 			},
 			"fisher": {
@@ -678,11 +689,11 @@ func DefaultCatalog() Catalog {
 				CoercivePower: true,
 			},
 			"peddler": {
-				Consumes:    []string{"food", "choice_grain", "meat", "fish", "hide", "winter_coat", "rare_herb", "sacrificial_offering", "timber", "plank", "ore", "tools", "fine_tools", "herb", "medicine", "tonic", "scroll", "classic_tome", "weapon", "martial_manual"},
+				Consumes:    []string{"food", "choice_grain", "meat", "fish", "hide", "winter_coat", "rare_herb", "sacrificial_offering", "paper", "ink", "timber", "plank", "ore", "tools", "fine_tools", "herb", "medicine", "tonic", "scroll", "classic_tome", "weapon", "martial_manual"},
 				TargetStock: map[string]int{"food": 8, "choice_grain": 2, "timber": 2, "plank": 2, "ore": 2, "tools": 1, "medicine": 2, "scroll": 2},
 			},
 			"merchant_chief": {
-				Consumes:    []string{"food", "choice_grain", "meat", "fish", "hide", "winter_coat", "rare_herb", "sacrificial_offering", "timber", "plank", "ore", "tools", "fine_tools", "herb", "medicine", "tonic", "scroll", "classic_tome", "weapon", "martial_manual"},
+				Consumes:    []string{"food", "choice_grain", "meat", "fish", "hide", "winter_coat", "rare_herb", "sacrificial_offering", "paper", "ink", "timber", "plank", "ore", "tools", "fine_tools", "herb", "medicine", "tonic", "scroll", "classic_tome", "weapon", "martial_manual"},
 				TargetStock: map[string]int{"food": 8, "choice_grain": 2, "timber": 2, "plank": 2, "ore": 2, "tools": 1, "fine_tools": 1, "medicine": 2, "tonic": 1, "scroll": 2, "classic_tome": 1},
 			},
 			"guard": {
@@ -696,51 +707,51 @@ func DefaultCatalog() Catalog {
 				CoercivePower: true,
 			},
 			"scholar": {
-				Produces:        []string{"scroll"},
-				Consumes:        []string{"food"},
+				Produces:        []string{"paper", "ink", "scroll"},
+				Consumes:        []string{"timber", "water", "herb", "food"},
 				TargetStock:     map[string]int{"scroll": 3, "food": 6},
 				PublicTrustDuty: true,
 			},
 			"xiucai": {
-				Produces:        []string{"scroll", "classic_tome"},
-				Consumes:        []string{"food", "scroll"},
+				Produces:        []string{"paper", "ink", "scroll", "classic_tome"},
+				Consumes:        []string{"timber", "water", "herb", "food", "scroll"},
 				TargetStock:     map[string]int{"classic_tome": 2, "scroll": 2, "food": 6},
 				PublicTrustDuty: true,
 			},
 			"martial_artist": {
 				Produces:      []string{"martial_manual", "weapon"},
-				Consumes:      []string{"food", "ore", "timber", "medicine", "tonic"},
+				Consumes:      []string{"paper", "ink", "food", "ore", "timber", "medicine", "tonic"},
 				TargetStock:   map[string]int{"martial_manual": 3, "weapon": 2, "food": 6, "medicine": 2},
 				CoercivePower: true,
 			},
 			"martial_master": {
 				Produces:      []string{"martial_manual", "weapon"},
-				Consumes:      []string{"food", "ore", "timber", "medicine", "tonic"},
+				Consumes:      []string{"paper", "ink", "food", "ore", "timber", "medicine", "tonic"},
 				TargetStock:   map[string]int{"martial_manual": 4, "weapon": 3, "food": 6, "tonic": 2},
 				CoercivePower: true,
 			},
 			"constable": {
 				Produces:        []string{"bounty_writ"},
-				Consumes:        []string{"food", "scroll", "weapon", "medicine"},
+				Consumes:        []string{"paper", "ink", "food", "scroll", "weapon", "medicine"},
 				TargetStock:     map[string]int{"bounty_writ": 3, "weapon": 1, "food": 6},
 				CoercivePower:   true,
 				PublicTrustDuty: true,
 			},
 			"chief_constable": {
 				Produces:        []string{"bounty_writ"},
-				Consumes:        []string{"food", "scroll", "weapon", "medicine", "tonic"},
+				Consumes:        []string{"paper", "ink", "food", "scroll", "weapon", "medicine", "tonic"},
 				TargetStock:     map[string]int{"bounty_writ": 4, "weapon": 2, "food": 6},
 				CoercivePower:   true,
 				PublicTrustDuty: true,
 			},
 			"bandit": {
-				Produces:      []string{"food"},
+
 				Consumes:      []string{"food", "choice_grain", "weapon", "medicine"},
 				TargetStock:   map[string]int{"food": 8, "weapon": 1, "medicine": 2},
 				CoercivePower: true,
 			},
 			"bandit_leader": {
-				Produces:      []string{"food"},
+
 				Consumes:      []string{"food", "choice_grain", "weapon", "medicine", "tonic"},
 				TargetStock:   map[string]int{"food": 10, "weapon": 2, "tonic": 1},
 				CoercivePower: true,
@@ -843,10 +854,12 @@ func (c Catalog) Capabilities(a Actor) map[string]bool {
 	}
 	if len(a.Professions) > 0 {
 		result["craft"] = true
+		result["harvest"] = true
 	}
 	for _, r := range c.Recipes {
 		if r.RequiredTag != "" && ActorHasTag(idTags, r.RequiredTag) {
 			result["craft"] = true
+			result["harvest"] = true
 			break
 		}
 	}
@@ -1003,6 +1016,9 @@ func (c Catalog) ProfessionGating(a Actor, r Recipe) (bool, string) {
 
 // RecipeYield returns the settled output count including bonus input, profession mastery, advanced career tier, and guild standing.
 func (c Catalog) RecipeYield(a Actor, r Recipe, bonus bool) int {
+	if r.Growth != nil {
+		return r.OutputQty
+	}
 	yield := r.OutputQty
 	if bonus {
 		yield += r.BonusOutput
@@ -1122,11 +1138,9 @@ func CloneCatalog(c Catalog) Catalog {
 		TagProfiles:            make(map[string]TagProfile, len(c.TagProfiles)),
 		LevelThresholds:        append([]int(nil), c.LevelThresholds...),
 		FactionLevelThresholds: append([]int(nil), c.FactionLevelThresholds...),
-		Calendar: CalendarSpec{
-			DaysPerSeason: c.Calendar.DaysPerSeason,
-		},
-		Lifecycle:  c.Lifecycle,
-		Governance: c.Governance,
+		Calendar:               CalendarSpec{},
+		Lifecycle:              c.Lifecycle,
+		Governance:             c.Governance,
 	}
 	for k, v := range c.TagActions {
 		out.TagActions[k] = append([]string(nil), v...)
@@ -1152,6 +1166,7 @@ func CloneCatalog(c Catalog) Catalog {
 	}
 	for i, r := range c.Recipes {
 		rc := r
+		rc.Growth = cloneGrowthRule(r.Growth)
 		if r.Inputs != nil {
 			rc.Inputs = make(map[string]int, len(r.Inputs))
 			for k, v := range r.Inputs {

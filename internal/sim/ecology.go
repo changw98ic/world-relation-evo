@@ -9,6 +9,7 @@ import (
 
 // SeasonSpec defines a named season in a world's declarative calendar.
 type SeasonSpec struct {
+	Days             int            `json:"days"`
 	ID               string         `json:"id"`
 	Name             string         `json:"name"`
 	FeatureYieldPct  map[string]int `json:"feature_yield_pct,omitempty"`
@@ -18,10 +19,9 @@ type SeasonSpec struct {
 	RouteCapacityPct map[string]int `json:"route_capacity_pct,omitempty"`
 }
 
-// CalendarSpec defines configurable season length and annual cycle (e.g. 7 days/season = 28 days/year, or 365 days/year).
+// CalendarSpec defines each season duration. The default is a 365-day non-leap year.
 type CalendarSpec struct {
-	DaysPerSeason int          `json:"days_per_season"`
-	Seasons       []SeasonSpec `json:"seasons,omitempty"`
+	Seasons []SeasonSpec `json:"seasons,omitempty"`
 }
 
 // CalendarState is the derived calendar date for any quarter-hour simulation tick.
@@ -37,46 +37,26 @@ type CalendarState struct {
 
 // CalendarAt computes the year, season, and day within season from tick and CalendarSpec.
 func CalendarAt(tick int64, spec CalendarSpec) CalendarState {
-	clock := ClockAt(tick)
-	daysPerSeason := spec.DaysPerSeason
-	if daysPerSeason <= 0 {
-		daysPerSeason = 7
+	if len(spec.Seasons) == 0 {
+		spec = DefaultCalendarSpec()
 	}
-	numSeasons := len(spec.Seasons)
-	if numSeasons == 0 {
-		daysInYear := daysPerSeason * 4
-		zeroDay := clock.Day - 1
-		year := zeroDay/daysInYear + 1
-		dayOfYear := zeroDay%daysInYear + 1
-		sIdx := (dayOfYear - 1) / daysPerSeason
-		return CalendarState{
-			Year:        year,
-			SeasonIndex: sIdx,
-			SeasonID:    "default",
-			SeasonName:  "Default",
-			DayOfSeason: (dayOfYear-1)%daysPerSeason + 1,
-			DayOfYear:   dayOfYear,
-			DaysInYear:  daysInYear,
+	yearDays := 0
+	for _, season := range spec.Seasons {
+		if season.Days <= 0 {
+			panic("calendar season duration must be positive")
 		}
+		yearDays += season.Days
 	}
-	daysInYear := daysPerSeason * numSeasons
-	zeroDay := clock.Day - 1
-	year := zeroDay/daysInYear + 1
-	dayOfYear := zeroDay%daysInYear + 1
-	sIdx := (dayOfYear - 1) / daysPerSeason
-	if sIdx >= numSeasons {
-		sIdx = numSeasons - 1
+	day := ClockAt(tick).Day - 1
+	dayInYear := day % yearDays
+	remaining := dayInYear
+	for index, season := range spec.Seasons {
+		if remaining < season.Days {
+			return CalendarState{Year: day/yearDays + 1, SeasonIndex: index, SeasonID: season.ID, SeasonName: season.Name, DayOfSeason: remaining + 1, DayOfYear: dayInYear + 1, DaysInYear: yearDays}
+		}
+		remaining -= season.Days
 	}
-	s := spec.Seasons[sIdx]
-	return CalendarState{
-		Year:        year,
-		SeasonIndex: sIdx,
-		SeasonID:    s.ID,
-		SeasonName:  s.Name,
-		DayOfSeason: (dayOfYear-1)%daysPerSeason + 1,
-		DayOfYear:   dayOfYear,
-		DaysInYear:  daysInYear,
-	}
+	panic("calendar day outside configured year")
 }
 
 // WeatherSpec defines a declarative weather state and its physical effects on yields, travel, shipping, and exposure.
@@ -124,19 +104,19 @@ type EncounterSpec struct {
 
 // DisasterSpec defines a regional natural hazard, its weather/seasonal triggers, and engineering mitigations.
 type DisasterSpec struct {
-	ID                  string         `json:"id"`
-	Name                string         `json:"name"`
-	TriggerWeathers     []string       `json:"trigger_weathers,omitempty"`
-	TriggerSeasons      []string       `json:"trigger_seasons,omitempty"`
-	TargetFeatures      []string       `json:"target_features,omitempty"`
-	ProbPermillePerDay  int            `json:"prob_permille_per_day"`
-	DurationTicks       int64          `json:"duration_ticks"`
-	ResourceDamagePct   map[string]int `json:"resource_damage_pct,omitempty"`
-	HouseDamage         int            `json:"house_damage,omitempty"`
-	SanitationDrop      int            `json:"sanitation_drop,omitempty"`
-	CasualtyPermille    int            `json:"casualty_permille,omitempty"`
-	MitigatedByInfra    string         `json:"mitigated_by_infra,omitempty"`
-	ReliefItem          string         `json:"relief_item,omitempty"`
+	ID                 string         `json:"id"`
+	Name               string         `json:"name"`
+	TriggerWeathers    []string       `json:"trigger_weathers,omitempty"`
+	TriggerSeasons     []string       `json:"trigger_seasons,omitempty"`
+	TargetFeatures     []string       `json:"target_features,omitempty"`
+	ProbPermillePerDay int            `json:"prob_permille_per_day"`
+	DurationTicks      int64          `json:"duration_ticks"`
+	ResourceDamagePct  map[string]int `json:"resource_damage_pct,omitempty"`
+	HouseDamage        int            `json:"house_damage,omitempty"`
+	SanitationDrop     int            `json:"sanitation_drop,omitempty"`
+	CasualtyPermille   int            `json:"casualty_permille,omitempty"`
+	MitigatedByInfra   string         `json:"mitigated_by_infra,omitempty"`
+	ReliefItem         string         `json:"relief_item,omitempty"`
 }
 
 // AccidentSpec defines a declarative workplace or transit accident and its tool/infrastructure safety mitigations.
@@ -197,6 +177,9 @@ type DiseaseSpec struct {
 
 // LifecycleSpec defines age brackets, fertility, aging, natural elder mortality, and successor hydration rules.
 type LifecycleSpec struct {
+	WasteItem                 string `json:"waste_item,omitempty"`
+	WastePerFoodDivisor       int64  `json:"waste_per_food_divisor,omitempty"`
+	CompostRecipeID           string `json:"compost_recipe_id,omitempty"`
 	ChildMaxAge               int    `json:"child_max_age"`
 	ElderMinAge               int    `json:"elder_min_age"`
 	MaxExpectancy             int    `json:"max_expectancy"`
@@ -224,21 +207,21 @@ type ActiveDisaster struct {
 
 // DistrictState holds live ecological, weather, sanitation, infrastructure, threat, and disaster state for one district.
 type DistrictState struct {
-	DistrictID      string           `json:"district_id"`
-	Weather         string           `json:"weather"`
-	Sanitation      int              `json:"sanitation"`
-	NightsoilPool   int64            `json:"nightsoil_pool,omitempty"`
+	DistrictID       string           `json:"district_id"`
+	Weather          string           `json:"weather"`
+	Sanitation       int              `json:"sanitation"`
+	NightsoilPool    int64            `json:"nightsoil_pool,omitempty"`
 	MoraleBonus      int              `json:"morale_bonus,omitempty"`
 	BountyPool       int              `json:"bounty_pool,omitempty"`
 	Corruption       int              `json:"corruption,omitempty"`
 	RacketPressure   int              `json:"racket_pressure,omitempty"`
 	BribeShieldTicks int              `json:"bribe_shield_ticks,omitempty"`
 	LastRitualSeason string           `json:"last_ritual_season,omitempty"`
-	Resources       map[string]int64 `json:"resources,omitempty"`
-	MaxResources    map[string]int64 `json:"max_resources,omitempty"`
-	Infrastructure  map[string]int   `json:"infrastructure,omitempty"`
-	ThreatActivity  map[string]int   `json:"threat_activity,omitempty"`
-	ActiveDisasters []ActiveDisaster `json:"active_disasters,omitempty"`
+	Resources        map[string]int64 `json:"resources,omitempty"`
+	MaxResources     map[string]int64 `json:"max_resources,omitempty"`
+	Infrastructure   map[string]int   `json:"infrastructure,omitempty"`
+	ThreatActivity   map[string]int   `json:"threat_activity,omitempty"`
+	ActiveDisasters  []ActiveDisaster `json:"active_disasters,omitempty"`
 }
 
 func CloneDistrictState(ds DistrictState) DistrictState {
@@ -279,10 +262,9 @@ func worldHash(worldID string, tick int64, salt string) uint64 {
 
 func DefaultCalendarSpec() CalendarSpec {
 	return CalendarSpec{
-		DaysPerSeason: 7, // 4 seasons * 7 days = 28 days per condensed year
 		Seasons: []SeasonSpec{
 			{
-				ID:   "spring",
+				ID: "spring", Days: 92,
 				Name: "春季",
 				FeatureYieldPct: map[string]int{
 					"farmland": 115, "herb_patch": 120, "pasture": 120, "fishery_waters": 110, "woodland": 105,
@@ -291,7 +273,7 @@ func DefaultCalendarSpec() CalendarSpec {
 				CanalCapacityPct: 100,
 			},
 			{
-				ID:   "summer",
+				ID: "summer", Days: 92,
 				Name: "夏季",
 				FeatureYieldPct: map[string]int{
 					"farmland": 110, "fishery_waters": 125, "woodland": 115, "pasture": 110,
@@ -300,7 +282,7 @@ func DefaultCalendarSpec() CalendarSpec {
 				CanalCapacityPct: 110,
 			},
 			{
-				ID:   "autumn",
+				ID: "autumn", Days: 91,
 				Name: "秋季",
 				FeatureYieldPct: map[string]int{
 					"farmland": 130, "hunting_ground": 125, "forage_ground": 120, "pasture": 105,
@@ -309,7 +291,7 @@ func DefaultCalendarSpec() CalendarSpec {
 				CanalCapacityPct: 100,
 			},
 			{
-				ID:   "winter",
+				ID: "winter", Days: 90,
 				Name: "冬季",
 				FeatureYieldPct: map[string]int{
 					"farmland": 55, "pasture": 65, "herb_patch": 60, "fishery_waters": 75, "hunting_ground": 110, "mine_shaft": 100,
@@ -399,7 +381,7 @@ func DefaultResourceSpecs() map[string]ResourcePoolSpec {
 			SeasonalRegenPct: map[string]int{"spring": 125, "summer": 120, "autumn": 90, "winter": 55}, DepletionFloorPct: 35,
 		},
 		"ore_vein": {
-			ID: "ore_vein", Name: "矿脉储量", NodeFeatures: []string{"mine_shaft"}, RegenPermillePerDay: 55,
+			ID: "ore_vein", Name: "矿脉储量", NodeFeatures: []string{"mine_shaft", "woodland"}, RegenPermillePerDay: 0,
 			SeasonalRegenPct: map[string]int{"spring": 100, "summer": 100, "autumn": 100, "winter": 100}, DepletionFloorPct: 40,
 		},
 		"game_herd": {
@@ -451,7 +433,7 @@ func DefaultDisasterSpecs() []DisasterSpec {
 		{
 			ID: "river_flood", Name: "河决洪涝",
 			TriggerWeathers: []string{"storm", "rain"}, TriggerSeasons: []string{"summer", "spring"},
-			TargetFeatures: []string{"farmland", "canal_wharf", "fishery_waters"},
+			TargetFeatures:     []string{"farmland", "canal_wharf", "fishery_waters"},
 			ProbPermillePerDay: 95, DurationTicks: 144,
 			ResourceDamagePct: map[string]int{"soil_fertility": 15}, HouseDamage: 6, SanitationDrop: 24,
 			CasualtyPermille: 2, MitigatedByInfra: "levee", ReliefItem: "food",
@@ -459,23 +441,23 @@ func DefaultDisasterSpecs() []DisasterSpec {
 		{
 			ID: "drought", Name: "亢旱缺水",
 			TriggerWeathers: []string{"drought_heat"}, TriggerSeasons: []string{"summer", "autumn"},
-			TargetFeatures: []string{"farmland", "pasture"},
+			TargetFeatures:     []string{"farmland", "pasture"},
 			ProbPermillePerDay: 110, DurationTicks: 192,
 			ResourceDamagePct: map[string]int{"soil_fertility": 18, "water_table": 28, "pasture_grass": 20},
-			SanitationDrop: 10, CasualtyPermille: 2, MitigatedByInfra: "irrigation_well", ReliefItem: "water",
+			SanitationDrop:    10, CasualtyPermille: 2, MitigatedByInfra: "irrigation_well", ReliefItem: "water",
 		},
 		{
 			ID: "locust_swarm", Name: "飞蝗蔽日",
 			TriggerWeathers: []string{"drought_heat", "clear"}, TriggerSeasons: []string{"summer", "autumn"},
-			TargetFeatures: []string{"farmland", "pasture"},
+			TargetFeatures:     []string{"farmland", "pasture"},
 			ProbPermillePerDay: 55, DurationTicks: 96,
 			ResourceDamagePct: map[string]int{"soil_fertility": 20, "pasture_grass": 18},
-			CasualtyPermille: 1, MitigatedByInfra: "granary", ReliefItem: "food",
+			CasualtyPermille:  1, MitigatedByInfra: "granary", ReliefItem: "food",
 		},
 		{
 			ID: "wildfire", Name: "山林大火",
 			TriggerWeathers: []string{"drought_heat", "clear"}, TriggerSeasons: []string{"autumn", "summer"},
-			TargetFeatures: []string{"woodland", "hunting_ground"},
+			TargetFeatures:     []string{"woodland", "hunting_ground"},
 			ProbPermillePerDay: 45, DurationTicks: 96,
 			ResourceDamagePct: map[string]int{"timber_stand": 22, "herb_bed": 20}, HouseDamage: 5,
 			CasualtyPermille: 2, MitigatedByInfra: "irrigation_well",
@@ -483,7 +465,7 @@ func DefaultDisasterSpecs() []DisasterSpec {
 		{
 			ID: "blizzard_cold", Name: "严冬暴雪寒潮",
 			TriggerWeathers: []string{"frost_snow"}, TriggerSeasons: []string{"winter"},
-			TargetFeatures: []string{"residential", "pasture", "farmland"},
+			TargetFeatures:     []string{"residential", "pasture", "farmland"},
 			ProbPermillePerDay: 120, DurationTicks: 144,
 			ResourceDamagePct: map[string]int{"pasture_grass": 15}, HouseDamage: 4,
 			CasualtyPermille: 2, MitigatedByInfra: "granary", ReliefItem: "winter_coat",
@@ -506,12 +488,12 @@ func DefaultAccidentSpecs() []AccidentSpec {
 		{
 			ID: "canal_shipwreck", Name: "漕船风浪覆没",
 			RouteMediums: []string{"waterway"}, NodeFeatures: []string{"fishery_waters", "canal_wharf"},
-			Recipes: []string{"net_fish"},
+			Recipes:      []string{"net_fish"},
 			BasePermille: 12, SafetyInfra: "levee", Damage: 20, LethalityPermille: 50,
 		},
 		{
 			ID: "workshop_fire", Name: "炉坊走水烫伤",
-			Recipes: []string{"forge_tools", "forge_fine_tools", "temper_weapon"},
+			Recipes:      []string{"forge_tools", "forge_fine_tools", "temper_weapon"},
 			BasePermille: 8, Damage: 15, LethalityPermille: 20,
 		},
 	}
@@ -590,7 +572,7 @@ func DefaultDiseaseSpecs() []DiseaseSpec {
 }
 
 func DefaultLifecycleSpec() LifecycleSpec {
-	return LifecycleSpec{
+	return LifecycleSpec{WasteItem: "nightsoil", WastePerFoodDivisor: 4, CompostRecipeID: "compost_waste",
 		ChildMaxAge:               15,
 		ElderMinAge:               55,
 		MaxExpectancy:             78,
@@ -768,25 +750,24 @@ func (w *World) EcologicalYieldMultiplierPct(districtID string, r Recipe) int {
 	return pct
 }
 
-// drawDistrictResource deducts resource harvest from the district's finite ecological pool (down to 5% reserve).
-func (w *World) drawDistrictResource(districtID, poolID string, amount int64) {
-	if w.DistrictStates == nil || poolID == "" || amount <= 0 {
-		return
-	}
-	ds, ok := w.DistrictStates[districtID]
-	if !ok || ds.Resources == nil || ds.MaxResources[poolID] <= 0 {
-		return
-	}
-	minReserve := ds.MaxResources[poolID] / 20
-	cur := ds.Resources[poolID] - amount
-	if cur < minReserve {
-		cur = minReserve
-	}
-	ds.Resources[poolID] = cur
-	w.DistrictStates[districtID] = ds
+// availableDistrictResource excludes the existing 5% ecological reserve.
+func (w *World) availableDistrictResource(districtID, poolID string) int64 {
+	return w.DistrictStates[districtID].AvailableResource(poolID)
 }
 
-// pickSeasonWeather selects the next weather deterministically from seasonal weights.
+// drawDistrictResource returns the amount actually extracted; it never replenishes a pool.
+func (w *World) drawDistrictResource(districtID, poolID string, amount int64) int64 {
+	amount = min(amount, w.availableDistrictResource(districtID, poolID))
+	if amount <= 0 {
+		return 0
+	}
+	ds := w.DistrictStates[districtID]
+	ds.Resources[poolID] -= amount
+	w.recordEcologicalChange(districtID, poolID, -amount)
+	w.DistrictStates[districtID] = ds
+	return amount
+}
+
 func (w *World) pickSeasonWeather(districtID string, cal CalendarState) string {
 	if len(w.Catalog.Weathers) == 0 {
 		return "clear"
@@ -911,24 +892,23 @@ func (w *World) stepWorldEnvironment() []Event {
 				spec := w.Catalog.Resources[poolID]
 				regenPermille := spec.RegenPermillePerDay
 				if regenPermille <= 0 {
-					regenPermille = 50
+					continue
 				}
-				if mult := spec.SeasonalRegenPct[cal.SeasonID]; mult > 0 {
+				if mult, ok := spec.SeasonalRegenPct[cal.SeasonID]; ok {
 					regenPermille = (regenPermille * mult) / 100
 				}
 				if ws, hasW := w.Catalog.Weathers[ds.Weather]; hasW {
-					if mult := ws.ResourceRegenPct[poolID]; mult > 0 {
+					if mult, ok := ws.ResourceRegenPct[poolID]; ok {
 						regenPermille = (regenPermille * mult) / 100
 					}
 				}
 				delta := (maxCap * int64(regenPermille)) / 1000
-				if delta < 1 {
-					delta = 1
+				if delta <= 0 {
+					continue
 				}
+				delta = min(delta, maxCap-cur)
 				cur += delta
-				if cur > maxCap {
-					cur = maxCap
-				}
+				w.recordEcologicalChange(dID, poolID, delta)
 				ds.Resources[poolID] = cur
 			}
 
@@ -1027,10 +1007,9 @@ func (w *World) stepWorldEnvironment() []Event {
 				for poolID, lossPct := range dis.ResourceDamagePct {
 					if ds.Resources != nil && ds.Resources[poolID] > 0 {
 						effLoss := (lossPct * dmgScalePct) / 100
-						ds.Resources[poolID] -= (ds.Resources[poolID] * int64(effLoss)) / 100
-						if ds.Resources[poolID] < 1 {
-							ds.Resources[poolID] = 1
-						}
+						loss := min(ds.Resources[poolID], (ds.Resources[poolID]*int64(effLoss))/100)
+						ds.Resources[poolID] -= loss
+						w.recordEcologicalChange(dID, poolID, -loss)
 					}
 				}
 				if dis.SanitationDrop > 0 {
@@ -1058,15 +1037,15 @@ func (w *World) stepWorldEnvironment() []Event {
 					Kind:    "disaster_struck",
 					Action:  Action{Kind: "wait", Location: dID},
 					Payload: map[string]any{
-						"text":            fmt.Sprintf("%s struck %s (infra mitigation %d%%, relief %d %s distributed; %d injured, %d perished)", dis.Name, dID, infraMitigationPct, reliefUsed, dis.ReliefItem, wounded, dead),
-						"district":        dID,
-						"disaster_id":     dis.ID,
-						"disaster_name":   dis.Name,
-						"mitigation_pct":  infraMitigationPct,
-						"relief_used":     reliefUsed,
-						"wounded":         wounded,
-						"deaths":          dead,
-						"cause":           "disaster",
+						"text":           fmt.Sprintf("%s struck %s (infra mitigation %d%%, relief %d %s distributed; %d injured, %d perished)", dis.Name, dID, infraMitigationPct, reliefUsed, dis.ReliefItem, wounded, dead),
+						"district":       dID,
+						"disaster_id":    dis.ID,
+						"disaster_name":  dis.Name,
+						"mitigation_pct": infraMitigationPct,
+						"relief_used":    reliefUsed,
+						"wounded":        wounded,
+						"deaths":         dead,
+						"cause":          "disaster",
 					},
 				}
 				w.NextID++
@@ -1150,16 +1129,10 @@ func (w *World) runCohortInfraRepair(districtID, infraID string, spec Infrastruc
 		if c.Population <= 0 {
 			continue
 		}
-		producesMaterial := false
-		for item := range spec.BuildInputs {
-			if w.Catalog.TagsProduce([]string{c.Profession}, item) {
-				producesMaterial = true
-				break
-			}
-		}
-		if c.District != districtID && !producesMaterial {
+		if c.District != districtID {
 			continue
 		}
+
 		canPay := true
 		for item, qty := range spec.BuildInputs {
 			if c.ItemPool[item] < int64(qty)*5 {
@@ -1172,6 +1145,7 @@ func (w *World) runCohortInfraRepair(districtID, infraID string, spec Infrastruc
 		}
 		for item, qty := range spec.BuildInputs {
 			c.ItemPool[item] -= int64(qty) * 5
+			w.recordLedgerItemConsumed(item, int64(qty)*5)
 			if c.ItemPool[item] <= 0 {
 				delete(c.ItemPool, item)
 			}
@@ -1200,6 +1174,7 @@ func (w *World) applyDisasterImpactAndRelief(districtID string, dis DisasterSpec
 				use = c.ItemPool[dis.ReliefItem]
 			}
 			c.ItemPool[dis.ReliefItem] -= use
+			w.recordLedgerItemConsumed(dis.ReliefItem, use)
 			if c.ItemPool[dis.ReliefItem] <= 0 {
 				delete(c.ItemPool, dis.ReliefItem)
 			}
@@ -1331,6 +1306,7 @@ func (w *World) stepCohortThreatSuppression() []Event {
 					hunter.ItemPool = map[string]int64{}
 				}
 				hunter.ItemPool[enc.RareDropItem] += dropQty
+				w.recordLedgerItemProduced(enc.RareDropItem, dropQty)
 			}
 			wHunt := maxInt(1, squad/12)
 			dNumer := int64(wHunt) * int64(maxInt(25, enc.LethalityPermille))
@@ -1346,18 +1322,18 @@ func (w *World) stepCohortThreatSuppression() []Event {
 				Kind:    "cohort_threat_hunted",
 				Action:  Action{Kind: "hunt_threat", Location: dID, Item: enc.RareDropItem, Quantity: int(dropQty), Price: int(bounty)},
 				Payload: map[string]any{
-					"text":            fmt.Sprintf("%s dispatched %d hunters/guards into %s to suppress %s (-%d threat, +%d %s, +%d bounty coins; %d wounded, %d killed)", hunter.Name, squad, dID, enc.Name, suppressed, dropQty, enc.RareDropItem, bounty, hw, hd),
-					"cohort_id":       hunter.ID,
-					"district":        dID,
-					"threat_id":       enc.ID,
-					"threat_name":     enc.Name,
-					"suppressed":      suppressed,
-					"drop_item":       enc.RareDropItem,
-					"drop_qty":        dropQty,
-					"bounty_coins":    bounty,
-					"wounded":         hw,
-					"deaths":          hd,
-					"cause":           "beast",
+					"text":         fmt.Sprintf("%s dispatched %d hunters/guards into %s to suppress %s (-%d threat, +%d %s, +%d bounty coins; %d wounded, %d killed)", hunter.Name, squad, dID, enc.Name, suppressed, dropQty, enc.RareDropItem, bounty, hw, hd),
+					"cohort_id":    hunter.ID,
+					"district":     dID,
+					"threat_id":    enc.ID,
+					"threat_name":  enc.Name,
+					"suppressed":   suppressed,
+					"drop_item":    enc.RareDropItem,
+					"drop_qty":     dropQty,
+					"bounty_coins": bounty,
+					"wounded":      hw,
+					"deaths":       hd,
+					"cause":        "beast",
 				},
 			}
 			w.NextID++
@@ -1419,6 +1395,7 @@ func (w *World) stepCohortRituals(cal CalendarState) []Event {
 			}
 			for inItem, inQty := range rit.Inputs {
 				priests.ItemPool[inItem] -= int64(inQty) * scaleBatches
+				w.recordLedgerItemConsumed(inItem, int64(inQty)*scaleBatches)
 				if priests.ItemPool[inItem] <= 0 {
 					delete(priests.ItemPool, inItem)
 				}
@@ -1450,14 +1427,14 @@ func (w *World) stepCohortRituals(cal CalendarState) []Event {
 				Kind:    "cohort_ritual",
 				Action:  Action{Kind: "perform_ritual", Location: shrineDist, RecipeID: rit.ID},
 				Payload: map[string]any{
-					"text":          fmt.Sprintf("%s conducted %s (%s) at %s consuming %d offerings (+%d prefecture morale)", priests.Name, rit.Name, seasonTag, shrineDist, scaleBatches, rit.MoraleBoost),
-					"cohort_id":     priests.ID,
-					"ritual_id":     rit.ID,
-					"ritual_name":   rit.Name,
-					"district":      shrineDist,
-					"season":        cal.SeasonID,
-					"batches":       scaleBatches,
-					"morale_boost":  rit.MoraleBoost,
+					"text":         fmt.Sprintf("%s conducted %s (%s) at %s consuming %d offerings (+%d prefecture morale)", priests.Name, rit.Name, seasonTag, shrineDist, scaleBatches, rit.MoraleBoost),
+					"cohort_id":    priests.ID,
+					"ritual_id":    rit.ID,
+					"ritual_name":  rit.Name,
+					"district":     shrineDist,
+					"season":       cal.SeasonID,
+					"batches":      scaleBatches,
+					"morale_boost": rit.MoraleBoost,
 				},
 			}
 			w.NextID++
@@ -1489,6 +1466,7 @@ func (w *World) stepCohortRituals(cal CalendarState) []Event {
 			}
 			for inItem, inQty := range rit.Inputs {
 				priests.ItemPool[inItem] -= int64(inQty) * 4
+				w.recordLedgerItemConsumed(inItem, int64(inQty)*4)
 				if priests.ItemPool[inItem] <= 0 {
 					delete(priests.ItemPool, inItem)
 				}
@@ -1679,4 +1657,9 @@ func (w *World) stepCohortEncountersAndAccidents() []Event {
 		}
 	}
 	return events
+}
+
+// AvailableResource is the extractable amount above the existing ecological reserve.
+func (ds DistrictState) AvailableResource(poolID string) int64 {
+	return maxInt64(0, ds.Resources[poolID]-ds.MaxResources[poolID]/20)
 }

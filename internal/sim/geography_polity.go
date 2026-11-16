@@ -162,22 +162,22 @@ type PolityDecree struct {
 // stored independently so breakaway warlords, occupied towns, or rebel sectors do not inherit
 // decrees from a nominal superior they no longer obey.
 type PolityNode struct {
-	ID                  string         `json:"id"`
-	Name                string         `json:"name"`
-	Level               string         `json:"level"`
-	DeJureParentID      string         `json:"de_jure_parent_id,omitempty"`
-	DeFactoControllerID string         `json:"de_facto_controller_id,omitempty"`
-	SeatDistrictID      string         `json:"seat_district_id,omitempty"`
-	SeatVenueID         string         `json:"seat_venue_id,omitempty"`
+	ID                  string           `json:"id"`
+	Name                string           `json:"name"`
+	Level               string           `json:"level"`
+	DeJureParentID      string           `json:"de_jure_parent_id,omitempty"`
+	DeFactoControllerID string           `json:"de_facto_controller_id,omitempty"`
+	SeatDistrictID      string           `json:"seat_district_id,omitempty"`
+	SeatVenueID         string           `json:"seat_venue_id,omitempty"`
 	LeaderActorID       string           `json:"leader_actor_id,omitempty"`
 	Treasury            int64            `json:"treasury,omitempty"`
 	Currencies          map[string]int64 `json:"currencies,omitempty"`
 	Ledger              TreasuryLedger   `json:"ledger,omitempty"`
-	MarketTaxPermille   int            `json:"market_tax_permille,omitempty"`
-	PollTaxPermille     int            `json:"poll_tax_permille,omitempty"`
-	Curfew              bool           `json:"curfew,omitempty"`
-	EmbargoItems        []string       `json:"embargo_items,omitempty"`
-	Decrees             []PolityDecree `json:"decrees,omitempty"`
+	MarketTaxPermille   int              `json:"market_tax_permille,omitempty"`
+	PollTaxPermille     int              `json:"poll_tax_permille,omitempty"`
+	Curfew              bool             `json:"curfew,omitempty"`
+	EmbargoItems        []string         `json:"embargo_items,omitempty"`
+	Decrees             []PolityDecree   `json:"decrees,omitempty"`
 }
 
 // PolityNetwork holds all multi-level administrative and faction jurisdictions in the world.
@@ -188,19 +188,19 @@ type PolityNetwork struct {
 // PolityPerceptionView exposes public administrative facts at the actor's current location
 // plus leadership authority if the actor leads a polity—never leaking private remote events.
 type PolityPerceptionView struct {
-	LocalPolityID       string   `json:"local_polity_id,omitempty"`
-	LocalPolityName     string   `json:"local_polity_name,omitempty"`
-	LocalPolityLevel    string   `json:"local_polity_level,omitempty"`
-	EffectiveRulerID    string   `json:"effective_ruler_id,omitempty"`
-	MarketTaxPermille   int      `json:"market_tax_permille,omitempty"`
-	Curfew              bool     `json:"curfew,omitempty"`
-	EmbargoItems        []string `json:"embargo_items,omitempty"`
-	LedPolityID         string   `json:"led_polity_id,omitempty"`
-	LedPolityName       string   `json:"led_polity_name,omitempty"`
-	LedPolityTreasury   int64    `json:"led_polity_treasury,omitempty"`
-	LedPolitySeatVenue  string   `json:"led_polity_seat_venue,omitempty"`
-	LedPolityCurfew     bool     `json:"led_polity_curfew,omitempty"`
-	LedPolityMarketTax  int      `json:"led_polity_market_tax,omitempty"`
+	LocalPolityID      string   `json:"local_polity_id,omitempty"`
+	LocalPolityName    string   `json:"local_polity_name,omitempty"`
+	LocalPolityLevel   string   `json:"local_polity_level,omitempty"`
+	EffectiveRulerID   string   `json:"effective_ruler_id,omitempty"`
+	MarketTaxPermille  int      `json:"market_tax_permille,omitempty"`
+	Curfew             bool     `json:"curfew,omitempty"`
+	EmbargoItems       []string `json:"embargo_items,omitempty"`
+	LedPolityID        string   `json:"led_polity_id,omitempty"`
+	LedPolityName      string   `json:"led_polity_name,omitempty"`
+	LedPolityTreasury  int64    `json:"led_polity_treasury,omitempty"`
+	LedPolitySeatVenue string   `json:"led_polity_seat_venue,omitempty"`
+	LedPolityCurfew    bool     `json:"led_polity_curfew,omitempty"`
+	LedPolityMarketTax int      `json:"led_polity_market_tax,omitempty"`
 }
 
 func ClonePolityNetwork(net *PolityNetwork) *PolityNetwork {
@@ -1086,10 +1086,9 @@ func (w *World) TriggerGeoAnomaly(spec GeoAnomalySpec) []Event {
 					for poolID, lossPct := range spec.ResourceDamagePct {
 						if ds.Resources != nil && ds.Resources[poolID] > 0 {
 							effLoss := (lossPct * rawInt * dmgScale) / 10000
-							ds.Resources[poolID] -= (ds.Resources[poolID] * int64(effLoss)) / 100
-							if ds.Resources[poolID] < 1 {
-								ds.Resources[poolID] = 1
-							}
+							loss := min(ds.Resources[poolID], ds.Resources[poolID]*int64(effLoss)/100)
+							ds.Resources[poolID] -= loss
+							w.recordEcologicalChange(dID, poolID, -loss)
 						}
 					}
 					w.DistrictStates[dID] = ds

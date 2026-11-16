@@ -59,6 +59,8 @@
         "claim_turf"
       ],
       "resident": [
+        "refuel",
+        "harvest",
         "start_plan",
         "abandon_plan",
         "wait",
@@ -236,7 +238,7 @@
       },
       "livestock": {
         "id": "livestock",
-        "name": "pasture livestock",
+        "name": "adult cattle",
         "tier": 2,
         "tradeable": true,
         "batch_qty": 1,
@@ -343,7 +345,7 @@
       },
       "sacrificial_offering": {
         "id": "sacrificial_offering",
-        "name": "ritual grain \u0026 incense offering",
+        "name": "ritual grain & incense offering",
         "tier": 3,
         "tradeable": true,
         "batch_qty": 1,
@@ -376,7 +378,7 @@
       },
       "seeds": {
         "id": "seeds",
-        "name": "crop seeds",
+        "name": "wheat seeds",
         "tier": 1,
         "tradeable": true,
         "batch_qty": 3,
@@ -457,6 +459,43 @@
         "offer_threshold": 2,
         "surplus_threshold": 2,
         "shortage_threshold": 1
+      },
+      "paper": {
+        "id": "paper",
+        "name": "paper sheets",
+        "tier": 1,
+        "tradeable": true,
+        "batch_qty": 1,
+        "batch_price": 1
+      },
+      "ink": {
+        "id": "ink",
+        "name": "writing ink",
+        "tier": 1,
+        "tradeable": true,
+        "batch_qty": 1,
+        "batch_price": 1
+      },
+      "calf": {
+        "id": "calf",
+        "name": "cattle calf",
+        "tier": 1,
+        "tradeable": true,
+        "batch_qty": 1,
+        "batch_price": 2
+      },
+      "fuel_cell": {
+        "id": "fuel_cell",
+        "name": "generator fuel cell",
+        "tier": 1,
+        "tradeable": true,
+        "batch_qty": 1,
+        "batch_price": 3
+      },
+      "nightsoil": {
+        "id": "nightsoil",
+        "name": "collected organic waste",
+        "tier": 1
       }
     },
     "professions": [
@@ -1313,16 +1352,39 @@
     ],
     "recipes": [
       {
-        "id": "buy_seeds",
-        "label": "Buy 3 crop seeds for 1 coin",
+        "growth": {
+          "duration_ticks": 5760,
+          "maintenance_interval_ticks": 96,
+          "supplies": {
+            "water": 1
+          },
+          "source": "UMN Extension: well-managed warm-season compost 2-4 months; preset uses 60 days"
+        },
+        "id": "compost_waste",
+        "label": "Mature collected organic waste into compost",
         "profession": "farmer",
         "min_profession_level": 1,
-        "node_feature": "market",
+        "house_facility": "compost_pit",
+        "ticks": 2,
+        "energy_cost": 6,
+        "inputs": {
+          "nightsoil": 3
+        },
+        "output_item": "compost",
+        "output_qty": 1
+      },
+      {
+        "id": "save_seeds",
+        "label": "Select crop seed from stored grain",
+        "profession": "farmer",
+        "min_profession_level": 1,
         "ticks": 1,
         "energy_cost": 2,
-        "money_cost": 1,
+        "inputs": {
+          "food": 1
+        },
         "output_item": "seeds",
-        "output_qty": 3
+        "output_qty": 1
       },
       {
         "id": "fetch_water",
@@ -1337,6 +1399,14 @@
         "output_qty": 2
       },
       {
+        "growth": {
+          "duration_ticks": 5760,
+          "maintenance_interval_ticks": 96,
+          "supplies": {
+            "water": 1
+          },
+          "source": "UMN Extension: well-managed warm-season compost 2-4 months; preset uses 60 days"
+        },
         "id": "make_compost",
         "label": "Turn 2 compost in the yard compost pit",
         "profession": "farmer",
@@ -1344,10 +1414,21 @@
         "house_facility": "compost_pit",
         "ticks": 2,
         "energy_cost": 6,
+        "inputs": {
+          "food": 2
+        },
         "output_item": "compost",
         "output_qty": 2
       },
       {
+        "growth": {
+          "duration_ticks": 11520,
+          "maintenance_interval_ticks": 96,
+          "supplies": {
+            "water": 1
+          },
+          "source": "FAO crop water needs: wheat 120-150 days; preset uses 120 days"
+        },
         "id": "farm_grain",
         "label": "Irrigate, tend, and harvest grain in the fields",
         "profession": "farmer",
@@ -1373,14 +1454,10 @@
         "min_profession_level": 2,
         "min_faction_level": 2,
         "node_feature": "farmland",
-        "resource_pool": "soil_fertility",
-        "resource_draw": 2,
         "ticks": 4,
         "energy_cost": 14,
         "inputs": {
-          "compost": 1,
-          "seeds": 1,
-          "water": 1
+          "food": 2
         },
         "output_item": "choice_grain",
         "output_qty": 2
@@ -1572,6 +1649,10 @@
         "node_feature": "academy",
         "ticks": 3,
         "energy_cost": 8,
+        "inputs": {
+          "ink": 1,
+          "paper": 1
+        },
         "output_item": "scroll",
         "output_qty": 1
       },
@@ -1597,6 +1678,10 @@
         "node_feature": "martial_hall",
         "ticks": 3,
         "energy_cost": 10,
+        "inputs": {
+          "ink": 1,
+          "paper": 1
+        },
         "bonus_input": "weapon",
         "bonus_output": 1,
         "durable_bonus": true,
@@ -1626,26 +1711,29 @@
         "node_feature": "yamen",
         "ticks": 3,
         "energy_cost": 9,
+        "inputs": {
+          "ink": 1,
+          "paper": 1
+        },
         "bonus_input": "scroll",
         "bonus_output": 1,
         "output_item": "bounty_writ",
         "output_qty": 1
       },
       {
-        "id": "pillage_supplies",
-        "label": "Raid mountain trails and stockpile 2 rations at bandit camp",
-        "profession": "bandit",
-        "min_profession_level": 1,
-        "node_feature": "bandit_camp",
-        "ticks": 3,
-        "energy_cost": 11,
-        "bonus_input": "weapon",
-        "bonus_output": 1,
-        "durable_bonus": true,
-        "output_item": "food",
-        "output_qty": 2
-      },
-      {
+        "growth": {
+          "duration_ticks": 27168,
+          "maintenance_interval_ticks": 96,
+          "supplies": {
+            "water": 1
+          },
+          "resource_pool": "pasture_grass",
+          "resource_draw": 2,
+          "parents": {
+            "livestock": 2
+          },
+          "source": "UNL Beef: cattle gestation typically 283 days; breeding pair and care inputs declared by this preset"
+        },
         "id": "graze_livestock",
         "label": "Graze and breed 1 pasture livestock herd",
         "profession": "herder",
@@ -1657,7 +1745,7 @@
         "energy_cost": 11,
         "bonus_input": "water",
         "bonus_output": 1,
-        "output_item": "livestock",
+        "output_item": "calf",
         "output_qty": 1
       },
       {
@@ -1786,7 +1874,9 @@
         "ticks": 2,
         "energy_cost": 12,
         "output_item": "scrap_metal",
-        "output_qty": 2
+        "output_qty": 2,
+        "resource_pool": "scrap_reserve",
+        "resource_draw": 2
       },
       {
         "id": "assemble_radio",
@@ -1809,10 +1899,73 @@
         "ticks": 2,
         "energy_cost": 10,
         "inputs": {
-          "water": 1
+          "water": 1,
+          "seeds": 1
         },
         "output_item": "hydro_ration",
-        "output_qty": 3
+        "output_qty": 3,
+        "growth": {
+          "duration_ticks": 11520,
+          "maintenance_interval_ticks": 96,
+          "supplies": {
+            "water": 1
+          },
+          "source": "WorldPack hydroponic wheat preset: 120 days; a different cultivar or accelerated technology must declare its own cycle and supplies"
+        }
+      },
+      {
+        "id": "make_paper",
+        "label": "Prepare paper from timber pulp",
+        "profession": "scholar",
+        "min_profession_level": 1,
+        "node_feature": "academy",
+        "ticks": 3,
+        "energy_cost": 8,
+        "inputs": {
+          "timber": 1,
+          "water": 1
+        },
+        "output_item": "paper",
+        "output_qty": 1
+      },
+      {
+        "id": "make_ink",
+        "label": "Prepare writing ink from plant pigment",
+        "profession": "scholar",
+        "min_profession_level": 1,
+        "node_feature": "academy",
+        "ticks": 3,
+        "energy_cost": 8,
+        "inputs": {
+          "herb": 1,
+          "water": 1
+        },
+        "output_item": "ink",
+        "output_qty": 1
+      },
+      {
+        "growth": {
+          "duration_ticks": 43200,
+          "maintenance_interval_ticks": 96,
+          "supplies": {
+            "water": 1
+          },
+          "resource_pool": "pasture_grass",
+          "resource_draw": 2,
+          "source": "Penn State Extension: heifers ready for breeding at 13-15 months; preset uses 450 days"
+        },
+        "id": "raise_livestock",
+        "label": "Raise juvenile stock to breeding maturity",
+        "profession": "herder",
+        "min_profession_level": 1,
+        "node_feature": "pasture",
+        "ticks": 3,
+        "energy_cost": 11,
+        "inputs": {
+          "calf": 1
+        },
+        "output_item": "livestock",
+        "output_qty": 1
       }
     ],
     "tag_profiles": {
@@ -1822,6 +1975,7 @@
           "choice_grain"
         ],
         "consumes": [
+          "nightsoil",
           "seeds",
           "water",
           "compost",
@@ -1851,9 +2005,6 @@
         }
       },
       "bandit": {
-        "produces": [
-          "food"
-        ],
         "consumes": [
           "food",
           "choice_grain",
@@ -1868,9 +2019,6 @@
         "coercive_power": true
       },
       "bandit_leader": {
-        "produces": [
-          "food"
-        ],
         "consumes": [
           "food",
           "choice_grain",
@@ -1976,6 +2124,8 @@
           "bounty_writ"
         ],
         "consumes": [
+          "paper",
+          "ink",
           "food",
           "scroll",
           "weapon",
@@ -1995,6 +2145,8 @@
           "bounty_writ"
         ],
         "consumes": [
+          "paper",
+          "ink",
           "food",
           "scroll",
           "weapon",
@@ -2030,6 +2182,7 @@
           "choice_grain"
         ],
         "consumes": [
+          "nightsoil",
           "seeds",
           "water",
           "compost",
@@ -2163,11 +2316,13 @@
       },
       "herder": {
         "produces": [
+          "calf",
           "livestock",
           "meat",
           "hide"
         ],
         "consumes": [
+          "calf",
           "water",
           "food"
         ],
@@ -2220,6 +2375,8 @@
           "weapon"
         ],
         "consumes": [
+          "paper",
+          "ink",
           "food",
           "ore",
           "timber",
@@ -2240,6 +2397,8 @@
           "weapon"
         ],
         "consumes": [
+          "paper",
+          "ink",
           "food",
           "ore",
           "timber",
@@ -2333,6 +2492,8 @@
           "winter_coat",
           "rare_herb",
           "sacrificial_offering",
+          "paper",
+          "ink",
           "timber",
           "plank",
           "ore",
@@ -2383,6 +2544,8 @@
           "winter_coat",
           "rare_herb",
           "sacrificial_offering",
+          "paper",
+          "ink",
           "timber",
           "plank",
           "ore",
@@ -2409,11 +2572,13 @@
       },
       "ranch_master": {
         "produces": [
+          "calf",
           "livestock",
           "meat",
           "hide"
         ],
         "consumes": [
+          "calf",
           "water",
           "food"
         ],
@@ -2472,9 +2637,14 @@
       },
       "scholar": {
         "produces": [
+          "paper",
+          "ink",
           "scroll"
         ],
         "consumes": [
+          "timber",
+          "water",
+          "herb",
           "food"
         ],
         "target_stock": {
@@ -2509,10 +2679,15 @@
       },
       "xiucai": {
         "produces": [
+          "paper",
+          "ink",
           "scroll",
           "classic_tome"
         ],
         "consumes": [
+          "timber",
+          "water",
+          "herb",
           "food",
           "scroll"
         ],
@@ -2540,9 +2715,9 @@
       360
     ],
     "calendar": {
-      "days_per_season": 7,
       "seasons": [
         {
+          "days": 92,
           "id": "spring",
           "name": "春季",
           "feature_yield_pct": {
@@ -2561,6 +2736,7 @@
           "canal_capacity_pct": 100
         },
         {
+          "days": 92,
           "id": "summer",
           "name": "夏季",
           "feature_yield_pct": {
@@ -2578,6 +2754,7 @@
           "canal_capacity_pct": 110
         },
         {
+          "days": 91,
           "id": "autumn",
           "name": "秋季",
           "feature_yield_pct": {
@@ -2595,6 +2772,7 @@
           "canal_capacity_pct": 100
         },
         {
+          "days": 90,
           "id": "winter",
           "name": "冬季",
           "feature_yield_pct": {
@@ -2779,9 +2957,10 @@
         "id": "ore_vein",
         "name": "矿脉储量",
         "node_features": [
-          "mine_shaft"
+          "mine_shaft",
+          "woodland"
         ],
-        "regen_permille_per_day": 55,
+        "regen_permille_per_day": 0,
         "seasonal_regen_pct": {
           "autumn": 100,
           "spring": 100,
@@ -2851,6 +3030,14 @@
           "winter": 85
         },
         "depletion_floor_pct": 40
+      },
+      "scrap_reserve": {
+        "id": "scrap_reserve",
+        "name": "recoverable wreck material",
+        "node_features": [
+          "woodland"
+        ],
+        "regen_permille_per_day": 0
       }
     },
     "encounters": [
@@ -3058,7 +3245,8 @@
         "id": "mine_collapse",
         "name": "矿井塌方透水",
         "node_features": [
-          "mine_shaft"
+          "mine_shaft",
+          "woodland"
         ],
         "recipes": [
           "mine_ore",
@@ -3165,7 +3353,8 @@
         "name": "矿道木石支护",
         "node_feature": "mine_shaft",
         "node_features": [
-          "mine_shaft"
+          "mine_shaft",
+          "woodland"
         ],
         "max_condition": 100,
         "decay_per_day": 4,
@@ -3311,7 +3500,10 @@
       "annual_birth_permille": 22,
       "elder_annual_death_permille": 36,
       "compost_item": "compost",
-      "auto_hydrate_successor": true
+      "auto_hydrate_successor": true,
+      "waste_item": "nightsoil",
+      "waste_per_food_divisor": 4,
+      "compost_recipe_id": "compost_waste"
     },
     "governance": {
       "market_tax_permille": 90,
@@ -3487,14 +3679,16 @@
         "to": "bunker_district",
         "ticks": 1,
         "energy_cost": 2,
-        "medium": "road"
+        "medium": "road",
+        "freight_capacity": 0
       },
       {
         "from": "bunker_district",
         "to": "crater_outpost",
         "ticks": 2,
         "energy_cost": 4,
-        "medium": "road"
+        "medium": "road",
+        "freight_capacity": 0
       }
     ],
     "geo_regions": [
@@ -4068,7 +4262,17 @@
         "kind": "generator",
         "generation": 100,
         "active": true,
-        "powered": true
+        "powered": false,
+        "source": {
+          "fuel_item": "fuel_cell",
+          "units_per_cycle": 1,
+          "energy_per_unit": 9600,
+          "cycle_ticks": 96,
+          "source": "WorldPack fuel-cell rating: one cell stores one day at the configured nameplate output"
+        },
+        "fuel_stock": 1,
+        "stored_energy": 0,
+        "energy_capacity": 9600
       },
       {
         "id": "bunker_workshop_grid",

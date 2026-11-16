@@ -115,12 +115,29 @@ func TestPostgresPreservesTopologyHousesTasksAndLineage(t *testing.T) {
 		w.Actors[i].InsideHouse = ""
 		w.Actors[i].Location = "south_fields"
 	}
+	// This persistence fixture uses an explicit two-tick crop cycle.
+	for i := range w.Catalog.Recipes {
+		if w.Catalog.Recipes[i].ID == "farm_grain" {
+			w.Catalog.Recipes[i].Growth = &sim.GrowthRule{DurationTicks: 2, MaintenanceIntervalTicks: 2, Supplies: map[string]int{"water": 1}, Source: "persistence test crop"}
+		}
+	}
+	w.Actors[0].Items["water"] = 3
 	events := w.Apply("p01", sim.Action{Kind: "craft", RecipeID: "farm_grain"})
 	for w.Actors[0].Task != nil {
 		w.Tick++
 		events = append(events, w.Advance("p01")...)
 	}
-	root := events[len(events)-1].ID
+	w.Tick += 2
+	events = append(events, w.AdvanceGrowth()...)
+	if len(w.Growth) != 1 || !w.Growth[0].Ready {
+		t.Fatal("test crop did not mature")
+	}
+	harvest := w.Apply("p01", sim.Action{Kind: "harvest", TargetID: fmt.Sprint(w.Growth[0].ID)})
+	events = append(events, harvest...)
+	if harvest[0].Kind != "harvested" {
+		t.Fatal("test crop was not harvested")
+	}
+	root := harvest[0].ID
 	events = append(events, w.Apply("p01", sim.Action{
 		Kind: "speak", TargetID: "p02", Text: "I harvested two grain", BasisEventID: root,
 		Statement: &sim.Statement{Topic: "item_produced", Item: "food", Location: "south_fields", Quantity: 2},
