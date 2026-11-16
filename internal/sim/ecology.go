@@ -207,6 +207,13 @@ type LifecycleSpec struct {
 	AutoHydrateSuccessor      bool   `json:"auto_hydrate_successor,omitempty"`
 }
 
+// EcologySpec configures initial ecological state for an external WorldPack.
+type EcologySpec struct {
+	Enabled        bool                     `json:"enabled,omitempty"`
+	ScalePop       int                      `json:"scale_pop,omitempty"`
+	DistrictStates map[string]DistrictState `json:"district_states,omitempty"`
+}
+
 // ActiveDisaster tracks an ongoing regional disaster in a district until ExpiresTick.
 type ActiveDisaster struct {
 	ID          string `json:"id"`
@@ -926,7 +933,13 @@ func (w *World) stepWorldEnvironment() []Event {
 			}
 
 			// 2c. Infrastructure natural wear & cohort public-works engineering repair (修堤、凿井、支护矿道、修公厕、修义仓)
-			for infraID, cond := range ds.Infrastructure {
+			infraKeys := make([]string, 0, len(ds.Infrastructure))
+			for infraID := range ds.Infrastructure {
+				infraKeys = append(infraKeys, infraID)
+			}
+			sort.Strings(infraKeys)
+			for _, infraID := range infraKeys {
+				cond := ds.Infrastructure[infraID]
 				spec, exists := w.Catalog.Infrastructures[infraID]
 				if !exists {
 					continue
@@ -1060,6 +1073,12 @@ func (w *World) stepWorldEnvironment() []Event {
 				witnesses := w.distributeAnomalyObservations(ev, dis.ID, "disaster", w.Map.GeoRegionIDForLocation(dID, ""), dID, maxInt(20, dmgScalePct))
 				ev.Payload["witnesses"] = witnesses
 				events = append(events, ev)
+				for ai := range w.Actors {
+					act := &w.Actors[ai]
+					if !act.Dead && act.Location == dID && act.Task != nil && act.Task.Dormant {
+						events = append(events, w.interruptTaskOnDamage(act, "disaster")...)
+					}
+				}
 			}
 
 			// 2f. Beast & Anomaly ecological growth, surge raids (兽潮/水怪袭扰), official bounties, and hunter/martial suppression

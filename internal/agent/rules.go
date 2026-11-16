@@ -77,7 +77,7 @@ func (rulesPolicy) Decide(_ context.Context, p sim.Perception) (sim.Action, erro
 	}
 
 	// 2b. Self-medication and wound/disease recuperation: treat wounds or contagious/cold illness.
-	if (a.Health < 85 || a.DiseaseID != "") && p.Catalog.Capabilities(a)["medicate"] {
+	if (a.Health < 85 || a.DiseaseID != "") && p.Capabilities()["medicate"] {
 		bestMed := ""
 		bestScore := 0
 		for _, id := range itemKeys {
@@ -115,7 +115,7 @@ func (rulesPolicy) Decide(_ context.Context, p sim.Perception) (sim.Action, erro
 	}
 
 	// 4. Community healing if capable and carrying medicinal items.
-	if p.Catalog.Capabilities(a)["heal"] {
+	if p.Capabilities()["heal"] {
 		if medItem := cheapestMedicinalItem(p.Catalog, a, itemKeys); medItem != "" {
 			for _, b := range p.Nearby {
 				if b.Health < sim.MaxHealth {
@@ -555,7 +555,7 @@ func planCreditAndRelations(p sim.Perception) (sim.Action, bool) {
 	if a.Energy < 10 || a.Health < 40 || p.Tick < a.RestUntil {
 		return sim.Action{}, false
 	}
-	allowed := p.Catalog.Capabilities(a)
+	allowed := p.Capabilities()
 	freeMoney := availableMoneyAfterAgreements(p)
 	if allowed["foreclose_collateral"] && p.OverdueBorrowerID != "" && p.OverdueHouseID != "" {
 		return sim.Action{Kind: "foreclose_collateral", TargetID: p.OverdueBorrowerID, HouseID: p.OverdueHouseID}, true
@@ -578,7 +578,7 @@ func planConflictAndLaw(p sim.Perception) (sim.Action, bool) {
 	if a.Energy < 28 || a.Health < 65 || p.Tick < a.RestUntil || recentlyConflictActed(a, p.Tick, 24) {
 		return sim.Action{}, false
 	}
-	allowed := p.Catalog.Capabilities(a)
+	allowed := p.Capabilities()
 
 	// 0. Upright censors and honest law officers audit & purge co-located officers when backed by epistemic evidence.
 	if allowed["audit_corruption"] && a.IllicitGain == 0 && a.Energy >= 12 {
@@ -695,7 +695,7 @@ func planEcologyRitualAndInfra(p sim.Perception) (sim.Action, bool) {
 		return sim.Action{}, false
 	}
 	a := p.Self
-	allowed := p.Catalog.Capabilities(a)
+	allowed := p.Capabilities()
 
 	if allowed["perform_ritual"] && a.Energy >= 20 {
 		seasonTag := fmt.Sprintf("Y%d-%s", p.Calendar.Year, p.Calendar.SeasonID)
@@ -820,6 +820,9 @@ func planCatalogWork(p sim.Perception) (sim.Action, bool) {
 
 func resolveRecipe(p sim.Perception, r sim.Recipe, depth int) (sim.Action, bool) {
 	if depth > 3 {
+		return sim.Action{}, false
+	}
+	if blocked, _ := sim.IsRecipeBlockedByWorldLaw(p.WorldLaws, r); blocked {
 		return sim.Action{}, false
 	}
 	a := p.Self
@@ -970,7 +973,7 @@ func informationAction(p sim.Perception) (sim.Action, bool) {
 			continue
 		}
 
-		if claim.Topic == "wrongful_conviction" && claim.Location != "" && a.Location != claim.Location && a.IllicitGain == 0 && a.Energy >= 16 && p.Catalog.Capabilities(a)["file_appeal"] {
+		if claim.Topic == "wrongful_conviction" && claim.Location != "" && a.Location != claim.Location && a.IllicitGain == 0 && a.Energy >= 16 && p.Capabilities()["file_appeal"] {
 			visitedAfter := false
 			for _, past := range a.Memories {
 				if past.Tick > m.Tick && past.Kind == "moved" && strings.HasSuffix(past.Text, "to "+claim.Location) {
@@ -1059,7 +1062,7 @@ func availableItemAfterAgreements(p sim.Perception, itemID string) int {
 // It returns one choice; only World.Apply performs transfers or records commitments.
 func chooseContinuity(p sim.Perception) (sim.Action, bool) {
 	a := p.Self
-	allowed := p.Catalog.Capabilities(a)
+	allowed := p.Capabilities()
 	freeMoney := availableMoneyAfterAgreements(p)
 	nearby := func(id string) bool {
 		for _, n := range p.Nearby {

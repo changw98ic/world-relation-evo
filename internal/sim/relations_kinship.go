@@ -883,7 +883,7 @@ func (rs *RelationEvoState) settleDeathAndInheritance(w *World, e Event) []Event
 		}
 	}
 
-	if len(claimants) > 0 && (len(ownedHouses) > 0 || deceased.Money > 0 || len(deceased.Items) > 0) {
+	if len(claimants) > 0 && (len(ownedHouses) > 0 || deceased.Money > 0 || len(deceased.Items) > 0 || len(deceased.Currencies) > 0) {
 		primaryHeir := claimants[0]
 		var rivalHeir *Actor
 		lowTrust := false
@@ -914,6 +914,22 @@ func (rs *RelationEvoState) settleDeathAndInheritance(w *World, e Event) []Event
 		if inheritedCoins > 0 {
 			deceased.Money = 0
 			primaryHeir.Money += inheritedCoins
+			w.recordLedgerCurrencyProduced("coins", int64(inheritedCoins))
+		}
+		if len(deceased.Currencies) > 0 {
+			curKeys := make([]string, 0, len(deceased.Currencies))
+			for cur, amt := range deceased.Currencies {
+				if amt > 0 {
+					curKeys = append(curKeys, cur)
+				}
+			}
+			sort.Strings(curKeys)
+			for _, cur := range curKeys {
+				amt := deceased.Currencies[cur]
+				w.addActorCurrency(primaryHeir, cur, amt)
+				w.recordLedgerCurrencyProduced(cur, amt)
+			}
+			deceased.Currencies = nil
 		}
 		if primaryHeir.Items == nil {
 			primaryHeir.Items = map[string]int{}
@@ -991,6 +1007,7 @@ func (rs *RelationEvoState) settleDeathAndInheritance(w *World, e Event) []Event
 		}
 	} else if deceased.Money > 0 {
 		// Heirless estate escheats to public treasury so TotalCoins() stays 100% conserved.
+		w.recordLedgerCurrencyProduced("coins", int64(deceased.Money))
 		w.creditTreasury(int64(deceased.Money), "confiscated")
 		deceased.Money = 0
 	}

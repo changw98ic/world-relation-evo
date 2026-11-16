@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -163,5 +164,96 @@ func TestCompactEventsRetainsCausalAndProgressionEvents(t *testing.T) {
 	compacted := CompactEvents(raw)
 	if len(compacted) != 4 {
 		t.Fatalf("expected 4 high-value events retained, got %d (%+v)", len(compacted), compacted)
+	}
+}
+
+func TestSchemaIncludesCheckpointAndDecisionLogTables(t *testing.T) {
+	for _, needle := range []string{
+		"CREATE TABLE IF NOT EXISTS world_checkpoints",
+		"CREATE TABLE IF NOT EXISTS world_decision_logs",
+		"PRIMARY KEY (world_id, tick)",
+		"state jsonb NOT NULL",
+		"decisions jsonb NOT NULL",
+	} {
+		if !strings.Contains(schema, needle) {
+			t.Fatalf("embedded schema missing %q", needle)
+		}
+	}
+}
+
+func TestPostgresCheckpointsDecisionLogsAndLoadEvents(t *testing.T) {
+	dsn := os.Getenv("WRE_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set WRE_TEST_DATABASE_URL to run PostgreSQL integration test")
+	}
+	ctx := context.Background()
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	id := fmt.Sprintf("cp-integration-%d", time.Now().UnixNano())
+	defer func() {
+		s.db.ExecContext(ctx, `DELETE FROM world_decision_logs WHERE world_id=$1`, id)
+		s.db.ExecContext(ctx, `DELETE FROM world_checkpoints WHERE world_id=$1`, id)
+		s.db.ExecContext(ctx, `DELETE FROM world_events WHERE world_id=$1`, id)
+		s.db.ExecContext(ctx, `DELETE FROM worlds WHERE id=$1`, id)
+	}()
+
+	w0 := &sim.World{ID: id, Tick: 0, NextID: 1}
+	w5 := &sim.World{ID: id, Tick: 5, NextID: 12}
+	if err := s.SaveCheckpoint(ctx, w0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveCheckpoint(ctx, w5); err != nil {
+		t.Fatal(err)
+	}
+	cp, raw, err := s.LoadNearestCheckpoint(ctx, id, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cp.Tick != 0 || len(raw) == 0 {
+		t.Fatalf("expected tick 0 checkpoint, got tick=%d len=%d", cp.Tick, len(raw))
+	}
+	cp, _, err = s.LoadNearestCheckpoint(ctx, id, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cp.Tick != 5 {
+		t.Fatalf("expected tick 5 checkpoint, got %d", cp.Tick)
+	}
+
+	log1 := sim.TickDecisionLog{Tick: 1, Decisions: map[string]sim.Action{"a1": {Kind: "wait", Text: "pause"}}}
+	log2 := sim.TickDecisionLog{Tick: 2, Decisions: map[string]sim.Action{"a1": {Kind: "speak", Text: "hi"}}}
+	if err := s.SaveDecisionLog(ctx, id, log1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveDecisionLog(ctx, id, log2); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := s.LoadDecisionLogs(ctx, id, 1, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 2 || logs[0].Tick != 1 || logs[1].Decisions["a1"].Text != "hi" {
+		t.Fatalf("unexpected logs: %+v", logs)
+	}
+
+	evs := []sim.Event{
+		{ID: 1, Tick: 1, ActorID: "a1", Kind: "wait", Action: sim.Action{Kind: "wait"}, Payload: map[string]any{"x": 1}},
+		{ID: 2, Tick: 2, ActorID: "a1", Kind: "speech", Action: sim.Action{Kind: "speak", Text: "hi"}, Payload: map[string]any{"text": "hi"}},
+	}
+	if err := s.Save(ctx, w5, evs); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := s.LoadEvents(ctx, id, 1, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 2 || loaded[1].Action.Text != "hi" {
+		t.Fatalf("unexpected loaded events: %+v", loaded)
 	}
 }

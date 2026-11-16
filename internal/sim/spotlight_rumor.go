@@ -741,6 +741,9 @@ func (w *World) canDehydrateSpotlightActor(sr *SpotlightRumorState, a Actor, hou
 	if len(w.Cohorts) == 0 || a.Dead || a.Task != nil {
 		return false
 	}
+	if w.IsActorPinnedFocal(a) {
+		return false
+	}
 	if a.Health != MaxHealth || a.WoundedTracked {
 		return false
 	}

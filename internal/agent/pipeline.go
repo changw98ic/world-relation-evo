@@ -92,7 +92,7 @@ func requirementSummary(req map[string]int) string {
 
 func Options(p sim.Perception) []Option {
 	a := p.Self
-	allowed := p.Catalog.Capabilities(a)
+	allowed := p.Capabilities()
 	var options []Option
 	add := func(label string, action sim.Action) {
 		if allowed[action.Kind] {
@@ -310,6 +310,9 @@ func Options(p sim.Perception) []Option {
 	}
 
 	for _, r := range p.Catalog.Recipes {
+		if blocked, _ := sim.IsRecipeBlockedByWorldLaw(p.WorldLaws, r); blocked {
+			continue
+		}
 		if ok, _ := sim.CheckRecipe(p.Catalog, p.Map, p.CurrentHouse, a, r); ok {
 			bonus := r.BonusInput != "" && a.Items[r.BonusInput] >= 1
 			expected := p.Catalog.RecipeYield(a, r, bonus)
@@ -344,13 +347,17 @@ func Options(p sim.Perception) []Option {
 		}
 	}
 	var surplusItems []sim.ItemSpec
-	for _, itemID := range itemKeys {
-		if embargoed[itemID] {
-			continue
-		}
-		spec := p.Catalog.Items[itemID]
-		if spec.Tradeable && spec.BatchQty > 0 && a.Items[itemID] >= spec.OfferThreshold {
-			surplusItems = append(surplusItems, spec)
+	var surplusPrices []int
+	if allowed["offer"] {
+		for _, itemID := range itemKeys {
+			if embargoed[itemID] {
+				continue
+			}
+			spec := p.Catalog.Items[itemID]
+			if spec.Tradeable && spec.BatchQty > 0 && a.Items[itemID] >= spec.OfferThreshold {
+				surplusItems = append(surplusItems, spec)
+				surplusPrices = append(surplusPrices, p.Catalog.SalePrice(a, spec.ID))
+			}
 		}
 	}
 
@@ -388,7 +395,14 @@ func Options(p sim.Perception) []Option {
 			continue
 		}
 		add(fmt.Sprintf("Talk to %s (%s, %s, level %d)", b.Name, b.ID, b.Role, b.Level), sim.Action{Kind: "speak", TargetID: b.ID})
-		for _, spec := range surplusItems {
+		for si, spec := range surplusItems {
+			if spec.BuyerRequiredTag != "" && !sim.ActorHasTag(b.Tags, spec.BuyerRequiredTag) {
+				continue
+			}
+			cur := "coins"
+			if len(spec.AcceptedCurrencies) > 0 && !sim.ItemAcceptsCurrency(spec, "coins") {
+				cur = spec.AcceptedCurrencies[0]
+			}
 			pending := false
 			for _, o := range p.Offers {
 				if o.Seller == a.ID && o.Buyer == b.ID && o.Item == spec.ID {
@@ -397,8 +411,13 @@ func Options(p sim.Perception) []Option {
 				}
 			}
 			if !pending {
-				add(fmt.Sprintf("Offer %d %s (tier %d) to %s for %d coins", spec.BatchQty, spec.ID, spec.Tier, b.Name, p.Catalog.SalePrice(a, spec.ID)), sim.Action{
-					Kind: "offer", TargetID: b.ID, Item: spec.ID, Quantity: spec.BatchQty, Price: p.Catalog.SalePrice(a, spec.ID),
+				actCur := ""
+				if cur != "coins" {
+					actCur = cur
+				}
+				salePrice := surplusPrices[si]
+				add(fmt.Sprintf("Offer %d %s (tier %d) to %s for %d %s", spec.BatchQty, spec.ID, spec.Tier, b.Name, salePrice, cur), sim.Action{
+					Kind: "offer", TargetID: b.ID, Item: spec.ID, Quantity: spec.BatchQty, Price: salePrice, Currency: actCur,
 				})
 			}
 		}
@@ -461,14 +480,27 @@ func Options(p sim.Perception) []Option {
 		}
 	}
 
+	selfEffTags := p.EffectiveTags()
 	for _, o := range p.Offers {
 		if o.Buyer != a.ID {
 			continue
 		}
-		if a.Money >= o.Price {
+		spec := p.Catalog.Items[o.Item]
+		cur := o.Currency
+		if cur == "" {
+			cur = "coins"
+		}
+		canAfford := false
+		if cur == "coins" {
+			canAfford = a.Money >= o.Price
+		} else {
+			canAfford = a.Currencies[cur] >= int64(o.Price)
+		}
+		tagOK := spec.BuyerRequiredTag == "" || sim.ActorHasTag(selfEffTags, spec.BuyerRequiredTag)
+		if canAfford && sim.ItemAcceptsCurrency(spec, cur) && tagOK {
 			for _, b := range p.Nearby {
 				if b.ID == o.Seller && !b.Jailed {
-					add(fmt.Sprintf("Buy %d %s from %s for %d coins (offer %d)", o.Quantity, o.Item, b.Name, o.Price, o.ID), sim.Action{
+					add(fmt.Sprintf("Buy %d %s from %s for %d %s (offer %d)", o.Quantity, o.Item, b.Name, o.Price, cur, o.ID), sim.Action{
 						Kind: "accept", TargetID: o.Seller, OfferID: o.ID,
 					})
 				}
@@ -505,7 +537,7 @@ func Options(p sim.Perception) []Option {
 			chKeys = append(chKeys, k)
 		}
 		sort.Strings(chKeys)
-		tags := a.IdentityTags()
+		tags := selfEffTags
 		for _, chID := range chKeys {
 			ch := p.Catalog.CommChannels[chID]
 			if a.Energy < ch.EnergyCost {
@@ -553,7 +585,261 @@ func Options(p sim.Perception) []Option {
 			}
 		}
 	}
+
+	// Technical knowledge discovery, teaching, and local facility adoption (strictly scoped to eligible/known techs).
+	if len(p.Catalog.Techs) > 0 {
+		techKeys := make([]string, 0, len(p.Catalog.Techs))
+		for k := range p.Catalog.Techs {
+			techKeys = append(techKeys, k)
+		}
+		sort.Strings(techKeys)
+		for _, techID := range techKeys {
+			tech := p.Catalog.Techs[techID]
+			if ok, _ := sim.CanResearchTechWithKnown(p.Catalog, a, tech, p.KnownTechs); ok {
+				ticks := tech.ResearchTicks
+				if ticks < 1 {
+					ticks = 1
+				}
+				add(fmt.Sprintf("Research %s (%dm, -%d energy)", tech.Name, ticks*15, tech.ResearchEnergyCost),
+					sim.Action{Kind: "research_tech", TechID: tech.ID})
+			}
+		}
+
+		knownSorted := append([]string(nil), p.KnownTechs...)
+		sort.Strings(knownSorted)
+		effTags := selfEffTags
+		nearbySet := make(map[string]bool, len(p.Nearby))
+		for _, nb := range p.Nearby {
+			nearbySet[nb.ID] = true
+		}
+
+		for _, techID := range knownSorted {
+			tech, exists := p.Catalog.Techs[techID]
+			if !exists {
+				continue
+			}
+			for _, nb := range p.Nearby {
+				if nb.Jailed || nb.Sleeping {
+					continue
+				}
+				add(fmt.Sprintf("Teach %s to %s", tech.Name, nb.Name),
+					sim.Action{Kind: "teach_knowledge", TechID: tech.ID, TargetID: nb.ID})
+			}
+			if len(p.Catalog.CommChannels) > 0 {
+				chKeys := make([]string, 0, len(p.Catalog.CommChannels))
+				for k := range p.Catalog.CommChannels {
+					chKeys = append(chKeys, k)
+				}
+				sort.Strings(chKeys)
+				peerSet := map[string]bool{}
+				for peerID := range a.Trust {
+					if peerID != "" && peerID != a.ID && !nearbySet[peerID] {
+						peerSet[peerID] = true
+					}
+				}
+				for _, m := range a.Memories {
+					if m.Source != "" && m.Source != "world" && m.Source != a.ID && !nearbySet[m.Source] {
+						peerSet[m.Source] = true
+					}
+					if m.TargetID != "" && m.TargetID != a.ID && !nearbySet[m.TargetID] {
+						peerSet[m.TargetID] = true
+					}
+				}
+				peers := make([]string, 0, len(peerSet))
+				for pid := range peerSet {
+					peers = append(peers, pid)
+				}
+				sort.Strings(peers)
+				for _, chID := range chKeys {
+					ch := p.Catalog.CommChannels[chID]
+					if a.Energy < ch.EnergyCost {
+						continue
+					}
+					if len(ch.GrantedByTags) > 0 {
+						granted := false
+						for _, gt := range ch.GrantedByTags {
+							if sim.ActorHasTag(effTags, gt) {
+								granted = true
+								break
+							}
+						}
+						if !granted {
+							continue
+						}
+					}
+					for _, pid := range peers {
+						add(fmt.Sprintf("Teach %s to %s via %s (-%d energy)", tech.Name, pid, ch.Name, ch.EnergyCost),
+							sim.Action{Kind: "teach_knowledge", TechID: tech.ID, TargetID: pid, Channel: ch.ID})
+					}
+				}
+			}
+
+			if a.Energy >= tech.AdoptEnergyCost && holdsAllItems(a.Items, tech.AdoptInputs) {
+				adoptTicks := tech.AdoptTicks
+				if adoptTicks < 1 {
+					adoptTicks = 1
+				}
+				if a.InsideHouse != "" {
+					if p.CurrentHouse != nil && p.CurrentHouse.CanAccess(a.ID) {
+						if tech.FacilityName == "" || !p.CurrentHouse.HasFacility(tech.FacilityName) {
+							add(fmt.Sprintf("Adopt %s in %s (%dm)", tech.Name, p.CurrentHouse.Name, adoptTicks*15),
+								sim.Action{Kind: "adopt_facility", TechID: tech.ID, HouseID: p.CurrentHouse.ID})
+						}
+					}
+				} else {
+					if a.VenueID != "" {
+						if p.CurrentVenue == nil || tech.GrantsVenueFeature == "" || !sim.ActorHasTag(p.CurrentVenue.Features, tech.GrantsVenueFeature) {
+							add(fmt.Sprintf("Adopt %s at venue %s (%dm)", tech.Name, a.VenueID, adoptTicks*15),
+								sim.Action{Kind: "adopt_facility", TechID: tech.ID, Location: a.VenueID})
+						}
+					}
+					for _, h := range p.AccessibleHouses {
+						if h.District == a.Location && (h.VenueID == "" || a.VenueID == "" || h.VenueID == a.VenueID) {
+							if tech.FacilityName == "" || !h.HasFacility(tech.FacilityName) {
+								add(fmt.Sprintf("Adopt %s in %s (%dm)", tech.Name, h.Name, adoptTicks*15),
+									sim.Action{Kind: "adopt_facility", TechID: tech.ID, HouseID: h.ID})
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	addDeclarativeActionOptions(p, allowed, add)
 	return options
+}
+
+func actionSpecCostSummary(spec sim.ActionSpec) string {
+	var parts []string
+	if spec.Ticks > 1 {
+		parts = append(parts, fmt.Sprintf("%dt", spec.Ticks))
+	}
+	if spec.Dormant {
+		parts = append(parts, "dormant")
+	}
+	if spec.EnergyCost > 0 {
+		parts = append(parts, fmt.Sprintf("-%d energy", spec.EnergyCost))
+	}
+	if spec.MoneyCost > 0 {
+		parts = append(parts, fmt.Sprintf("-%d coins", spec.MoneyCost))
+	}
+	for _, k := range sortedIntMapKeys(spec.SlotCosts) {
+		if spec.SlotCosts[k] > 0 {
+			parts = append(parts, fmt.Sprintf("-%d %s", spec.SlotCosts[k], k))
+		}
+	}
+	for _, k := range sortedIntMapKeys(spec.CurrencyCosts) {
+		if spec.CurrencyCosts[k] > 0 {
+			parts = append(parts, fmt.Sprintf("-%d %s", spec.CurrencyCosts[k], k))
+		}
+	}
+	for _, k := range sortedIntMapKeys(spec.ItemCosts) {
+		if spec.ItemCosts[k] > 0 {
+			parts = append(parts, fmt.Sprintf("-%d %s", spec.ItemCosts[k], k))
+		}
+	}
+	if len(parts) == 0 {
+		return "instant"
+	}
+	return strings.Join(parts, ", ")
+}
+
+func sortedIntMapKeys(m map[string]int) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func addDeclarativeActionOptions(p sim.Perception, allowed map[string]bool, add func(string, sim.Action)) {
+	if len(p.Catalog.ActionSpecs) == 0 {
+		return
+	}
+	a := p.Self
+	specKeys := make([]string, 0, len(p.Catalog.ActionSpecs))
+	for k := range p.Catalog.ActionSpecs {
+		specKeys = append(specKeys, k)
+	}
+	sort.Strings(specKeys)
+	for _, k := range specKeys {
+		spec := p.Catalog.ActionSpecs[k]
+		actionID := spec.ID
+		if actionID == "" {
+			actionID = k
+		}
+		if actionID == "" || !allowed[actionID] {
+			continue
+		}
+		if len(spec.WorldLawDelta) > 0 && !spec.AllowRewriteWorldLaw {
+			continue
+		}
+		if spec.RequiredVenueFeature != "" && !p.Map.VenueOrDistrictHasFeature(a.VenueID, a.Location, spec.RequiredVenueFeature) {
+			continue
+		}
+		if ok, _ := sim.ActorMeetsDeclarativeCosts(a, spec); !ok {
+			continue
+		}
+		name := spec.Name
+		if name == "" {
+			name = actionID
+		}
+		summary := actionSpecCostSummary(spec)
+		switch spec.TargetKind {
+		case "", "self":
+			add(fmt.Sprintf("%s (%s)", name, summary), sim.Action{Kind: actionID})
+		case "venue":
+			if spec.RangeKm <= 0 {
+				if a.VenueID != "" {
+					add(fmt.Sprintf("%s at %s (%s)", name, a.VenueID, summary), sim.Action{Kind: actionID, Location: a.VenueID})
+				} else {
+					for _, v := range p.Map.Venues {
+						if v.DistrictID == a.Location {
+							add(fmt.Sprintf("%s at %s (%s)", name, v.Name, summary), sim.Action{Kind: actionID, Location: v.ID})
+						}
+					}
+				}
+			} else if srcCoord, ok := p.Map.GeoCoordOfLocation(a.Location, a.VenueID); ok {
+				for _, v := range p.Map.Venues {
+					if dstCoord, ok2 := p.Map.GeoCoordOfLocation(v.DistrictID, v.ID); ok2 && sim.GeoDistanceKm(srcCoord, dstCoord) <= spec.RangeKm {
+						add(fmt.Sprintf("%s at %s (%s)", name, v.Name, summary), sim.Action{Kind: actionID, Location: v.ID})
+					}
+				}
+			} else if a.VenueID != "" {
+				add(fmt.Sprintf("%s at %s (%s)", name, a.VenueID, summary), sim.Action{Kind: actionID, Location: a.VenueID})
+			}
+		case "district":
+			if spec.RangeKm <= 0 {
+				if a.Location != "" {
+					add(fmt.Sprintf("%s in %s (%s)", name, a.Location, summary), sim.Action{Kind: actionID, Location: a.Location})
+				}
+			} else if srcCoord, ok := p.Map.GeoCoordOfLocation(a.Location, a.VenueID); ok {
+				for _, d := range p.Map.Districts {
+					if dstCoord, ok2 := p.Map.GeoCoordOfLocation(d.ID, ""); ok2 && sim.GeoDistanceKm(srcCoord, dstCoord) <= spec.RangeKm {
+						add(fmt.Sprintf("%s in %s (%s)", name, d.Name, summary), sim.Action{Kind: actionID, Location: d.ID})
+					}
+				}
+			} else if a.Location != "" {
+				add(fmt.Sprintf("%s in %s (%s)", name, a.Location, summary), sim.Action{Kind: actionID, Location: a.Location})
+			}
+		case "actor":
+			for _, b := range p.Nearby {
+				if !b.Jailed {
+					add(fmt.Sprintf("%s -> %s (%s)", name, b.Name, summary), sim.Action{Kind: actionID, TargetID: b.ID})
+				}
+			}
+		case "cohort":
+			for _, c := range p.LocalCohorts {
+				if c.District == a.Location && c.Population > 0 {
+					add(fmt.Sprintf("%s -> %s (%s)", name, c.Name, summary), sim.Action{Kind: actionID, TargetID: c.ID})
+				}
+			}
+		}
+	}
 }
 
 func sortedItemIDs(items map[string]sim.ItemSpec) []string {
@@ -651,6 +937,9 @@ func (RuleSelector) Select(ctx context.Context, p sim.Perception, options []Opti
 			a.FactionID == desired.FactionID &&
 			a.ProfessionID == desired.ProfessionID &&
 			a.RecipeID == desired.RecipeID &&
+			(desired.TechID == "" || a.TechID == desired.TechID) &&
+			(desired.Currency == "" || a.Currency == desired.Currency) &&
+			(desired.TransitionID == "" || a.TransitionID == desired.TransitionID) &&
 			a.OfferID == desired.OfferID &&
 			a.AgreementID == desired.AgreementID &&
 			(desired.Item == "" || a.Item == desired.Item) &&
@@ -782,6 +1071,35 @@ func (TemplateContent) Generate(_ context.Context, p sim.Perception, a sim.Actio
 						SubjectID: m.Observation.SubjectID,
 						ObjectID:  m.Observation.ObjectID,
 						CaseID:    m.Observation.CaseID,
+						Location:  m.Observation.Location,
+						Quantity:  1,
+					},
+				}, nil
+			case "ambient_shift":
+				mod := m.Observation.Modality
+				if mod == "" {
+					mod = "eyewitness"
+				}
+				return Content{
+					Text:         fmt.Sprintf("I perceived %s shift (%s) at %s (level %d).", m.Observation.Item, mod, m.Observation.Location, m.Observation.Quantity),
+					BasisEventID: m.EventID,
+					Statement: &sim.Statement{
+						Topic:     "ambient_shift",
+						SubjectID: m.Observation.SubjectID,
+						Item:      m.Observation.Item,
+						Location:  m.Observation.Location,
+						Quantity:  m.Observation.Quantity,
+					},
+				}, nil
+			case "facility_adopted":
+				return Content{
+					Text:         fmt.Sprintf("I witnessed %s adopting %s at %s.", m.Observation.SubjectID, m.Observation.Item, m.Observation.ObjectID),
+					BasisEventID: m.EventID,
+					Statement: &sim.Statement{
+						Topic:     "facility_adopted",
+						SubjectID: m.Observation.SubjectID,
+						ObjectID:  m.Observation.ObjectID,
+						Item:      m.Observation.Item,
 						Location:  m.Observation.Location,
 						Quantity:  1,
 					},

@@ -154,3 +154,137 @@ func CompactEvents(events []sim.Event) []sim.Event {
 	}
 	return out
 }
+
+// SaveCheckpoint persists a full World snapshot keyed by (world_id, tick) for deterministic replay.
+func (s *Store) SaveCheckpoint(ctx context.Context, w *sim.World) error {
+	if w == nil {
+		return fmt.Errorf("world is nil")
+	}
+	state, err := json.Marshal(w)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO world_checkpoints (world_id, tick, state, created_at)
+		VALUES ($1, $2, $3::jsonb, now())
+		ON CONFLICT (world_id, tick) DO UPDATE
+			SET state = EXCLUDED.state, created_at = now()`, w.ID, w.Tick, string(state))
+	if err != nil {
+		return fmt.Errorf("save checkpoint world=%q tick=%d: %w", w.ID, w.Tick, err)
+	}
+	return nil
+}
+
+// LoadNearestCheckpoint returns the latest checkpoint for worldID with tick <= maxTick,
+// along with its raw JSON bytes so replay starts from the exact serialized snapshot.
+func (s *Store) LoadNearestCheckpoint(ctx context.Context, worldID string, maxTick int64) (*sim.World, []byte, error) {
+	var raw []byte
+	err := s.db.QueryRowContext(ctx, `
+		SELECT state FROM world_checkpoints
+		WHERE world_id = $1 AND tick <= $2
+		ORDER BY tick DESC
+		LIMIT 1`, worldID, maxTick).Scan(&raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	var w sim.World
+	if err := json.Unmarshal(raw, &w); err != nil {
+		return nil, nil, fmt.Errorf("unmarshal checkpoint world=%q: %w", worldID, err)
+	}
+	return &w, raw, nil
+}
+
+// SaveDecisionLog persists the settled actor decisions for a single tick.
+func (s *Store) SaveDecisionLog(ctx context.Context, worldID string, log sim.TickDecisionLog) error {
+	raw, err := json.Marshal(log)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO world_decision_logs (world_id, tick, decisions, created_at)
+		VALUES ($1, $2, $3::jsonb, now())
+		ON CONFLICT (world_id, tick) DO UPDATE
+			SET decisions = EXCLUDED.decisions, created_at = now()`, worldID, log.Tick, string(raw))
+	if err != nil {
+		return fmt.Errorf("save decision log world=%q tick=%d: %w", worldID, log.Tick, err)
+	}
+	return nil
+}
+
+// LoadDecisionLogs loads ordered per-tick decision logs for worldID across [fromTick, toTick].
+func (s *Store) LoadDecisionLogs(ctx context.Context, worldID string, fromTick, toTick int64) ([]sim.TickDecisionLog, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT decisions FROM world_decision_logs
+		WHERE world_id = $1 AND tick >= $2 AND tick <= $3
+		ORDER BY tick ASC`, worldID, fromTick, toTick)
+	if err != nil {
+		return nil, fmt.Errorf("query decision logs world=%q: %w", worldID, err)
+	}
+	defer rows.Close()
+	var logs []sim.TickDecisionLog
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		var entry sim.TickDecisionLog
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			return nil, fmt.Errorf("unmarshal decision log world=%q: %w", worldID, err)
+		}
+		logs = append(logs, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return logs, nil
+}
+
+// LoadEvents loads persisted events for worldID ordered by (tick, id) across [fromTick, toTick].
+// If toTick < 0, all events with tick >= fromTick are returned.
+func (s *Store) LoadEvents(ctx context.Context, worldID string, fromTick, toTick int64) ([]sim.Event, error) {
+	var rows *sql.Rows
+	var err error
+	if toTick < 0 {
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT id, tick, actor_id, target_id, kind, action, payload
+			FROM world_events
+			WHERE world_id = $1 AND tick >= $2
+			ORDER BY tick ASC, id ASC`, worldID, fromTick)
+	} else {
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT id, tick, actor_id, target_id, kind, action, payload
+			FROM world_events
+			WHERE world_id = $1 AND tick >= $2 AND tick <= $3
+			ORDER BY tick ASC, id ASC`, worldID, fromTick, toTick)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query events world=%q: %w", worldID, err)
+	}
+	defer rows.Close()
+	var events []sim.Event
+	for rows.Next() {
+		var (
+			ev         sim.Event
+			actionRaw  []byte
+			payloadRaw []byte
+		)
+		if err := rows.Scan(&ev.ID, &ev.Tick, &ev.ActorID, &ev.TargetID, &ev.Kind, &actionRaw, &payloadRaw); err != nil {
+			return nil, err
+		}
+		if len(actionRaw) > 0 {
+			if err := json.Unmarshal(actionRaw, &ev.Action); err != nil {
+				return nil, fmt.Errorf("unmarshal event %d action: %w", ev.ID, err)
+			}
+		}
+		if len(payloadRaw) > 0 {
+			if err := json.Unmarshal(payloadRaw, &ev.Payload); err != nil {
+				return nil, fmt.Errorf("unmarshal event %d payload: %w", ev.ID, err)
+			}
+		}
+		events = append(events, ev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return events, nil
+}

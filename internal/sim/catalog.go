@@ -51,24 +51,28 @@ func (a Attributes) Meets(req map[string]int) (bool, string) {
 
 // ItemSpec defines generic item properties. Tier is the goods grade (1–5).
 type ItemSpec struct {
-	ID                string `json:"id"`
-	Name              string `json:"name"`
-	Tier              int    `json:"tier"`
-	Edible            bool   `json:"edible,omitempty"`
-	HungerRelief      int    `json:"hunger_relief,omitempty"`
-	Potable           bool   `json:"potable,omitempty"`
-	ThirstRelief      int    `json:"thirst_relief,omitempty"`
-	WarmthBonus       int    `json:"warmth_bonus,omitempty"`
-	MedicinalHeal     int    `json:"medicinal_heal,omitempty"`
-	DiseaseCure       int    `json:"disease_cure,omitempty"`
-	SafetyBonusPct    int    `json:"safety_bonus_pct,omitempty"`
-	CombatBonus       int    `json:"combat_bonus,omitempty"`
-	Tradeable         bool   `json:"tradeable,omitempty"`
-	BatchQty          int    `json:"batch_qty,omitempty"`
-	BatchPrice        int    `json:"batch_price,omitempty"`
-	OfferThreshold    int    `json:"offer_threshold,omitempty"`
-	SurplusThreshold  int    `json:"surplus_threshold,omitempty"`
-	ShortageThreshold int    `json:"shortage_threshold,omitempty"`
+	ID                 string   `json:"id"`
+	Name               string   `json:"name"`
+	Tier               int      `json:"tier"`
+	Edible             bool     `json:"edible,omitempty"`
+	HungerRelief       int      `json:"hunger_relief,omitempty"`
+	Potable            bool     `json:"potable,omitempty"`
+	ThirstRelief       int      `json:"thirst_relief,omitempty"`
+	WarmthBonus        int      `json:"warmth_bonus,omitempty"`
+	MedicinalHeal      int      `json:"medicinal_heal,omitempty"`
+	DiseaseCure        int      `json:"disease_cure,omitempty"`
+	SafetyBonusPct     int      `json:"safety_bonus_pct,omitempty"`
+	CombatBonus        int      `json:"combat_bonus,omitempty"`
+	Tradeable          bool     `json:"tradeable,omitempty"`
+	BatchQty           int      `json:"batch_qty,omitempty"`
+	BatchPrice         int      `json:"batch_price,omitempty"`
+	OfferThreshold     int      `json:"offer_threshold,omitempty"`
+	SurplusThreshold   int      `json:"surplus_threshold,omitempty"`
+	ShortageThreshold  int      `json:"shortage_threshold,omitempty"`
+	AcceptedCurrencies []string `json:"accepted_currencies,omitempty"`
+	BuyerRequiredTag   string   `json:"buyer_required_tag,omitempty"`
+	DualUseCurrency    string   `json:"dual_use_currency,omitempty"`
+	DualUseRate        int      `json:"dual_use_rate,omitempty"`
 }
 
 // Profession is a leveled trade (Tier 1 base or Tier 2+ advanced) with attribute entry requirements,
@@ -182,6 +186,14 @@ type Catalog struct {
 	LocomotionModes        map[string]LocomotionSpec     `json:"locomotion_modes,omitempty"`
 	SensoryModes           map[string]SensorySpec        `json:"sensory_modes,omitempty"`
 	CommChannels           map[string]CommChannelSpec    `json:"comm_channels,omitempty"`
+	CombatProfiles         []CombatProfileSpec           `json:"combat_profiles,omitempty"`
+	ActionSpecs            map[string]ActionSpec         `json:"action_specs,omitempty"`
+	StateSlots             map[string]StateSlotSpec      `json:"state_slots,omitempty"`
+	Forms                  map[string]FormSpec           `json:"forms,omitempty"`
+	Transitions            map[string]TransitionSpec     `json:"transitions,omitempty"`
+	Currencies             map[string]CurrencySpec       `json:"currencies,omitempty"`
+	Techs                  map[string]TechSpec           `json:"techs,omitempty"`
+	DefaultWorldLaws       map[string]int                `json:"default_world_laws,omitempty"`
 }
 
 func DefaultCatalog() Catalog {
@@ -823,18 +835,7 @@ func (c Catalog) FactionLevel(influence int) int {
 // Capabilities reports which action kinds the actor's tags and professions grant.
 func (c Catalog) Capabilities(a Actor) map[string]bool {
 	result := map[string]bool{}
-	idTags := a.IdentityTags()
-	for pid, lv := range a.Professions {
-		if lv > 0 {
-			if prof, ok := c.ProfessionByID(pid); ok {
-				for _, g := range prof.Grants {
-					if !ActorHasTag(idTags, g) {
-						idTags = append(idTags, g)
-					}
-				}
-			}
-		}
-	}
+	idTags := c.EffectiveTags(a)
 	for _, tag := range idTags {
 		for _, action := range c.TagActions[tag] {
 			result[action] = true
@@ -884,7 +885,69 @@ func (c Catalog) Capabilities(a Actor) map[string]bool {
 			}
 		}
 	}
+	for k, spec := range c.ActionSpecs {
+		actionID := spec.ID
+		if actionID == "" {
+			actionID = k
+		}
+		if actionID == "" {
+			continue
+		}
+		if len(spec.GrantedByTags) == 0 {
+			result[actionID] = true
+			continue
+		}
+		for _, gt := range spec.GrantedByTags {
+			if ActorHasTag(idTags, gt) {
+				result[actionID] = true
+				break
+			}
+		}
+	}
+	if len(c.Transitions) > 0 {
+		result["attempt_transition"] = true
+	}
+	if len(c.StateSlots) > 0 || len(c.Currencies) > 0 {
+		result["refine_currency_item"] = true
+		result["absorb_item_slot"] = true
+	} else {
+		for _, spec := range c.Items {
+			if spec.DualUseCurrency != "" || spec.DualUseRate > 0 {
+				result["refine_currency_item"] = true
+				result["absorb_item_slot"] = true
+				break
+			}
+		}
+	}
+	if result["wait"] || ActorHasTag(idTags, "resident") || ActorHasTag(idTags, "engineer") || ActorHasTag(idTags, "saboteur") || result["attack"] || result["craft"] {
+		result["sever_flow_edge"] = true
+		result["repair_flow_edge"] = true
+	}
+	if len(c.Techs) > 0 {
+		result["teach_knowledge"] = true
+		result["adopt_facility"] = true
+		for _, tech := range c.Techs {
+			if len(tech.GrantedByTags) == 0 {
+				result["research_tech"] = true
+				break
+			}
+			for _, gt := range tech.GrantedByTags {
+				if ActorHasTag(idTags, gt) {
+					result["research_tech"] = true
+					break
+				}
+			}
+			if result["research_tech"] {
+				break
+			}
+		}
+	}
 	return result
+}
+
+// EffectiveTags returns the actor's identity tags combined with form innate tags and active profession grants.
+func (c Catalog) EffectiveTags(a Actor) []string {
+	return actorEffectiveTags(c, a)
 }
 
 // CanLearnProfession checks whether actor `a` meets the attribute, parent profession, and guild level requirements
@@ -932,7 +995,7 @@ func (c Catalog) ProfessionGating(a Actor, r Recipe) (bool, string) {
 			}
 		}
 	}
-	if r.RequiredTag != "" && !ActorHasTag(a.Tags, r.RequiredTag) {
+	if r.RequiredTag != "" && !ActorHasTag(c.ActorEffectiveTags(a), r.RequiredTag) {
 		return false, "recipe " + r.ID + " requires tag: " + r.RequiredTag
 	}
 	return true, ""
@@ -1069,7 +1132,11 @@ func CloneCatalog(c Catalog) Catalog {
 		out.TagActions[k] = append([]string(nil), v...)
 	}
 	for k, v := range c.Items {
-		out.Items[k] = v
+		ic := v
+		if v.AcceptedCurrencies != nil {
+			ic.AcceptedCurrencies = append([]string(nil), v.AcceptedCurrencies...)
+		}
+		out.Items[k] = ic
 	}
 	for i, p := range c.Professions {
 		pc := p
@@ -1224,6 +1291,71 @@ func CloneCatalog(c Catalog) Catalog {
 			}
 			out.CommChannels[k] = cp
 		}
+	}
+	if c.CombatProfiles != nil {
+		out.CombatProfiles = make([]CombatProfileSpec, len(c.CombatProfiles))
+		for i, cp := range c.CombatProfiles {
+			out.CombatProfiles[i] = CloneCombatProfileSpec(cp)
+		}
+	}
+	if c.ActionSpecs != nil {
+		out.ActionSpecs = make(map[string]ActionSpec, len(c.ActionSpecs))
+		for k, spec := range c.ActionSpecs {
+			out.ActionSpecs[k] = CloneActionSpec(spec)
+		}
+	}
+	if c.StateSlots != nil {
+		out.StateSlots = make(map[string]StateSlotSpec, len(c.StateSlots))
+		for k, v := range c.StateSlots {
+			out.StateSlots[k] = v
+		}
+	}
+	if c.Forms != nil {
+		out.Forms = make(map[string]FormSpec, len(c.Forms))
+		for k, f := range c.Forms {
+			fc := f
+			if f.SlotMetabolism != nil {
+				fc.SlotMetabolism = cloneIntMap(f.SlotMetabolism)
+			}
+			if f.InnateTags != nil {
+				fc.InnateTags = append([]string(nil), f.InnateTags...)
+			}
+			out.Forms[k] = fc
+		}
+	}
+	if c.Transitions != nil {
+		out.Transitions = make(map[string]TransitionSpec, len(c.Transitions))
+		for k, t := range c.Transitions {
+			tc := t
+			if t.RequiredSlots != nil {
+				tc.RequiredSlots = cloneIntMap(t.RequiredSlots)
+			}
+			if t.ItemCosts != nil {
+				tc.ItemCosts = cloneIntMap(t.ItemCosts)
+			}
+			if t.SlotCosts != nil {
+				tc.SlotCosts = cloneIntMap(t.SlotCosts)
+			}
+			if t.SuccessGrantTags != nil {
+				tc.SuccessGrantTags = append([]string(nil), t.SuccessGrantTags...)
+			}
+			out.Transitions[k] = tc
+		}
+	}
+	if c.Currencies != nil {
+		out.Currencies = make(map[string]CurrencySpec, len(c.Currencies))
+		for k, v := range c.Currencies {
+			out.Currencies[k] = v
+		}
+	}
+	if c.Techs != nil {
+		out.Techs = make(map[string]TechSpec, len(c.Techs))
+		for k, ts := range c.Techs {
+			out.Techs[k] = CloneTechSpec(ts)
+		}
+	}
+	if c.DefaultWorldLaws != nil {
+		out.DefaultWorldLaws = cloneIntMapPreserveNil(c.DefaultWorldLaws)
 	}
 	return out
 }

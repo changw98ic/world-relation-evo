@@ -56,6 +56,7 @@ type Offer struct {
 	Item     string `json:"item"`
 	Quantity int    `json:"quantity"`
 	Price    int    `json:"price"`
+	Currency string `json:"currency,omitempty"`
 	Expires  int64  `json:"expires"`
 }
 
@@ -68,6 +69,7 @@ type Task struct {
 	Yield       int    `json:"yield,omitempty"`
 	SleepTenths int    `json:"sleep_tenths,omitempty"`
 	StartEnergy int    `json:"start_energy,omitempty"`
+	Dormant     bool   `json:"dormant,omitempty"`
 }
 
 type Actor struct {
@@ -101,8 +103,12 @@ type Actor struct {
 	RestUntil       int64             `json:"rest_until,omitempty"`
 	SleepTrait      string            `json:"sleep_trait"`
 	Money           int               `json:"money"`
+	Currencies      map[string]int64  `json:"currencies,omitempty"`
 	IllicitGain     int               `json:"illicit_gain,omitempty"`
 	Items           map[string]int    `json:"items"`
+	PinFocal        bool              `json:"pin_focal,omitempty"`
+	FormID          string            `json:"form_id,omitempty"`
+	StateSlots      map[string]int    `json:"state_slots,omitempty"`
 	Goal            string            `json:"goal"`
 	Personality     string            `json:"personality"`
 	Trust           map[string]int    `json:"trust"`
@@ -160,6 +166,11 @@ type World struct {
 	Relations        *RelationEvoState        `json:"relations,omitempty"`
 	JusticeRevolt    *JusticeRevoltState      `json:"justice_revolt,omitempty"`
 	SpotlightRumor   *SpotlightRumorState     `json:"spotlight_rumor,omitempty"`
+	ActiveEffects    []ActiveEffect           `json:"active_effects,omitempty"`
+	FlowGrid         *FlowGridState           `json:"flow_grid,omitempty"`
+	LedgerAudit      *LedgerAuditState        `json:"ledger_audit,omitempty"`
+	Knowledge        *KnowledgeBook           `json:"knowledge,omitempty"`
+	WorldLaws        map[string]int           `json:"world_laws,omitempty"`
 }
 
 type Action struct {
@@ -174,9 +185,12 @@ type Action struct {
 	FactionID    string     `json:"faction_id,omitempty"`
 	ProfessionID string     `json:"profession_id,omitempty"`
 	RecipeID     string     `json:"recipe_id,omitempty"`
+	TechID       string     `json:"tech_id,omitempty"`
 	Item         string     `json:"item,omitempty"`
 	Quantity     int        `json:"quantity,omitempty"`
 	Price        int        `json:"price,omitempty"`
+	Currency     string     `json:"currency,omitempty"`
+	TransitionID string     `json:"transition_id,omitempty"`
 	OfferID      int64      `json:"offer_id,omitempty"`
 	Text         string     `json:"text,omitempty"`
 }
@@ -221,13 +235,21 @@ type FactionView struct {
 	Members      int            `json:"members"`
 }
 
+type CohortView struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	District   string `json:"district"`
+	Profession string `json:"profession"`
+	Population int    `json:"population"`
+}
+
 type Perception struct {
-	Continuity          ContinuityView `json:"continuity"`
-	LoanRequests        []LoanRequest  `json:"loan_requests,omitempty"`
-	LoanQuotes          []LoanRequest  `json:"loan_quotes,omitempty"`
-	Tick                int64          `json:"tick"`
-	Clock               Clock          `json:"clock"`
-	Calendar            CalendarState  `json:"calendar"`
+	Continuity          ContinuityView        `json:"continuity"`
+	LoanRequests        []LoanRequest         `json:"loan_requests,omitempty"`
+	LoanQuotes          []LoanRequest         `json:"loan_quotes,omitempty"`
+	Tick                int64                 `json:"tick"`
+	Clock               Clock                 `json:"clock"`
+	Calendar            CalendarState         `json:"calendar"`
 	Self                Actor                 `json:"self"`
 	CurrentDistrict     District              `json:"current_district"`
 	CurrentVenue        *Venue                `json:"current_venue,omitempty"`
@@ -239,22 +261,26 @@ type Perception struct {
 	VenueRoutes         []VenueRouteView      `json:"venue_routes,omitempty"`
 	Polity              *PolityPerceptionView `json:"polity,omitempty"`
 	Nearby              []Neighbor            `json:"nearby,omitempty"`
-	Offers              []Offer        `json:"offers,omitempty"`
-	SpotlightSalience   int            `json:"spotlight_salience,omitempty"`
-	HasActiveLoan       bool           `json:"has_active_loan,omitempty"`
-	OverdueBorrowerID   string         `json:"overdue_borrower_id,omitempty"`
-	OverdueHouseID      string         `json:"overdue_house_id,omitempty"`
-	Married             bool           `json:"married,omitempty"`
-	EligibleSpouseIDs   []string       `json:"eligible_spouse_ids,omitempty"`
-	ActiveGrudgeTargets []string       `json:"active_grudge_targets,omitempty"`
-	MediateTargetID     string         `json:"mediate_target_id,omitempty"`
-	DistrictController  string         `json:"district_controller,omitempty"`
-	HasOpenWrongfulCase bool           `json:"has_open_wrongful_case,omitempty"`
-	AppealTargetID      string         `json:"appeal_target_id,omitempty"`
-	AppealBasisEventID  int64          `json:"appeal_basis_event_id,omitempty"`
-	DistrictGrievance   int            `json:"district_grievance,omitempty"`
-	Map                 WorldMap       `json:"-"`
-	Catalog             Catalog        `json:"-"`
+	LocalCohorts        []CohortView          `json:"local_cohorts,omitempty"`
+	ActiveEffects       []ActiveEffect        `json:"active_effects,omitempty"`
+	Offers              []Offer               `json:"offers,omitempty"`
+	SpotlightSalience   int                   `json:"spotlight_salience,omitempty"`
+	HasActiveLoan       bool                  `json:"has_active_loan,omitempty"`
+	OverdueBorrowerID   string                `json:"overdue_borrower_id,omitempty"`
+	OverdueHouseID      string                `json:"overdue_house_id,omitempty"`
+	Married             bool                  `json:"married,omitempty"`
+	EligibleSpouseIDs   []string              `json:"eligible_spouse_ids,omitempty"`
+	ActiveGrudgeTargets []string              `json:"active_grudge_targets,omitempty"`
+	MediateTargetID     string                `json:"mediate_target_id,omitempty"`
+	DistrictController  string                `json:"district_controller,omitempty"`
+	HasOpenWrongfulCase bool                  `json:"has_open_wrongful_case,omitempty"`
+	AppealTargetID      string                `json:"appeal_target_id,omitempty"`
+	AppealBasisEventID  int64                 `json:"appeal_basis_event_id,omitempty"`
+	DistrictGrievance   int                   `json:"district_grievance,omitempty"`
+	KnownTechs          []string              `json:"known_techs,omitempty"`
+	WorldLaws           map[string]int        `json:"world_laws,omitempty"`
+	Map                 WorldMap              `json:"-"`
+	Catalog             Catalog               `json:"-"`
 }
 
 type Decider interface {
@@ -750,28 +776,12 @@ func appendUnique(list []string, value string) []string {
 }
 
 func (w *World) View(id string) Perception {
-	a := *w.actor(id)
-	a.Tags = append([]string(nil), a.Tags...)
-	a.Guilds = append([]string(nil), a.Guilds...)
-	a.Professions = cloneIntMap(a.Professions)
-	a.ProfessionRanks = cloneStringMap(a.ProfessionRanks)
-	a.ProfessionXP = cloneIntMap(a.ProfessionXP)
-	a.GuildLevels = cloneIntMap(a.GuildLevels)
-	a.Items = cloneIntMap(a.Items)
-	a.Trust = cloneIntMap(a.Trust)
+	a := cloneActor(*w.actor(id))
 	if a.Items == nil {
 		a.Items = map[string]int{}
 	}
 	if a.Trust == nil {
 		a.Trust = map[string]int{}
-	}
-	if a.Task != nil {
-		tc := *a.Task
-		if tc.Action.Statement != nil {
-			sc := *tc.Action.Statement
-			tc.Action.Statement = &sc
-		}
-		a.Task = &tc
 	}
 
 	dist, _ := w.Map.DistrictByID(a.Location)
@@ -786,6 +796,23 @@ func (w *World) View(id string) Perception {
 		CurrentDistrict: dist,
 		Map:             CloneMap(w.Map),
 		Catalog:         CloneCatalog(w.Catalog),
+	}
+	if len(w.ActiveEffects) > 0 {
+		p.ActiveEffects = make([]ActiveEffect, len(w.ActiveEffects))
+		for i, eff := range w.ActiveEffects {
+			p.ActiveEffects[i] = CloneActiveEffect(eff)
+		}
+	}
+	for _, c := range w.Cohorts {
+		if c.Population > 0 && c.District == a.Location {
+			p.LocalCohorts = append(p.LocalCohorts, CohortView{
+				ID:         c.ID,
+				Name:       c.Name,
+				District:   c.District,
+				Profession: c.Profession,
+				Population: c.Population,
+			})
+		}
 	}
 	if w.DistrictStates != nil {
 		if ds, ok := w.DistrictStates[a.Location]; ok {
@@ -810,6 +837,8 @@ func (w *World) View(id string) Perception {
 		}
 	}
 	p.Polity = buildPolityPerceptionView(p.Map, ClonePolityNetwork(w.Polities), a)
+	p.KnownTechs = w.ActorKnownTechs(id)
+	p.WorldLaws = w.EffectiveWorldLaws()
 	for _, h := range w.Houses {
 		if h.CanAccess(id) {
 			p.AccessibleHouses = append(p.AccessibleHouses, CloneHouse(h))
@@ -838,7 +867,7 @@ func (w *World) View(id string) Perception {
 				LeadsToward: w.Map.LeadsToward(a.Location, r.To),
 			})
 		}
-		p.VenueRoutes = buildVenueRouteViews(p.Map, p.Catalog, w.DistrictStates, a)
+		p.VenueRoutes = buildVenueRouteViews(p.Map, p.Catalog, w.DistrictStates, w.actorWithEffectTags(a))
 	}
 
 	for _, b := range w.Actors {
@@ -847,7 +876,7 @@ func (w *World) View(id string) Perception {
 				ID:       b.ID,
 				Name:     b.Name,
 				Role:     b.Role,
-				Tags:     append([]string(nil), b.IdentityTags()...),
+				Tags:     append([]string(nil), w.neighborEffectiveTags(b)...),
 				Level:    b.Level,
 				Health:   b.Health,
 				Sleeping: b.Task != nil && b.Task.Action.Kind == "sleep",
@@ -906,11 +935,19 @@ func (w *World) ensureSpotlightRumor() *SpotlightRumorState {
 // applyPerceptionEvoHints populates read-only tactical context fields on p from active
 // evolutionary subsystems without mutating any world state (safe for concurrent view workers).
 func (w *World) applyPerceptionEvoHints(p *Perception) {
+	var agreements []Agreement
+	if w.Continuity != nil {
+		agreements = w.Continuity.Agreements
+	}
+	w.applyPerceptionEvoHintsWithAgreements(p, agreements)
+}
+
+func (w *World) applyPerceptionEvoHintsWithAgreements(p *Perception, agreements []Agreement) {
 	if p == nil {
 		return
 	}
 	p.Self.Plan = ClonePersonalPlan(p.Self.Plan)
-	p.Continuity = w.ContinuityFor(p.Self.ID)
+	p.Continuity = w.continuityForAgreements(p.Self.ID, agreements)
 	a := p.Self
 	p.LoanRequests = w.MarketCredit.PendingLoanRequests(a.ID)
 	spec := DefaultMarketCreditSpec()
@@ -1224,7 +1261,7 @@ func (w *World) awakeSamePlaceObservers(placeActor Actor, excludeIDs ...string) 
 		if c.Dead || excl[c.ID] || w.Tick < c.JailedUntil {
 			continue
 		}
-		if c.Task != nil && c.Task.Action.Kind == "sleep" {
+		if c.Task != nil && (c.Task.Action.Kind == "sleep" || c.Task.Dormant) {
 			continue
 		}
 		if SamePlace(placeActor, *c) {
@@ -1313,21 +1350,55 @@ func (w *World) Step(ctx context.Context, d Decider) ([]Event, error) {
 	}
 	events = append(events, w.StepMarketAndCredit(w.ensureMarketCredit())...)
 	if len(w.Cohorts) > 0 {
+		var beforeMacro map[string]int64
+		if w.LedgerAudit != nil {
+			beforeMacro = w.snapshotCombinedItemTotals()
+		}
 		events = append(events, w.stepCohorts()...)
+		if w.LedgerAudit != nil {
+			w.recordItemSnapshotDelta(beforeMacro, w.snapshotCombinedItemTotals())
+		}
 	}
 
 	w.Tick++
+	events = append(events, w.stepActiveEffects()...)
 	events = append(events, w.AdvanceContinuity()...)
-	// Physiological hunger accumulates once every 6 hours (24 quarter-hour ticks).
-	if w.Tick%(6*TicksPerHour) == 0 {
-		for i := range w.Actors {
-			if !w.Actors[i].Dead && w.Tick >= w.Actors[i].JailedUntil {
-				w.Actors[i].Hunger++
+	// Physiological hunger accumulates once every 6 hours (24 quarter-hour ticks),
+	// scaled or disabled by each actor's FormSpec.
+	baseHungerInterval := int64(6 * TicksPerHour)
+	for i := range w.Actors {
+		a := &w.Actors[i]
+		if a.Dead || w.Tick < a.JailedUntil {
+			continue
+		}
+		interval := baseHungerInterval
+		if form, hasForm := w.actorFormSpec(*a); hasForm {
+			if form.DisableHunger {
+				continue
 			}
+			if form.HungerIntervalMulPct > 0 && form.HungerIntervalMulPct != 100 {
+				interval = (baseHungerInterval * int64(form.HungerIntervalMulPct)) / 100
+				if interval < 1 {
+					interval = 1
+				}
+			}
+		}
+		if w.Tick%interval == 0 {
+			a.Hunger++
 		}
 	}
 	// Advance regional ecology/weather/disasters/encounters/rituals and actor lifecycle/physiology.
+	var beforeEnv map[string]int64
+	if w.LedgerAudit != nil && len(w.Cohorts) > 0 {
+		beforeEnv = w.snapshotCombinedItemTotals()
+	}
 	events = append(events, w.stepWorldEnvironment()...)
+	if w.LedgerAudit != nil && len(w.Cohorts) > 0 {
+		w.recordItemSnapshotDelta(beforeEnv, w.snapshotCombinedItemTotals())
+	}
+	events = append(events, w.stepAdoptedFacilities()...)
+	events = append(events, w.stepStateSlotsAndForms()...)
+	events = append(events, w.stepFlowGrid()...)
 	events = append(events, w.stepActorPhysiologyAndLifecycle()...)
 	// Release prisoners who have completed their Yamen jail sentence.
 	for i := range w.Actors {
@@ -1578,6 +1649,13 @@ func (w *World) markDeadIfZero(target *Actor, killer *Actor, x Action, cause str
 			w.creditTreasury(int64(target.Money), "confiscated")
 		}
 		target.Money = 0
+	} else if target.Money > 0 {
+		w.recordLedgerCurrencyConsumed("coins", int64(target.Money))
+	}
+	for cur, amt := range target.Currencies {
+		if amt > 0 {
+			w.recordLedgerCurrencyConsumed(cur, amt)
+		}
 	}
 	filtered := w.Offers[:0]
 	for _, o := range w.Offers {
@@ -1693,6 +1771,7 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 			w.drawDistrictResource(a.Location, r.ResourcePool, int64(maxInt(1, r.ResourceDraw)))
 		}
 		a.Items[r.OutputItem] += t.Yield
+		w.recordLedgerItemProduced(r.OutputItem, int64(t.Yield))
 		tier := w.Catalog.Items[r.OutputItem].Tier
 		if tier < 1 {
 			tier = 1
@@ -1774,12 +1853,16 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 		}
 		w.DistrictStates[a.Location] = ds
 		a.Money += bounty
+		if len(w.Cohorts) == 0 && bounty > 0 {
+			w.recordLedgerCurrencyProduced("coins", int64(bounty))
+		}
 		dropQty := 0
 		if enc.RareDropItem != "" {
 			roll := int(worldHash(w.ID, w.Tick, "act_hunt:"+a.ID+":"+enc.ID) % 1000)
 			if roll < enc.RareDropPermille {
 				dropQty = 1
 				a.Items[enc.RareDropItem]++
+				w.recordLedgerItemProduced(enc.RareDropItem, 1)
 			}
 		}
 		if a.Health > 20 {
@@ -1894,7 +1977,16 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 			"condition": h.Condition,
 		})}
 		return append(events, w.grantProfessionXP(a, x, "carpenter", 12, 3)...)
+	case "attempt_transition":
+		return w.executeTransition(a, x, resolveTransitionID(x))
+	case "research_tech":
+		return w.finishResearchTech(a, t)
+	case "adopt_facility":
+		return w.finishAdoptFacility(a, t)
 	default:
+		if spec, ok := w.Catalog.ActionSpecs[x.Kind]; ok {
+			return w.finishDeclarativeAction(a, t, spec)
+		}
 		return nil
 	}
 }
@@ -1924,7 +2016,7 @@ func (w *World) Apply(id string, x Action) []Event {
 	if a.Task != nil {
 		return fail("actor is already busy with " + a.Task.Action.Kind)
 	}
-	if !w.Catalog.Capabilities(*a)[x.Kind] {
+	if !w.ActorCapabilities(*a)[x.Kind] {
 		return fail("identity tags do not grant action: " + x.Kind)
 	}
 	if x.BasisEventID != 0 {
@@ -2138,6 +2230,7 @@ func (w *World) Apply(id string, x Action) []Event {
 		if a.Items[itemID] == 0 {
 			delete(a.Items, itemID)
 		}
+		w.recordLedgerItemConsumed(itemID, 1)
 		relief := spec.HungerRelief
 		if relief <= 0 {
 			relief = 1
@@ -2191,6 +2284,7 @@ func (w *World) Apply(id string, x Action) []Event {
 		if a.Items[itemID] == 0 {
 			delete(a.Items, itemID)
 		}
+		w.recordLedgerItemConsumed(itemID, 1)
 		relief := spec.ThirstRelief
 		if relief <= 0 {
 			relief = 2
@@ -2254,6 +2348,7 @@ func (w *World) Apply(id string, x Action) []Event {
 		if a.Items[itemID] == 0 {
 			delete(a.Items, itemID)
 		}
+		w.recordLedgerItemConsumed(itemID, 1)
 		healAmt := spec.MedicinalHeal
 		if healAmt > MaxHealth-a.Health {
 			healAmt = MaxHealth - a.Health
@@ -2291,6 +2386,9 @@ func (w *World) Apply(id string, x Action) []Event {
 		if !ok {
 			return fail("unknown recipe: " + x.RecipeID)
 		}
+		if blocked, reason := w.IsActionBlockedByWorldLaw(*a, x); blocked {
+			return fail(reason)
+		}
 		var curHouse *House
 		if a.InsideHouse != "" {
 			curHouse = w.house(a.InsideHouse)
@@ -2298,16 +2396,28 @@ func (w *World) Apply(id string, x Action) []Event {
 		if can, reason := CheckRecipe(w.Catalog, w.Map, curHouse, *a, r); !can {
 			return fail(reason)
 		}
+		venueID := a.VenueID
+		if venueID == "" && curHouse != nil {
+			venueID = curHouse.VenueID
+		}
+		if w.isVenuePowerBlocked(venueID) {
+			return fail("venue lacks power: " + venueID)
+		}
 		a.Energy -= r.EnergyCost
 		a.Money -= r.MoneyCost
-		if len(w.Cohorts) > 0 && r.MoneyCost > 0 {
-			w.creditTreasury(int64(r.MoneyCost), "fee")
+		if r.MoneyCost > 0 {
+			if len(w.Cohorts) > 0 {
+				w.creditTreasury(int64(r.MoneyCost), "fee")
+			} else {
+				w.recordLedgerCurrencyConsumed("coins", int64(r.MoneyCost))
+			}
 		}
 		for item, qty := range r.Inputs {
 			a.Items[item] -= qty
 			if a.Items[item] == 0 {
 				delete(a.Items, item)
 			}
+			w.recordLedgerItemConsumed(item, int64(qty))
 		}
 		bonus := false
 		if r.BonusInput != "" && a.Items[r.BonusInput] >= 1 {
@@ -2317,11 +2427,18 @@ func (w *World) Apply(id string, x Action) []Event {
 				if a.Items[r.BonusInput] == 0 {
 					delete(a.Items, r.BonusInput)
 				}
+				w.recordLedgerItemConsumed(r.BonusInput, 1)
 			}
 		}
 		yield := w.Catalog.RecipeYield(*a, r, bonus)
 		if ecoPct := w.EcologicalYieldMultiplierPct(a.Location, r); ecoPct != 100 && r.OutputQty > 0 {
 			yield = (yield * ecoPct) / 100
+			if yield < 1 {
+				yield = 1
+			}
+		}
+		if techPct := w.FacilityProductionBonusPct(*a); techPct > 0 && r.OutputQty > 0 {
+			yield = (yield * (100 + techPct)) / 100
 			if yield < 1 {
 				yield = 1
 			}
@@ -2375,6 +2492,7 @@ func (w *World) Apply(id string, x Action) []Event {
 			if a.Items[inItem] == 0 {
 				delete(a.Items, inItem)
 			}
+			w.recordLedgerItemConsumed(inItem, int64(inQty))
 		}
 		task := Task{Action: x, TotalTicks: 3, Remaining: 2, StartedTick: w.Tick}
 		a.Task = &task
@@ -2458,14 +2576,19 @@ func (w *World) Apply(id string, x Action) []Event {
 		}
 		a.Energy -= rit.EnergyCost
 		a.Money -= rit.MoneyCost
-		if len(w.Cohorts) > 0 && rit.MoneyCost > 0 {
-			w.creditTreasury(int64(rit.MoneyCost), "fee")
+		if rit.MoneyCost > 0 {
+			if len(w.Cohorts) > 0 {
+				w.creditTreasury(int64(rit.MoneyCost), "fee")
+			} else {
+				w.recordLedgerCurrencyConsumed("coins", int64(rit.MoneyCost))
+			}
 		}
 		for inItem, inQty := range rit.Inputs {
 			a.Items[inItem] -= inQty
 			if a.Items[inItem] == 0 {
 				delete(a.Items, inItem)
 			}
+			w.recordLedgerItemConsumed(inItem, int64(inQty))
 		}
 		ticks := rit.Ticks
 		if ticks < 1 {
@@ -2501,6 +2624,7 @@ func (w *World) Apply(id string, x Action) []Event {
 		if a.Items["plank"] == 0 {
 			delete(a.Items, "plank")
 		}
+		w.recordLedgerItemConsumed("plank", 1)
 		task := Task{Action: x, TotalTicks: 3, Remaining: 2, StartedTick: w.Tick}
 		a.Task = &task
 		return []Event{w.record(a, x, "task_started", map[string]any{
@@ -2541,9 +2665,14 @@ func (w *World) Apply(id string, x Action) []Event {
 		if a.Items["plank"] == 0 {
 			delete(a.Items, "plank")
 		}
+		w.recordLedgerItemConsumed("plank", int64(planks))
 		a.Money -= coins
-		if len(w.Cohorts) > 0 && coins > 0 {
-			w.creditTreasury(int64(coins), "fee")
+		if coins > 0 {
+			if len(w.Cohorts) > 0 {
+				w.creditTreasury(int64(coins), "fee")
+			} else {
+				w.recordLedgerCurrencyConsumed("coins", int64(coins))
+			}
 		}
 		a.Energy -= 12
 		task := Task{Action: x, TotalTicks: 4, Remaining: 3, StartedTick: w.Tick}
@@ -2574,6 +2703,9 @@ func (w *World) Apply(id string, x Action) []Event {
 		return emit("house_transferred", fmt.Sprintf("%s transferred ownership of %s to %s", a.Name, h.Name, b.Name), b)
 
 	case "attack":
+		if blocked, reason := w.IsActionBlockedByWorldLaw(*a, x); blocked {
+			return fail(reason)
+		}
 		if b == nil || b.ID == id || !SamePlace(*a, *b) || w.Tick < b.JailedUntil {
 			return fail("target is not nearby")
 		}
@@ -2584,6 +2716,33 @@ func (w *World) Apply(id string, x Action) []Event {
 			return fail("too injured to fight; must recuperate")
 		}
 		a.Energy -= 6
+		if b.Trust == nil {
+			b.Trust = map[string]int{}
+		}
+		if len(w.Catalog.CombatProfiles) > 0 || len(w.ActiveEffects) > 0 {
+			dmg, absorbed, immune, broken := w.resolveMultiDimCombatHit(*a, b, nil, x)
+			if dmg > b.Health {
+				dmg = b.Health
+			}
+			b.Health -= dmg
+			var interruptEvs []Event
+			if dmg > 0 && b.Health > 0 {
+				interruptEvs = w.interruptTaskOnDamage(b, "combat")
+			}
+			a.RestUntil = w.Tick + 32
+			b.Trust[a.ID] -= 2
+			ev := w.record(a, x, "attacked", map[string]any{
+				"text":           fmt.Sprintf("%s attacked %s (%d damage, %d absorbed, immune=%v)", a.Name, b.Name, dmg, absorbed, immune),
+				"damage":         dmg,
+				"absorbed":       absorbed,
+				"immune_blocked": immune,
+			}, b)
+			events := append(broken, ev)
+			events = append(events, interruptEvs...)
+			events = append(events, w.grantCombatXP(a, x, 4, 1)...)
+			events = append(events, w.markDeadIfZero(b, a, x, "combat attack")...)
+			return events
+		}
 		damage := 8 + (CombatPowerWithCatalog(w.Catalog, *a)-10)/2
 		if damage < 10 {
 			damage = 10
@@ -2592,8 +2751,9 @@ func (w *World) Apply(id string, x Action) []Event {
 			damage = b.Health
 		}
 		b.Health -= damage
-		if b.Task != nil && b.Task.Action.Kind == "sleep" {
-			b.Task = nil
+		var interruptEvs []Event
+		if damage > 0 && b.Health > 0 {
+			interruptEvs = w.interruptTaskOnDamage(b, "combat")
 		}
 		a.RestUntil = w.Tick + 32
 		b.Trust[a.ID] -= 2
@@ -2602,6 +2762,7 @@ func (w *World) Apply(id string, x Action) []Event {
 			"damage": damage,
 		}, b)
 		events := []Event{ev}
+		events = append(events, interruptEvs...)
 		events = append(events, w.grantCombatXP(a, x, 4, 1)...)
 		events = append(events, w.markDeadIfZero(b, a, x, "combat attack")...)
 		return events
@@ -3019,9 +3180,12 @@ func (w *World) Apply(id string, x Action) []Event {
 				if a.Items["bounty_writ"] == 0 {
 					delete(a.Items, "bounty_writ")
 				}
+				w.recordLedgerItemConsumed("bounty_writ", 1)
 			}
 			if len(w.Cohorts) > 0 {
 				baseOfficial = int(w.debitTreasury(int64(baseOfficial), "bounty"))
+			} else if baseOfficial > 0 {
+				w.recordLedgerCurrencyProduced("coins", int64(baseOfficial))
 			}
 			bounty := baseOfficial + confiscated
 			a.Money += bounty
@@ -3111,6 +3275,7 @@ func (w *World) Apply(id string, x Action) []Event {
 		if a.Items[itemID] == 0 {
 			delete(a.Items, itemID)
 		}
+		w.recordLedgerItemConsumed(itemID, 1)
 		a.Trust[b.ID]++
 		b.Trust[a.ID] += 2
 		ev := w.record(a, x, "healed", map[string]any{
@@ -3147,11 +3312,23 @@ func (w *World) Apply(id string, x Action) []Event {
 		if w.IsItemEmbargoedAt(a.Location, a.VenueID, x.Item) {
 			return fail("item is embargoed by local polity decree: " + x.Item)
 		}
+		cur := x.Currency
+		if cur == "" {
+			cur = "coins"
+		}
+		if !itemAcceptsCurrency(spec, cur) {
+			return fail(fmt.Sprintf("item %s does not accept currency %s", x.Item, cur))
+		}
+		if spec.BuyerRequiredTag != "" && !ActorHasTag(w.actorEffectiveTags(*b), spec.BuyerRequiredTag) {
+			return fail(fmt.Sprintf("buyer %s lacks required tag %s for %s", b.ID, spec.BuyerRequiredTag, x.Item))
+		}
 		if x.Quantity <= 0 || x.Price < 0 || a.Items[x.Item] < x.Quantity {
 			return fail("invalid offer or insufficient item stock")
 		}
+		offerText := fmt.Sprintf("%s offers %d %s (tier %d) for %d %s", a.Name, x.Quantity, x.Item, spec.Tier, x.Price, cur)
 		e := w.record(a, x, "trade_offered", map[string]any{
-			"text": fmt.Sprintf("%s offers %d %s (tier %d) for %d coins", a.Name, x.Quantity, x.Item, spec.Tier, x.Price),
+			"text":     offerText,
+			"currency": cur,
 		}, b)
 		w.Offers = append(w.Offers, Offer{
 			ID:       e.ID,
@@ -3160,6 +3337,7 @@ func (w *World) Apply(id string, x Action) []Event {
 			Item:     x.Item,
 			Quantity: x.Quantity,
 			Price:    x.Price,
+			Currency: x.Currency,
 			Expires:  w.Tick + 12,
 		})
 		return []Event{e}
@@ -3173,15 +3351,23 @@ func (w *World) Apply(id string, x Action) []Event {
 			x.TargetID = o.Seller
 			if x.Kind == "reject" {
 				w.Offers = append(w.Offers[:i], w.Offers[i+1:]...)
-			if len(w.Offers) == 0 {
-				w.Offers = nil
-			}
 				if len(w.Offers) == 0 {
 					w.Offers = nil
 				}
 				return emit("trade_rejected", a.Name+" rejected offer", seller)
 			}
-			if o.Expires < w.Tick || seller == nil || !SamePlace(*a, *seller) || seller.Items[o.Item] < o.Quantity || a.Money < o.Price {
+			spec := w.Catalog.Items[o.Item]
+			cur := o.Currency
+			if cur == "" {
+				cur = "coins"
+			}
+			if !itemAcceptsCurrency(spec, cur) {
+				return fail(fmt.Sprintf("item %s does not accept currency %s", o.Item, cur))
+			}
+			if spec.BuyerRequiredTag != "" && !ActorHasTag(w.actorEffectiveTags(*a), spec.BuyerRequiredTag) {
+				return fail(fmt.Sprintf("buyer %s lacks required tag %s for %s", a.ID, spec.BuyerRequiredTag, o.Item))
+			}
+			if o.Expires < w.Tick || seller == nil || !SamePlace(*a, *seller) || seller.Items[o.Item] < o.Quantity || w.actorCurrencyBalance(a, cur) < int64(o.Price) {
 				return fail("offer cannot settle")
 			}
 			if w.IsItemEmbargoedAt(a.Location, a.VenueID, o.Item) {
@@ -3199,15 +3385,27 @@ func (w *World) Apply(id string, x Action) []Event {
 					taxCoins = o.Price
 				}
 			}
-			a.Money -= o.Price
-			seller.Money += (o.Price - taxCoins)
-			if taxCoins > 0 {
-				if pol := w.EffectiveGoverningPolity(a.Location, a.VenueID); pol != nil {
-					pol.Treasury += int64(taxCoins)
-					pol.Ledger.TaxAssessedGross += int64(taxCoins)
-					pol.Ledger.TaxToTreasury += int64(taxCoins)
-				} else {
-					w.creditTreasury(int64(taxCoins), "tax")
+			pol := w.EffectiveGoverningPolity(a.Location, a.VenueID)
+			if cur == "coins" {
+				a.Money -= o.Price
+				seller.Money += (o.Price - taxCoins)
+				if taxCoins > 0 {
+					if pol != nil {
+						pol.Treasury += int64(taxCoins)
+						pol.Ledger.TaxAssessedGross += int64(taxCoins)
+						pol.Ledger.TaxToTreasury += int64(taxCoins)
+					} else {
+						w.creditTreasury(int64(taxCoins), "tax")
+					}
+				}
+			} else {
+				if pol == nil {
+					taxCoins = 0
+				}
+				w.addActorCurrency(a, cur, -int64(o.Price))
+				w.addActorCurrency(seller, cur, int64(o.Price-taxCoins))
+				if taxCoins > 0 && pol != nil {
+					w.addPolityCurrency(pol, cur, int64(taxCoins))
 				}
 			}
 			a.Trust[seller.ID]++
@@ -3216,7 +3414,14 @@ func (w *World) Apply(id string, x Action) []Event {
 			if len(w.Offers) == 0 {
 				w.Offers = nil
 			}
-			events := []Event{w.record(a, x, "trade_completed", map[string]any{"text": fmt.Sprintf("%s bought %d %s from %s for %d coins", a.Name, o.Quantity, o.Item, seller.Name, o.Price), "item": o.Item, "quantity": o.Quantity, "seller_id": seller.ID, "market_tax": taxCoins}, seller)}
+			events := []Event{w.record(a, x, "trade_completed", map[string]any{
+				"text":       fmt.Sprintf("%s bought %d %s from %s for %d %s", a.Name, o.Quantity, o.Item, seller.Name, o.Price, cur),
+				"item":       o.Item,
+				"quantity":   o.Quantity,
+				"seller_id":  seller.ID,
+				"currency":   cur,
+				"market_tax": taxCoins,
+			}, seller)}
 			tier := w.Catalog.Items[o.Item].Tier
 			if tier < 1 {
 				tier = 1
@@ -3225,6 +3430,33 @@ func (w *World) Apply(id string, x Action) []Event {
 			return append(events, w.grantProfessionXP(a, x, "peddler", tier*o.Quantity, tier)...)
 		}
 		return fail("offer not found")
+
+	case "attempt_transition":
+		return w.applyAttemptTransition(a, x)
+
+	case "refine_currency_item":
+		return w.applyRefineCurrencyItem(a, x)
+
+	case "absorb_item_slot":
+		return w.applyAbsorbItemSlot(a, x)
+
+	case "sever_flow_edge":
+		return w.applySeverFlowEdge(a, x)
+
+	case "repair_flow_edge":
+		return w.applyRepairFlowEdge(a, x)
+
+	case "research_tech":
+		return w.applyResearchTech(a, x)
+
+	case "teach_knowledge":
+		return w.applyTeachKnowledge(a, x, b)
+
+	case "adopt_facility":
+		return w.applyAdoptFacility(a, x)
+
+	case "rewrite_world_law":
+		return w.applyRewriteWorldLaw(a, x)
 
 	case "start_plan", "abandon_plan", "propose_agreement", "accept_agreement", "reject_agreement", "fulfill_agreement":
 		return w.ApplyContinuity(a, x)
@@ -3248,6 +3480,9 @@ func (w *World) Apply(id string, x Action) []Event {
 		return fail("justice action failed: " + x.Kind)
 
 	default:
+		if spec, ok := w.Catalog.ActionSpecs[x.Kind]; ok {
+			return w.applyDeclarativeAction(a, x, spec)
+		}
 		return fail("unknown action: " + x.Kind)
 	}
 }

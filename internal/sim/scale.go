@@ -40,10 +40,17 @@ type PopulationCohort struct {
 	AvgThirst          int              `json:"avg_thirst,omitempty"`
 	AvgXP              int              `json:"avg_xp,omitempty"`
 	MoneyPool          int64            `json:"money_pool"`
+	Currencies         map[string]int64 `json:"currencies,omitempty"`
 	IllicitWealth      int64            `json:"illicit_wealth,omitempty"`
 	ProtectedUntilTick int64            `json:"protected_until_tick,omitempty"`
 	ItemPool           map[string]int64 `json:"item_pool,omitempty"`
 	HydratedSeq        int              `json:"hydrated_seq,omitempty"`
+}
+
+func cloneCohort(c PopulationCohort) PopulationCohort {
+	c.Currencies = cloneInt64Map(c.Currencies)
+	c.ItemPool = cloneInt64Map(c.ItemPool)
+	return c
 }
 
 // EffectivePopulation returns healthy, free working-age cohort members able to work, patrol, or fight.
@@ -127,6 +134,8 @@ type stepIndex struct {
 	mapSnapshot       WorldMap
 	catalogSnapshot   Catalog
 	politiesSnapshot  *PolityNetwork
+	knowledgeSnapshot *KnowledgeBook
+	worldLawsSnapshot map[string]int
 	districtByID      map[string]District
 	venueByID         map[string]Venue
 	districtStates    map[string]DistrictState
@@ -138,6 +147,9 @@ type stepIndex struct {
 	placeBuckets      map[placeKey][]int
 	neighborSnap      []Neighbor
 	offersByActor     map[string][]Offer
+	activeEffectsSnap []ActiveEffect
+	cohortsByDistrict map[string][]CohortView
+	agreementsByActor map[string][]Agreement
 }
 
 func (w *World) buildStepIndex() *stepIndex {
@@ -147,6 +159,8 @@ func (w *World) buildStepIndex() *stepIndex {
 		mapSnapshot:       CloneMap(w.Map),
 		catalogSnapshot:   CloneCatalog(w.Catalog),
 		politiesSnapshot:  ClonePolityNetwork(w.Polities),
+		knowledgeSnapshot: CloneKnowledgeBook(w.Knowledge),
+		worldLawsSnapshot: w.EffectiveWorldLaws(),
 		districtByID:      make(map[string]District, len(w.Map.Districts)),
 		venueByID:         make(map[string]Venue, len(w.Map.Venues)),
 		roadsByDistrict:   make(map[string][]RoadView, len(w.Map.Districts)),
@@ -157,6 +171,45 @@ func (w *World) buildStepIndex() *stepIndex {
 		placeBuckets:      make(map[placeKey][]int, len(w.Map.Districts)*2),
 		neighborSnap:      make([]Neighbor, len(w.Actors)),
 		offersByActor:     make(map[string][]Offer),
+	}
+	if w.Continuity != nil && len(w.Continuity.Agreements) > 0 {
+		counts := make(map[string]int, len(w.Actors))
+		for _, ag := range w.Continuity.Agreements {
+			counts[ag.SupplierID]++
+			if ag.BuyerID != ag.SupplierID {
+				counts[ag.BuyerID]++
+			}
+		}
+		idx.agreementsByActor = make(map[string][]Agreement, len(counts))
+		for id, n := range counts {
+			idx.agreementsByActor[id] = make([]Agreement, 0, n)
+		}
+		for _, ag := range w.Continuity.Agreements {
+			idx.agreementsByActor[ag.SupplierID] = append(idx.agreementsByActor[ag.SupplierID], ag)
+			if ag.BuyerID != ag.SupplierID {
+				idx.agreementsByActor[ag.BuyerID] = append(idx.agreementsByActor[ag.BuyerID], ag)
+			}
+		}
+	}
+	if len(w.ActiveEffects) > 0 {
+		idx.activeEffectsSnap = make([]ActiveEffect, len(w.ActiveEffects))
+		for i, eff := range w.ActiveEffects {
+			idx.activeEffectsSnap[i] = CloneActiveEffect(eff)
+		}
+	}
+	if len(w.Catalog.ActionSpecs) > 0 && len(w.Cohorts) > 0 {
+		idx.cohortsByDistrict = make(map[string][]CohortView, len(w.Map.Districts))
+		for _, c := range w.Cohorts {
+			if c.Population > 0 {
+				idx.cohortsByDistrict[c.District] = append(idx.cohortsByDistrict[c.District], CohortView{
+					ID:         c.ID,
+					Name:       c.Name,
+					District:   c.District,
+					Profession: c.Profession,
+					Population: c.Population,
+				})
+			}
+		}
 	}
 	if w.DistrictStates != nil {
 		idx.districtStates = make(map[string]DistrictState, len(w.DistrictStates))
@@ -227,16 +280,23 @@ func (w *World) buildStepIndex() *stepIndex {
 		idx.factionMembers[f.ID] = mset
 	}
 
+	hasFormOrEffect := len(w.Catalog.Forms) > 0 || len(w.ActiveEffects) > 0
 	for i := range w.Actors {
 		a := &w.Actors[i]
 		if a.Dead {
 			continue
 		}
+		var nbTags []string
+		if hasFormOrEffect {
+			nbTags = w.neighborEffectiveTags(*a)
+		} else {
+			nbTags = a.IdentityTags()
+		}
 		idx.neighborSnap[i] = Neighbor{
 			ID:       a.ID,
 			Name:     a.Name,
 			Role:     a.Role,
-			Tags:     a.IdentityTags(),
+			Tags:     nbTags,
 			Level:    a.Level,
 			Health:   a.Health,
 			Sleeping: a.Task != nil && a.Task.Action.Kind == "sleep",
@@ -275,6 +335,8 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 	a.GuildLevels = cloneIntMap(a.GuildLevels)
 	a.Items = cloneIntMap(a.Items)
 	a.Trust = cloneIntMap(a.Trust)
+	a.StateSlots = cloneIntMap(a.StateSlots)
+	a.Currencies = cloneInt64Map(a.Currencies)
 	if a.Items == nil {
 		a.Items = map[string]int{}
 	}
@@ -303,6 +365,15 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 		Map:             idx.mapSnapshot,
 		Catalog:         idx.catalogSnapshot,
 	}
+	if len(idx.activeEffectsSnap) > 0 {
+		p.ActiveEffects = make([]ActiveEffect, len(idx.activeEffectsSnap))
+		for i, eff := range idx.activeEffectsSnap {
+			p.ActiveEffects[i] = CloneActiveEffect(eff)
+		}
+	}
+	if cohorts := idx.cohortsByDistrict[a.Location]; len(cohorts) > 0 {
+		p.LocalCohorts = append([]CohortView(nil), cohorts...)
+	}
 	if idx.districtStates != nil {
 		if ds, ok := idx.districtStates[a.Location]; ok {
 			dsc := CloneDistrictState(ds)
@@ -326,6 +397,8 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 		}
 	}
 	p.Polity = buildPolityPerceptionView(p.Map, idx.politiesSnapshot, a)
+	p.KnownTechs = actorKnownTechsFromBook(idx.knowledgeSnapshot, id)
+	p.WorldLaws = cloneIntMap(idx.worldLawsSnapshot)
 	if houses := idx.accessibleByActor[id]; len(houses) > 0 {
 		p.AccessibleHouses = make([]House, len(houses))
 		for i, h := range houses {
@@ -353,7 +426,9 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 				p.Roads[i] = rv
 			}
 		}
-		p.VenueRoutes = buildVenueRouteViews(p.Map, p.Catalog, idx.districtStates, a)
+		if len(p.Map.VenueRoutes) > 0 {
+			p.VenueRoutes = buildVenueRouteViews(p.Map, p.Catalog, idx.districtStates, w.actorWithEffectTags(a))
+		}
 	}
 
 	if !a.InTransit() {
@@ -431,7 +506,7 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 	if offers := idx.offersByActor[id]; len(offers) > 0 {
 		p.Offers = append([]Offer(nil), offers...)
 	}
-	w.applyPerceptionEvoHints(&p)
+	w.applyPerceptionEvoHintsWithAgreements(&p, idx.agreementsByActor[id])
 	recallPerceptionMemories(&p)
 	return p
 }
@@ -831,6 +906,23 @@ func (w *World) HydrateActor(cohortID string) (*Actor, error) {
 			}
 		}
 	}
+	var actorCurrencies map[string]int64
+	for cur, totalAmt := range c.Currencies {
+		share := totalAmt / oldPop
+		if share > 0 {
+			if actorCurrencies == nil {
+				actorCurrencies = map[string]int64{}
+			}
+			actorCurrencies[cur] = share
+			c.Currencies[cur] -= share
+			if c.Currencies[cur] <= 0 {
+				delete(c.Currencies, cur)
+			}
+		}
+	}
+	if len(c.Currencies) == 0 {
+		c.Currencies = nil
+	}
 	c.Population--
 	reconcileCohortAgeBrackets(c)
 
@@ -924,6 +1016,7 @@ func (w *World) HydrateActor(cohortID string) (*Actor, error) {
 		Thirst:       c.AvgThirst,
 		SleepTrait:   SleepEarlyBird,
 		Money:        money,
+		Currencies:   actorCurrencies,
 		Items:        items,
 		Goal:         fmt.Sprintf("Hydrated from %s to practice %s and trade", c.Name, c.Profession),
 		Personality:  "careful and candid",
@@ -956,6 +1049,9 @@ func (w *World) DehydrateActor(actorID string) error {
 	}
 	if a.Task != nil {
 		return fmt.Errorf("cannot dehydrate busy actor %s", actorID)
+	}
+	if w.IsActorPinnedFocal(a) {
+		return fmt.Errorf("cannot dehydrate pinned/high-tier/leader focal actor %s", actorID)
 	}
 
 	profID := a.Role
@@ -1021,6 +1117,11 @@ func (w *World) DehydrateActor(actorID string) error {
 	}
 	reconcileCohortAgeBrackets(target)
 	target.MoneyPool += int64(a.Money)
+	for cur, amt := range a.Currencies {
+		if amt != 0 {
+			w.addCohortCurrency(target, cur, amt)
+		}
+	}
 	w.rebindDehydratedActorContracts(actorID, target.ID, a.Money)
 	for item, qty := range a.Items {
 		if qty > 0 {
@@ -1530,6 +1631,11 @@ func (w *World) clearRegionalCohortMarket() []Event {
 	remainingOffers := make([]Offer, 0, len(w.Offers))
 	for _, o := range w.Offers {
 		seller := w.actor(o.Seller)
+		spec := w.Catalog.Items[o.Item]
+		if (o.Currency != "" && o.Currency != "coins") || !itemAcceptsCurrency(spec, "coins") || spec.BuyerRequiredTag != "" {
+			remainingOffers = append(remainingOffers, o)
+			continue
+		}
 		if seller == nil || o.Expires < w.Tick || seller.Items[o.Item] < o.Quantity || !w.Map.DistrictHasFeature(seller.Location, "market") {
 			remainingOffers = append(remainingOffers, o)
 			continue
@@ -1719,6 +1825,10 @@ func (w *World) clearRegionalCohortMarket() []Event {
 					}
 
 					carrier := w.payFreightToCarriers(plan.carrierTag, freightFee)
+					if carrier == nil {
+						// No carrier cohort was paid; waive freight fee so M0 coins remain strictly conserved.
+						freightFee = 0
+					}
 					if pass == 1 && plan.hazardPermille >= 18 {
 						roll := int(worldHash(w.ID, w.Tick, fmt.Sprintf("ship_acc:%s:%s:%s", seller.ID, buyer.ID, itemID)) % 1000)
 						if roll < plan.hazardPermille/2 {

@@ -185,6 +185,57 @@ func actorHasWarmClothing(cat Catalog, a Actor) bool {
 	return false
 }
 
+func actorElderAndExpectancy(lc LifecycleSpec, form *FormSpec) (elderAge, maxExp int) {
+	baseElder := lc.ElderMinAge
+	if baseElder <= 0 {
+		baseElder = 55
+	}
+	baseMax := lc.MaxExpectancy
+	if baseMax <= 0 {
+		baseMax = 78
+	}
+	if form != nil && form.LifeExpectancyYears > 0 {
+		maxExp = form.LifeExpectancyYears
+		elderAge = (baseElder * maxExp) / baseMax
+		if elderAge < 1 {
+			elderAge = 1
+		}
+		return elderAge, maxExp
+	}
+	return baseElder, baseMax
+}
+
+func actorAnnualMortalityPermille(lc LifecycleSpec, form *FormSpec, ageYears int) int {
+	elderAge, maxExp := actorElderAndExpectancy(lc, form)
+	if ageYears < elderAge {
+		return 0
+	}
+	baseMax := lc.MaxExpectancy
+	if baseMax <= 0 {
+		baseMax = 78
+	}
+	ramp := (ageYears - elderAge) * 12
+	if form != nil && form.LifeExpectancyYears > 0 && maxExp > 0 {
+		ramp = ((ageYears - elderAge) * 12 * baseMax) / maxExp
+	}
+	permille := lc.ElderAnnualDeathPermille + ramp
+	if ageYears >= maxExp {
+		permille += 350
+	}
+	return permille
+}
+
+// ActorAnnualMortalityPermille returns the annual old-age mortality permille for an actor of a given FormID and age.
+func (w *World) ActorAnnualMortalityPermille(formID string, ageYears int) int {
+	var formPtr *FormSpec
+	if formID != "" {
+		if f, ok := w.Catalog.Forms[formID]; ok {
+			formPtr = &f
+		}
+	}
+	return actorAnnualMortalityPermille(w.Catalog.Lifecycle, formPtr, ageYears)
+}
+
 // stepActorPhysiologyAndLifecycle settles individual Actor thirst, low-friction drinking & latrine excretion,
 // cold exposure, disease progression, annual aging, household births, elder mortality, and successor hydration.
 func (w *World) stepActorPhysiologyAndLifecycle() []Event {
@@ -238,6 +289,7 @@ func (w *World) stepActorPhysiologyAndLifecycle() []Event {
 						if a.Items[itemID] == 0 {
 							delete(a.Items, itemID)
 						}
+						w.recordLedgerItemConsumed(itemID, 1)
 						relief := spec.ThirstRelief
 						if relief <= 0 {
 							relief = 2
@@ -298,7 +350,8 @@ func (w *World) stepActorPhysiologyAndLifecycle() []Event {
 					continue
 				}
 			}
-			if a.Hunger >= 6 {
+			form, hasForm := w.actorFormSpec(*a)
+			if a.Hunger >= 6 && !(hasForm && form.DisableHunger) {
 				a.Health -= 10
 				if a.Health <= 0 {
 					evs := w.markDeadIfZero(a, nil, Action{Kind: "wait"}, "starvation")
@@ -386,14 +439,11 @@ func (w *World) stepActorPhysiologyAndLifecycle() []Event {
 		if annual && !a.Dead && a.AgeYears > 0 {
 			a.AgeYears++
 			lc := w.Catalog.Lifecycle
-			elderAge := lc.ElderMinAge
-			if elderAge <= 0 {
-				elderAge = 55
+			var formPtr *FormSpec
+			if form, ok := w.actorFormSpec(*a); ok {
+				formPtr = &form
 			}
-			maxExp := lc.MaxExpectancy
-			if maxExp <= 0 {
-				maxExp = 78
-			}
+			elderAge, maxExp := actorElderAndExpectancy(lc, formPtr)
 
 			// Household birth when prime adult has home, food security, and cohorts exist to welcome the child
 			edibleStock := 0
@@ -430,10 +480,8 @@ func (w *World) stepActorPhysiologyAndLifecycle() []Event {
 						a.Attributes.Strength--
 					}
 				}
-				deathPermille := lc.ElderAnnualDeathPermille + (a.AgeYears-elderAge)*12
-				if a.AgeYears >= maxExp {
-					deathPermille += 350
-				}
+				_ = maxExp
+				deathPermille := actorAnnualMortalityPermille(lc, formPtr, a.AgeYears)
 				roll := int(worldHash(w.ID, w.Tick, "elder_die:"+a.ID) % 1000)
 				if roll < deathPermille {
 					a.Health = 0

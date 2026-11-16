@@ -169,9 +169,10 @@ type PolityNode struct {
 	DeFactoControllerID string         `json:"de_facto_controller_id,omitempty"`
 	SeatDistrictID      string         `json:"seat_district_id,omitempty"`
 	SeatVenueID         string         `json:"seat_venue_id,omitempty"`
-	LeaderActorID       string         `json:"leader_actor_id,omitempty"`
-	Treasury            int64          `json:"treasury,omitempty"`
-	Ledger              TreasuryLedger `json:"ledger,omitempty"`
+	LeaderActorID       string           `json:"leader_actor_id,omitempty"`
+	Treasury            int64            `json:"treasury,omitempty"`
+	Currencies          map[string]int64 `json:"currencies,omitempty"`
+	Ledger              TreasuryLedger   `json:"ledger,omitempty"`
 	MarketTaxPermille   int            `json:"market_tax_permille,omitempty"`
 	PollTaxPermille     int            `json:"poll_tax_permille,omitempty"`
 	Curfew              bool           `json:"curfew,omitempty"`
@@ -211,6 +212,7 @@ func ClonePolityNetwork(net *PolityNetwork) *PolityNetwork {
 		out.Nodes = make([]PolityNode, len(net.Nodes))
 		for i, n := range net.Nodes {
 			nc := n
+			nc.Currencies = cloneInt64Map(n.Currencies)
 			if n.EmbargoItems != nil {
 				nc.EmbargoItems = append([]string(nil), n.EmbargoItems...)
 			}
@@ -423,14 +425,15 @@ func (m WorldMap) VenueRouteBetween(fromVenue, toVenue string) (VenueRoute, bool
 }
 
 func actorEffectiveTags(cat Catalog, a Actor) []string {
-	tags := a.IdentityTags()
-	for pid, lv := range a.Professions {
-		if lv > 0 {
-			if prof, ok := cat.ProfessionByID(pid); ok {
-				for _, g := range prof.Grants {
-					if !ActorHasTag(tags, g) {
-						tags = append(tags, g)
-					}
+	tags := cat.ActorEffectiveTags(a)
+	if len(a.Professions) == 0 {
+		return tags
+	}
+	for _, prof := range cat.Professions {
+		if a.Professions[prof.ID] > 0 {
+			for _, g := range prof.Grants {
+				if !ActorHasTag(tags, g) {
+					tags = append(tags, g)
 				}
 			}
 		}
@@ -799,16 +802,18 @@ func (w *World) actorEnclosure(a Actor) (indoor bool, shielding int) {
 			}
 		}
 	}
+	shielding += w.activeShieldingBonusForActor(a)
 	return indoor, shielding
 }
 
 func (w *World) siteMaxShielding(districtID, venueID string) (indoor bool, shielding int) {
+	bonus := w.activeShieldingBonusForVenue(districtID, venueID)
 	if venueID != "" {
 		if v, ok := w.Map.VenueByID(venueID); ok {
-			return v.Indoor, v.Shielding
+			return v.Indoor, v.Shielding + bonus
 		}
 	}
-	return false, 0
+	return false, bonus
 }
 
 // distributeAnomalyObservations evaluates every living awake actor against the physical site and
@@ -841,7 +846,7 @@ func (w *World) distributeAnomalyObservations(ev Event, anomalyID, flowKind, reg
 		if a.Dead || w.Tick < a.JailedUntil {
 			continue
 		}
-		if a.Task != nil && a.Task.Action.Kind == "sleep" {
+		if a.Task != nil && (a.Task.Action.Kind == "sleep" || a.Task.Dormant) {
 			continue
 		}
 		actorRegID := w.Map.GeoRegionIDForLocation(a.Location, a.VenueID)
@@ -855,7 +860,7 @@ func (w *World) distributeAnomalyObservations(ev Event, anomalyID, flowKind, reg
 			actorCoord, hasActorCoord := w.Map.GeoCoordOfLocation(a.Location, a.VenueID)
 			if hasActorCoord {
 				distKm := GeoDistanceKm(actorCoord, siteCoord)
-				tags := actorEffectiveTags(w.Catalog, *a)
+				tags := w.actorEffectiveTags(*a)
 				modeKeys := make([]string, 0, len(w.Catalog.SensoryModes))
 				for k := range w.Catalog.SensoryModes {
 					modeKeys = append(modeKeys, k)
@@ -925,7 +930,7 @@ func (w *World) CanSenseVenueRemotely(a Actor, targetDistrictID, targetVenueID s
 	}
 	distKm := GeoDistanceKm(srcCoord, dstCoord)
 	targetIndoor, targetShield := w.siteMaxShielding(targetDistrictID, targetVenueID)
-	tags := actorEffectiveTags(w.Catalog, a)
+	tags := w.actorEffectiveTags(a)
 
 	modeKeys := make([]string, 0, len(w.Catalog.SensoryModes))
 	for k := range w.Catalog.SensoryModes {
@@ -1105,6 +1110,7 @@ func (w *World) TriggerGeoAnomaly(spec GeoAnomalySpec) []Event {
 							shield += v.Shielding
 						}
 					}
+					shield += w.activeShieldingBonusForVenue(dID, w.Houses[hi].VenueID)
 					if shield >= rawInt {
 						continue
 					}
@@ -1153,6 +1159,7 @@ func (w *World) TriggerGeoAnomaly(spec GeoAnomalySpec) []Event {
 				} else {
 					a.Health -= dmg
 					woundedActors++
+					deathEvents = append(deathEvents, w.interruptTaskOnDamage(a, "disaster")...)
 				}
 			}
 		}
@@ -1214,7 +1221,7 @@ func (w *World) applyMoveVenue(a *Actor, x Action) []Event {
 			dsPtr = &dsCopy
 		}
 	}
-	effTicks, effEnergy, modeID, passable := locomotionCostForActor(w.Catalog, dsPtr, *a, route)
+	effTicks, effEnergy, modeID, passable := locomotionCostForActor(w.Catalog, dsPtr, w.actorWithEffectTags(*a), route)
 	if !passable {
 		return emitFail(fmt.Sprintf("cannot traverse %s route from %s to %s without required locomotion capability", route.Medium, fromVenue, destVenue.ID))
 	}
@@ -1431,7 +1438,7 @@ func (w *World) applyTransmitMessage(a *Actor, x Action) []Event {
 		return emitFail("no communication channels configured in world catalog")
 	}
 	chID := x.Channel
-	tags := actorEffectiveTags(w.Catalog, *a)
+	tags := w.actorEffectiveTags(*a)
 	if chID == "" {
 		keys := make([]string, 0, len(w.Catalog.CommChannels))
 		for k := range w.Catalog.CommChannels {
@@ -1494,11 +1501,11 @@ func (w *World) applyTransmitMessage(a *Actor, x Action) []Event {
 		if !ch.Broadcast && rcpt.ID != x.TargetID {
 			continue
 		}
-		if rcpt.Task != nil && rcpt.Task.Action.Kind == "sleep" {
+		if rcpt.Task != nil && (rcpt.Task.Action.Kind == "sleep" || rcpt.Task.Dormant) {
 			continue
 		}
 		if len(ch.ReceiverTags) > 0 {
-			rTags := actorEffectiveTags(w.Catalog, *rcpt)
+			rTags := w.actorEffectiveTags(*rcpt)
 			hasReceiver := false
 			for _, rt := range ch.ReceiverTags {
 				if ActorHasTag(rTags, rt) {

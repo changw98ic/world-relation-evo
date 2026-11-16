@@ -71,11 +71,18 @@ func (w *World) continuity() *ContinuityState {
 	return w.Continuity
 }
 func (w *World) ContinuityFor(id string) ContinuityView {
+	if w.Continuity == nil {
+		return ContinuityView{}
+	}
+	return w.continuityForAgreements(id, w.Continuity.Agreements)
+}
+
+func (w *World) continuityForAgreements(id string, agreements []Agreement) ContinuityView {
 	var v ContinuityView
 	if w.Continuity == nil {
 		return v
 	}
-	for _, a := range w.Continuity.Agreements {
+	for _, a := range agreements {
 		if a.SupplierID == id || a.BuyerID == id {
 			v.Agreements = append(v.Agreements, a)
 			if a.SupplierID == id && a.Status == "active" && w.Tick <= a.DueTick {
@@ -373,40 +380,53 @@ func ContinuityActions(p Perception) []Action {
 	}
 	keys := make([]string, 0, len(items))
 	for item := range items {
-		keys = append(keys, item)
+		if q, _, ok := agreementQuote(p.Catalog, item); ok && (a.Items[item] >= q || canProduce(p.Catalog, a, item)) {
+			keys = append(keys, item)
+		}
 	}
 	sort.Strings(keys)
+	type agreementPair struct {
+		buyer string
+		item  string
+	}
+	var openPairs map[agreementPair]bool
+	if len(keys) > 0 {
+		for _, g := range p.Continuity.Agreements {
+			if g.SupplierID == a.ID && (g.Status == "proposed" || g.Status == "active") {
+				if openPairs == nil {
+					openPairs = make(map[agreementPair]bool)
+				}
+				openPairs[agreementPair{buyer: g.BuyerID, item: g.Item}] = true
+			}
+		}
+	}
+	nearActive := make(map[string]bool, len(p.Nearby))
 	for _, b := range p.Nearby {
-		if b.Sleeping || b.Jailed || !p.Catalog.Capabilities(Actor{Tags: b.Tags})["accept_agreement"] {
+		if !b.Sleeping && !b.Jailed {
+			nearActive[b.ID] = true
+		} else {
+			continue
+		}
+		if len(keys) == 0 || !tagsAllowAction(p.Catalog, b.Tags, "accept_agreement") {
 			continue
 		}
 		for _, item := range keys {
-			if q, _, ok := agreementQuote(p.Catalog, item); !ok || (a.Items[item] < q && !canProduce(p.Catalog, a, item)) {
+			if openPairs[agreementPair{buyer: b.ID, item: item}] {
 				continue
 			}
-			open := false
-			for _, g := range p.Continuity.Agreements {
-				if g.SupplierID == a.ID && g.BuyerID == b.ID && g.Item == item && (g.Status == "proposed" || g.Status == "active") {
-					open = true
-				}
-			}
-			if !open {
-				out = append(out, Action{Kind: "propose_agreement", TargetID: b.ID, Item: item, Quantity: p.Catalog.Items[item].BatchQty, Price: p.Catalog.Items[item].BatchPrice})
-			}
+			spec := p.Catalog.Items[item]
+			out = append(out, Action{Kind: "propose_agreement", TargetID: b.ID, Item: item, Quantity: spec.BatchQty, Price: spec.BatchPrice})
 		}
 	}
 	for _, g := range p.Continuity.Agreements {
+		if g.Status != "proposed" && g.Status != "active" {
+			continue
+		}
 		other := g.SupplierID
 		if a.ID == g.SupplierID {
 			other = g.BuyerID
 		}
-		near := false
-		for _, n := range p.Nearby {
-			if n.ID == other && !n.Sleeping && !n.Jailed {
-				near = true
-			}
-		}
-		if !near {
+		if !nearActive[other] {
 			continue
 		}
 		if g.Status == "proposed" && g.BuyerID == a.ID && p.Tick <= g.ResponseBy {
@@ -424,4 +444,25 @@ func ContinuityActions(p Perception) []Action {
 		}
 	}
 	return out
+}
+
+func tagsAllowAction(c Catalog, tags []string, action string) bool {
+	for _, tag := range tags {
+		for _, act := range c.TagActions[tag] {
+			if act == action {
+				return true
+			}
+		}
+	}
+	if spec, ok := c.ActionSpecs[action]; ok {
+		if len(spec.GrantedByTags) == 0 {
+			return true
+		}
+		for _, gt := range spec.GrantedByTags {
+			if ActorHasTag(tags, gt) {
+				return true
+			}
+		}
+	}
+	return false
 }
