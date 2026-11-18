@@ -98,13 +98,14 @@ type VenueRoute struct {
 // VenueRouteView exposes a reachable venue hop in an actor's Perception, already adjusted for
 // terrain, weather, and the actor's best available LocomotionSpec.
 type VenueRouteView struct {
-	ToVenue     string   `json:"to_venue"`
-	ToDistrict  string   `json:"to_district,omitempty"`
-	Medium      string   `json:"medium,omitempty"`
-	ModeID      string   `json:"mode_id,omitempty"`
-	Ticks       int      `json:"ticks"`
-	EnergyCost  int      `json:"energy_cost"`
-	LeadsToward []string `json:"leads_toward,omitempty"`
+	ToVenue              string   `json:"to_venue"`
+	ToDistrict           string   `json:"to_district,omitempty"`
+	Medium               string   `json:"medium,omitempty"`
+	ModeID               string   `json:"mode_id,omitempty"`
+	Ticks                int      `json:"ticks"`
+	EnergyCost           int      `json:"energy_cost"`
+	LeadsToward          []string `json:"leads_toward,omitempty"`
+	LeadsTowardDistricts []string `json:"leads_toward_districts,omitempty"`
 }
 
 // LocomotionSpec declaratively defines a movement mode (e.g. walking, horse, boat, sword_flight,
@@ -188,19 +189,21 @@ type PolityNetwork struct {
 // PolityPerceptionView exposes public administrative facts at the actor's current location
 // plus leadership authority if the actor leads a polity—never leaking private remote events.
 type PolityPerceptionView struct {
-	LocalPolityID      string   `json:"local_polity_id,omitempty"`
-	LocalPolityName    string   `json:"local_polity_name,omitempty"`
-	LocalPolityLevel   string   `json:"local_polity_level,omitempty"`
-	EffectiveRulerID   string   `json:"effective_ruler_id,omitempty"`
-	MarketTaxPermille  int      `json:"market_tax_permille,omitempty"`
-	Curfew             bool     `json:"curfew,omitempty"`
-	EmbargoItems       []string `json:"embargo_items,omitempty"`
-	LedPolityID        string   `json:"led_polity_id,omitempty"`
-	LedPolityName      string   `json:"led_polity_name,omitempty"`
-	LedPolityTreasury  int64    `json:"led_polity_treasury,omitempty"`
-	LedPolitySeatVenue string   `json:"led_polity_seat_venue,omitempty"`
-	LedPolityCurfew    bool     `json:"led_polity_curfew,omitempty"`
-	LedPolityMarketTax int      `json:"led_polity_market_tax,omitempty"`
+	ReliefGrantAvailable  bool     `json:"relief_grant_available"`
+	LedPolitySeatDistrict string   `json:"led_polity_seat_district,omitempty"`
+	LocalPolityID         string   `json:"local_polity_id,omitempty"`
+	LocalPolityName       string   `json:"local_polity_name,omitempty"`
+	LocalPolityLevel      string   `json:"local_polity_level,omitempty"`
+	EffectiveRulerID      string   `json:"effective_ruler_id,omitempty"`
+	MarketTaxPermille     int      `json:"market_tax_permille,omitempty"`
+	Curfew                bool     `json:"curfew,omitempty"`
+	EmbargoItems          []string `json:"embargo_items,omitempty"`
+	LedPolityID           string   `json:"led_polity_id,omitempty"`
+	LedPolityName         string   `json:"led_polity_name,omitempty"`
+	LedPolityTreasury     int64    `json:"led_polity_treasury,omitempty"`
+	LedPolitySeatVenue    string   `json:"led_polity_seat_venue,omitempty"`
+	LedPolityCurfew       bool     `json:"led_polity_curfew,omitempty"`
+	LedPolityMarketTax    int      `json:"led_polity_market_tax,omitempty"`
 }
 
 func ClonePolityNetwork(net *PolityNetwork) *PolityNetwork {
@@ -320,6 +323,37 @@ func (m WorldMap) DefaultVenueForDistrict(districtID string) string {
 		}
 	}
 	return ""
+}
+
+// PlaceResidents initializes missing locations at creation or when resuming a
+// snapshot. The current house locates an indoor resident; otherwise the map's
+// declared district entry locates an outdoor resident. Existing positions and
+// historical records of the dead are retained.
+func (w *World) PlaceResidents() {
+	if len(w.Map.Venues) == 0 {
+		return
+	}
+	for i := range w.Actors {
+		w.placeResident(&w.Actors[i])
+	}
+	for i := range w.Cohorts {
+		for j := range w.Cohorts[i].Members {
+			w.placeResident(&w.Cohorts[i].Members[j])
+		}
+	}
+}
+
+func (w *World) placeResident(a *Actor) {
+	if a.VenueID != "" || a.Dead {
+		return
+	}
+	if a.InsideHouse != "" {
+		if h := w.house(a.InsideHouse); h != nil && h.District == a.Location && h.VenueID != "" {
+			a.VenueID = h.VenueID
+			return
+		}
+	}
+	a.VenueID = w.Map.DefaultVenueForDistrict(a.Location)
 }
 
 func (m WorldMap) VenueOrDistrictHasFeature(venueID, districtID, feature string) bool {
@@ -630,24 +664,42 @@ func buildVenueRouteViews(m WorldMap, cat Catalog, dsByDistrict map[string]Distr
 			continue
 		}
 		destV, _ := m.VenueByID(r.ToVenue)
-		var leads []string
-		for _, v := range m.Venues {
-			if v.ID == a.VenueID || v.ID == r.ToVenue {
+		views = append(views, VenueRouteView{
+			ToVenue:    r.ToVenue,
+			ToDistrict: destV.DistrictID,
+			Medium:     r.Medium,
+			ModeID:     modeID,
+			Ticks:      ticks,
+			EnergyCost: energy,
+		})
+	}
+	// One shortest-path result supplies both venue and district directions.
+	// A district is reached at its nearest accessible venue.
+	type districtPath struct{ viewIndex, ticks int }
+	best := make(map[string]districtPath)
+	for _, dest := range m.Venues {
+		hop, ticks, _, reachable := m.NextVenueHopForActor(cat, dsByDistrict, a, a.VenueID, dest.ID)
+		if !reachable {
+			continue
+		}
+		for i := range views {
+			if views[i].ToVenue != hop.ToVenue {
 				continue
 			}
-			if hop, _, _, reachable := m.NextVenueHopForActor(cat, dsByDistrict, a, a.VenueID, v.ID); reachable && hop.ToVenue == r.ToVenue {
-				leads = append(leads, v.ID)
+			if dest.ID != hop.ToVenue {
+				views[i].LeadsToward = append(views[i].LeadsToward, dest.ID)
 			}
+			if prior, exists := best[dest.DistrictID]; !exists || ticks < prior.ticks {
+				best[dest.DistrictID] = districtPath{i, ticks}
+			}
+			break
 		}
-		views = append(views, VenueRouteView{
-			ToVenue:     r.ToVenue,
-			ToDistrict:  destV.DistrictID,
-			Medium:      r.Medium,
-			ModeID:      modeID,
-			Ticks:       ticks,
-			EnergyCost:  energy,
-			LeadsToward: leads,
-		})
+	}
+	for _, district := range m.Districts {
+		if path, found := best[district.ID]; found && district.ID != a.Location {
+			view := &views[path.viewIndex]
+			view.LeadsTowardDistricts = append(view.LeadsTowardDistricts, district.ID)
+		}
 	}
 	return views
 }
@@ -702,10 +754,38 @@ func buildPolityPerceptionView(m WorldMap, net *PolityNetwork, a Actor) *PolityP
 		view.LedPolityName = led.Name
 		view.LedPolityTreasury = led.Treasury
 		view.LedPolitySeatVenue = led.SeatVenueID
+		view.LedPolitySeatDistrict = led.SeatDistrictID
 		view.LedPolityCurfew = led.Curfew
 		view.LedPolityMarketTax = led.MarketTaxPermille
 	}
 	return view
+}
+
+// cohortHasJurisdiction requires physical presence. A cohort explicitly affiliated
+// with a polity can enforce law only where that polity actually governs.
+func (w *World) cohortHasJurisdiction(c *PopulationCohort, districtID string) bool {
+	if c == nil || c.District != districtID || c.EffectivePopulation() <= 0 {
+		return false
+	}
+	if w.Polities != nil && w.Polities.NodeByID(c.FactionID) != nil {
+		for _, node := range w.effectivePolityChainAt(districtID, "") {
+			if node.ID == c.FactionID {
+				return true
+			}
+		}
+		return false
+	}
+	return true
+}
+
+func (w *World) presentLawCollector(districtID string) *PopulationCohort {
+	for i := range w.Cohorts {
+		c := &w.Cohorts[i]
+		if w.cohortHasJurisdiction(c, districtID) && w.isLawCollectorCohort(c) {
+			return c
+		}
+	}
+	return nil
 }
 
 func (w *World) effectivePolityChainAt(districtID, venueID string) []PolityNode {
@@ -930,6 +1010,7 @@ func (w *World) CanSenseVenueRemotely(a Actor, targetDistrictID, targetVenueID s
 	}
 	distKm := GeoDistanceKm(srcCoord, dstCoord)
 	targetIndoor, targetShield := w.siteMaxShielding(targetDistrictID, targetVenueID)
+	observerIndoor, observerShield := w.actorEnclosure(a)
 	tags := w.actorEffectiveTags(a)
 
 	modeKeys := make([]string, 0, len(w.Catalog.SensoryModes))
@@ -952,10 +1033,10 @@ func (w *World) CanSenseVenueRemotely(a Actor, targetDistrictID, targetVenueID s
 		if !granted {
 			continue
 		}
-		if targetIndoor && !spec.PenetratesIndoor {
+		if (targetIndoor || observerIndoor) && !spec.PenetratesIndoor {
 			continue
 		}
-		if targetShield > spec.PenetrationPower {
+		if observerShield > spec.PenetrationPower || targetShield > spec.PenetrationPower {
 			continue
 		}
 		return spec.ID, true
@@ -1191,6 +1272,98 @@ func (w *World) TriggerGeoAnomaly(spec GeoAnomalySpec) []Event {
 	return events
 }
 
+// communicationRangeAllows uses verified coordinates for finite remote channels.
+// An exact shared place needs no coordinates; range zero is the channel's district-local mode.
+func (w *World) communicationRangeAllows(sender, recipient Actor, rangeKm int) bool {
+	if rangeKm == 0 {
+		return sender.Location == recipient.Location
+	}
+	if SamePlace(sender, recipient) {
+		return true
+	}
+	src, hasSrc := w.Map.GeoCoordOfLocation(sender.Location, sender.VenueID)
+	dst, hasDst := w.Map.GeoCoordOfLocation(recipient.Location, recipient.VenueID)
+	return hasSrc && hasDst && GeoDistanceKm(src, dst) <= rangeKm
+}
+
+// perceivedActiveEffects exposes only present effects that the observer can perceive.
+// Only an effect's owner receives its internal strength and upkeep state.
+func (w *World) perceivedActiveEffects(a Actor, effects []ActiveEffect) []ActiveEffect {
+	var visible []ActiveEffect
+	for _, eff := range effects {
+		if eff.ExpiresTick > 0 && w.Tick >= eff.ExpiresTick {
+			continue
+		}
+		owned := eff.Source.Kind == "actor" && eff.Source.ID == a.ID || eff.SustainActorID == a.ID
+		if owned {
+			visible = append(visible, CloneActiveEffect(eff))
+			continue
+		}
+		if w.effectAppliesToActor(eff, a) && len(eff.GrantTags) > 0 {
+			visible = append(visible, ActiveEffect{ID: eff.ID, SpecID: eff.SpecID, Name: eff.Name, Anchor: eff.Anchor, GrantTags: append([]string(nil), eff.GrantTags...)})
+			continue
+		}
+		if a.Dead || a.InTransit() || a.Task != nil && (a.Task.Action.Kind == "sleep" || a.Task.Dormant) {
+			continue
+		}
+		district, venue := "", ""
+		local := false
+		targetIndoor, targetShield := false, 0
+		switch eff.Anchor.Kind {
+		case "actor":
+			target := w.actor(eff.Anchor.ID)
+			if target == nil || target.Dead || target.InTransit() {
+				continue
+			}
+			district, venue = target.Location, target.VenueID
+			targetIndoor, targetShield = w.actorEnclosure(*target)
+			local = SamePlace(a, *target)
+		case "venue":
+			site, ok := w.Map.VenueByID(eff.Anchor.ID)
+			if !ok {
+				continue
+			}
+			district, venue = site.DistrictID, site.ID
+			local = a.InsideHouse == "" && a.VenueID == venue
+		case "district":
+			district = eff.Anchor.ID
+			indoor, _ := w.actorEnclosure(a)
+			local = !indoor && a.Location == district
+		}
+		if !local {
+			mode, sensed := w.CanSenseVenueRemotely(a, district, venue)
+			if !sensed {
+				continue
+			}
+			spec := w.Catalog.SensoryModes[mode]
+			if targetIndoor && !spec.PenetratesIndoor || targetShield > spec.PenetrationPower {
+				continue
+			}
+		}
+		visible = append(visible, ActiveEffect{ID: eff.ID, SpecID: eff.SpecID, Name: eff.Name, Anchor: eff.Anchor})
+	}
+	return visible
+}
+
+// applyMoveDistrict follows the venue graph when places are configured, so district
+// travel cannot bypass a boat, flight, or other declared route capability.
+func (w *World) applyMoveDistrict(a *Actor, x Action) []Event {
+	from := a.VenueID
+	traveler := w.actorWithEffectTags(*a)
+	var best *VenueRouteView
+	for _, hop := range buildVenueRouteViews(w.Map, w.Catalog, w.DistrictStates, traveler) {
+		if hop.ToDistrict == x.Location && (best == nil || hop.Ticks < best.Ticks || hop.Ticks == best.Ticks && hop.ToVenue < best.ToVenue) {
+			candidate := hop
+			best = &candidate
+		}
+	}
+	if best == nil {
+		return []Event{w.record(a, x, "action_failed", map[string]any{"text": fmt.Sprintf("no traversable venue route from %s to district %s; travel through connected venues first", from, x.Location)})}
+	}
+	x.Kind, x.Location = "move_venue", best.ToVenue
+	return w.applyMoveVenue(a, x)
+}
+
 func (w *World) applyMoveVenue(a *Actor, x Action) []Event {
 	emitFail := func(reason string) []Event {
 		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
@@ -1203,9 +1376,6 @@ func (w *World) applyMoveVenue(a *Actor, x Action) []Event {
 		return emitFail("unknown destination venue: " + x.Location)
 	}
 	fromVenue := a.VenueID
-	if fromVenue == "" {
-		fromVenue = w.Map.DefaultVenueForDistrict(a.Location)
-	}
 	if fromVenue == "" {
 		return emitFail("actor has no current venue to depart from")
 	}
@@ -1326,7 +1496,7 @@ func (w *World) applyIssueDecree(a *Actor, x Action) []Event {
 	case "relief_grant":
 		budget := int64(decreeVal)
 		if budget <= 0 {
-			budget = 20
+			return emitFail("relief grant must request a positive cash amount")
 		}
 		if node.Treasury < budget {
 			budget = node.Treasury
@@ -1334,61 +1504,42 @@ func (w *World) applyIssueDecree(a *Actor, x Action) []Event {
 		if budget <= 0 {
 			return emitFail("polity treasury lacks funds for relief grant")
 		}
-		// Distribute relief strictly to needy actors/cohorts inside de-facto governed jurisdictions (100% M0 coin-conserving).
-		var needyActors []*Actor
-		for i := range w.Actors {
-			cand := &w.Actors[i]
-			if cand.Dead || cand.ID == a.ID {
-				continue
-			}
-			candPolity := w.Map.PolityIDForLocation(cand.Location, cand.VenueID)
-			if !w.Polities.PolityGovernsNode(node.ID, candPolity) {
-				continue
-			}
-			if cand.Money < 12 || cand.Hunger > 0 || cand.Health < MaxHealth {
-				needyActors = append(needyActors, cand)
-			}
+		needyActors, needyCohorts := w.reliefRecipients(node, a.ID)
+		people := int64(len(needyActors))
+		for _, cohort := range needyCohorts {
+			people += int64(cohort.Population - len(cohort.Members))
 		}
-		if len(needyActors) > 0 {
-			perActor := budget / int64(len(needyActors))
-			if perActor < 1 {
-				perActor = 1
+		if people == 0 {
+			return emitFail("no eligible needy residents in governed jurisdiction for relief grant")
+		}
+		perPerson, remainder := budget/people, budget%people
+		for _, recipient := range needyActors {
+			amount := perPerson
+			if remainder > 0 {
+				amount++
+				remainder--
 			}
-			for _, rcpt := range needyActors {
-				if node.Treasury < perActor || reliefDistributed+perActor > budget {
-					break
-				}
-				node.Treasury -= perActor
-				node.Ledger.ReliefAndInfraOut += perActor
-				rcpt.Money += int(perActor)
-				reliefDistributed += perActor
+			recipient.Money += int(amount)
+			reliefDistributed += amount
+			if amount > 0 {
 				reliefRecipients++
 			}
-		} else {
-			for ci := range w.Cohorts {
-				c := &w.Cohorts[ci]
-				if c.Population <= 0 {
-					continue
-				}
-				candPolity := w.Map.PolityIDForLocation(c.District, "")
-				if !w.Polities.PolityGovernsNode(node.ID, candPolity) {
-					continue
-				}
-				grant := budget - reliefDistributed
-				if grant <= 0 || node.Treasury <= 0 {
-					break
-				}
-				if grant > node.Treasury {
-					grant = node.Treasury
-				}
-				node.Treasury -= grant
-				node.Ledger.ReliefAndInfraOut += grant
-				c.MoneyPool += grant
-				reliefDistributed += grant
-				reliefRecipients += c.Population
-				break
+		}
+		for _, cohort := range needyCohorts {
+			population := int64(cohort.Population - len(cohort.Members))
+			extra := min(remainder, population)
+			amount := perPerson*population + extra
+			remainder -= extra
+			cohort.MoneyPool += amount
+			reliefDistributed += amount
+			if perPerson > 0 {
+				reliefRecipients += int(population)
+			} else {
+				reliefRecipients += int(extra)
 			}
 		}
+		node.Treasury -= reliefDistributed
+		node.Ledger.ReliefAndInfraOut += reliefDistributed
 		if reliefDistributed == 0 {
 			return emitFail("no eligible needy residents in governed jurisdiction for relief grant")
 		}
@@ -1486,11 +1637,19 @@ func (w *World) applyTransmitMessage(a *Actor, x Action) []Event {
 	if senderShield > ch.PenetrationPower {
 		return emitFail("sender enclosure shielding blocks outgoing transmission on " + ch.ID)
 	}
+	if !ch.Broadcast {
+		target := w.actor(x.TargetID)
+		if target == nil || target.Dead {
+			return emitFail("unknown or dead channel recipient")
+		}
+		if !w.communicationRangeAllows(*a, *target, ch.RangeKm) {
+			return emitFail("recipient is outside the channel range or its distance cannot be verified")
+		}
+	}
 
 	a.Energy -= ch.EnergyCost
 	x.Channel = ch.ID
 
-	srcCoord, hasSrcCoord := w.Map.GeoCoordOfLocation(a.Location, a.VenueID)
 	var recipients []*Actor
 	for i := range w.Actors {
 		rcpt := &w.Actors[i]
@@ -1516,15 +1675,8 @@ func (w *World) applyTransmitMessage(a *Actor, x Action) []Event {
 				continue
 			}
 		}
-		if ch.RangeKm > 0 && hasSrcCoord {
-			dstCoord, hasDstCoord := w.Map.GeoCoordOfLocation(rcpt.Location, rcpt.VenueID)
-			if hasDstCoord && GeoDistanceKm(srcCoord, dstCoord) > ch.RangeKm {
-				continue
-			}
-		} else if ch.RangeKm == 0 {
-			if rcpt.Location != a.Location {
-				continue
-			}
+		if !w.communicationRangeAllows(*a, *rcpt, ch.RangeKm) {
+			continue
 		}
 		_, rcptShield := w.actorEnclosure(*rcpt)
 		if rcptShield > ch.PenetrationPower {

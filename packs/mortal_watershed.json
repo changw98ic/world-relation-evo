@@ -2,7 +2,7 @@
   "id": "mortal-watershed",
   "name": "Mortal Dynasty County Watershed",
   "genre": "historical",
-  "description": "Two river-basin counties under Qingzhou Province linked by downstream watershed hydrology, sub-district venues, and multi-tier yamen governance.",
+  "description": "Two river-basin counties under Qingzhou Province linked by downstream watershed hydrology, sub-district venues, and multi-tier yamen governance. Spring sowing starts with last-season grain: 720 meal portions per anonymous resident, covering the 120-day crop period plus its preparation time. Initial grain is stored harvest from the previous season. Initial anonymous households hold 180 days of last-season rations (720 meal units/person at four meals/day), a finite six-month store covering the 120-day spring crop plus actual preparation, care and harvest delays; no automatic restocking.",
   "public_treasury": 240,
   "catalog": {
     "tag_actions": {
@@ -50,6 +50,9 @@
       "resident": [
         "refuel",
         "harvest",
+        "propose_growth_care",
+        "accept_growth_care",
+        "dispatch_harvest",
         "start_plan",
         "abandon_plan",
         "wait",
@@ -71,7 +74,9 @@
         "join_profession",
         "marry",
         "swear_bond",
-        "mediate_feud"
+        "mediate_feud",
+        "begin_rest",
+        "end_rest"
       ],
       "ritual": [
         "perform_ritual"
@@ -109,20 +114,24 @@
         "batch_price": 5,
         "offer_threshold": 2,
         "surplus_threshold": 2,
-        "shortage_threshold": 1
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "choice_grain": {
         "id": "choice_grain",
         "name": "choice grain",
         "tier": 2,
         "edible": true,
-        "hunger_relief": 2,
+        "hunger_relief": 1,
         "tradeable": true,
         "batch_qty": 2,
         "batch_price": 4,
         "offer_threshold": 4,
         "surplus_threshold": 5,
-        "shortage_threshold": 2
+        "shortage_threshold": 2,
+        "mass_units": 1,
+        "nutrition_units": 1
       },
       "classic_tome": {
         "id": "classic_tome",
@@ -133,7 +142,9 @@
         "batch_price": 8,
         "offer_threshold": 2,
         "surplus_threshold": 2,
-        "shortage_threshold": 1
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "compost": {
         "id": "compost",
@@ -144,7 +155,9 @@
         "batch_price": 1,
         "offer_threshold": 5,
         "surplus_threshold": 4,
-        "shortage_threshold": 1
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "fine_tools": {
         "id": "fine_tools",
@@ -157,7 +170,9 @@
         "batch_price": 8,
         "offer_threshold": 2,
         "surplus_threshold": 2,
-        "shortage_threshold": 1
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "fish": {
         "id": "fish",
@@ -170,7 +185,9 @@
         "batch_price": 2,
         "offer_threshold": 5,
         "surplus_threshold": 6,
-        "shortage_threshold": 2
+        "shortage_threshold": 2,
+        "mass_units": 1,
+        "nutrition_units": 1
       },
       "food": {
         "id": "food",
@@ -183,7 +200,9 @@
         "batch_price": 2,
         "offer_threshold": 6,
         "surplus_threshold": 8,
-        "shortage_threshold": 4
+        "shortage_threshold": 4,
+        "mass_units": 1,
+        "nutrition_units": 1
       },
       "herb": {
         "id": "herb",
@@ -194,7 +213,9 @@
         "batch_price": 2,
         "offer_threshold": 4,
         "surplus_threshold": 4,
-        "shortage_threshold": 2
+        "shortage_threshold": 2,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "hide": {
         "id": "hide",
@@ -205,7 +226,9 @@
         "batch_price": 3,
         "offer_threshold": 3,
         "surplus_threshold": 4,
-        "shortage_threshold": 1
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "livestock": {
         "id": "livestock",
@@ -216,7 +239,19 @@
         "batch_price": 5,
         "offer_threshold": 3,
         "surplus_threshold": 4,
-        "shortage_threshold": 1
+        "shortage_threshold": 1,
+        "mass_units": 6,
+        "nutrition_units": 6,
+        "living": {
+          "interval_ticks": 96,
+          "supplies": {
+            "water": 1
+          },
+          "resource_pool": "pasture_grass",
+          "resource_draw": 2,
+          "death_after_ticks": 672,
+          "source": "scenario husbandry budget: each animal drinks one water and grazes two grass daily; seven unfed days exhaust survival budget, not veterinary calibration"
+        }
       },
       "martial_manual": {
         "id": "martial_manual",
@@ -228,7 +263,9 @@
         "batch_price": 5,
         "offer_threshold": 2,
         "surplus_threshold": 2,
-        "shortage_threshold": 1
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "meat": {
         "id": "meat",
@@ -241,7 +278,9 @@
         "batch_price": 4,
         "offer_threshold": 4,
         "surplus_threshold": 5,
-        "shortage_threshold": 2
+        "shortage_threshold": 2,
+        "mass_units": 2,
+        "nutrition_units": 2
       },
       "medicine": {
         "id": "medicine",
@@ -254,7 +293,9 @@
         "batch_price": 3,
         "offer_threshold": 3,
         "surplus_threshold": 3,
-        "shortage_threshold": 1
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "ore": {
         "id": "ore",
@@ -265,7 +306,9 @@
         "batch_price": 2,
         "offer_threshold": 4,
         "surplus_threshold": 4,
-        "shortage_threshold": 1
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "plank": {
         "id": "plank",
@@ -276,7 +319,9 @@
         "batch_price": 3,
         "offer_threshold": 3,
         "surplus_threshold": 3,
-        "shortage_threshold": 1
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "rare_herb": {
         "id": "rare_herb",
@@ -287,7 +332,9 @@
         "batch_price": 5,
         "offer_threshold": 2,
         "surplus_threshold": 3,
-        "shortage_threshold": 1
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "sacrificial_offering": {
         "id": "sacrificial_offering",
@@ -298,7 +345,9 @@
         "batch_price": 5,
         "offer_threshold": 2,
         "surplus_threshold": 3,
-        "shortage_threshold": 1
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "scroll": {
         "id": "scroll",
@@ -309,7 +358,9 @@
         "batch_price": 3,
         "offer_threshold": 2,
         "surplus_threshold": 3,
-        "shortage_threshold": 1
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "seeds": {
         "id": "seeds",
@@ -320,7 +371,9 @@
         "batch_price": 1,
         "offer_threshold": 6,
         "surplus_threshold": 6,
-        "shortage_threshold": 1
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "timber": {
         "id": "timber",
@@ -331,7 +384,9 @@
         "batch_price": 2,
         "offer_threshold": 4,
         "surplus_threshold": 5,
-        "shortage_threshold": 2
+        "shortage_threshold": 2,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "tonic": {
         "id": "tonic",
@@ -344,7 +399,9 @@
         "batch_price": 8,
         "offer_threshold": 2,
         "surplus_threshold": 2,
-        "shortage_threshold": 1
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "tools": {
         "id": "tools",
@@ -356,7 +413,9 @@
         "batch_price": 4,
         "offer_threshold": 2,
         "surplus_threshold": 2,
-        "shortage_threshold": 1
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "water": {
         "id": "water",
@@ -369,7 +428,9 @@
         "batch_price": 1,
         "offer_threshold": 6,
         "surplus_threshold": 5,
-        "shortage_threshold": 1
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "weapon": {
         "id": "weapon",
@@ -381,7 +442,9 @@
         "batch_price": 5,
         "offer_threshold": 2,
         "surplus_threshold": 2,
-        "shortage_threshold": 1
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "winter_coat": {
         "id": "winter_coat",
@@ -393,7 +456,9 @@
         "batch_price": 5,
         "offer_threshold": 2,
         "surplus_threshold": 2,
-        "shortage_threshold": 1
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "paper": {
         "id": "paper",
@@ -401,7 +466,9 @@
         "tier": 1,
         "tradeable": true,
         "batch_qty": 1,
-        "batch_price": 1
+        "batch_price": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "ink": {
         "id": "ink",
@@ -409,7 +476,9 @@
         "tier": 1,
         "tradeable": true,
         "batch_qty": 1,
-        "batch_price": 1
+        "batch_price": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
       },
       "calf": {
         "id": "calf",
@@ -417,12 +486,26 @@
         "tier": 1,
         "tradeable": true,
         "batch_qty": 1,
-        "batch_price": 2
+        "batch_price": 2,
+        "mass_units": 2,
+        "nutrition_units": 2,
+        "living": {
+          "interval_ticks": 96,
+          "supplies": {
+            "water": 1
+          },
+          "resource_pool": "pasture_grass",
+          "resource_draw": 2,
+          "death_after_ticks": 672,
+          "source": "scenario husbandry budget: each animal drinks one water and grazes two grass daily; seven unfed days exhaust survival budget, not veterinary calibration"
+        }
       },
       "nightsoil": {
         "id": "nightsoil",
         "name": "collected organic waste",
-        "tier": 1
+        "tier": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
       }
     },
     "professions": [
@@ -1264,7 +1347,12 @@
           "nightsoil": 3
         },
         "output_item": "compost",
-        "output_qty": 1
+        "output_qty": 1,
+        "conversion": {
+          "source": "configured biological assimilation from growth supplies, environment and retained parents; UMN Extension: well-managed warm-season compost 2-4 months; preset uses 60 days",
+          "external_mass_units": 0,
+          "external_nutrition_units": 0
+        }
       },
       {
         "id": "save_seeds",
@@ -1277,7 +1365,10 @@
           "food": 1
         },
         "output_item": "seeds",
-        "output_qty": 1
+        "output_qty": 1,
+        "conversion": {
+          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
+        }
       },
       {
         "id": "fetch_water",
@@ -1289,7 +1380,12 @@
         "ticks": 2,
         "energy_cost": 5,
         "output_item": "water",
-        "output_qty": 2
+        "output_qty": 2,
+        "conversion": {
+          "source": "finite water_table extraction: 1 resource units fund at most 2 output units",
+          "external_mass_units": 2,
+          "external_nutrition_units": 0
+        }
       },
       {
         "growth": {
@@ -1311,16 +1407,22 @@
           "food": 2
         },
         "output_item": "compost",
-        "output_qty": 2
+        "output_qty": 2,
+        "conversion": {
+          "source": "configured biological assimilation from growth supplies, environment and retained parents; UMN Extension: well-managed warm-season compost 2-4 months; preset uses 60 days",
+          "external_mass_units": 0,
+          "external_nutrition_units": 0
+        }
       },
       {
         "growth": {
           "duration_ticks": 11520,
           "maintenance_interval_ticks": 96,
-          "supplies": {
-            "water": 1
-          },
-          "source": "FAO crop water needs: wheat 120-150 days; preset uses 120 days"
+          "source": "FAO crop water needs: wheat 120-150 days; preset uses 120 days; scenario irrigation budget: one available local water_table unit and one worker per field per day; scenario care-survival budget: seven continuous days without required care ends the batch; not a measured species mortality threshold",
+          "resource_pool": "water_table",
+          "resource_draw": 1,
+          "care_workers_per_batch": 1,
+          "failure_after_ticks": 672
         },
         "id": "farm_grain",
         "label": "Irrigate, tend, and harvest grain in the fields",
@@ -1338,7 +1440,12 @@
         "bonus_input": "compost",
         "bonus_output": 1,
         "output_item": "food",
-        "output_qty": 2
+        "output_qty": 1200,
+        "conversion": {
+          "source": "configured biological assimilation from growth supplies, environment and retained parents; FAO crop water needs: wheat 120-150 days; preset uses 120 days",
+          "external_mass_units": 1198,
+          "external_nutrition_units": 1201
+        }
       },
       {
         "id": "thresh_choice_grain",
@@ -1353,7 +1460,10 @@
           "food": 2
         },
         "output_item": "choice_grain",
-        "output_qty": 2
+        "output_qty": 2,
+        "conversion": {
+          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
+        }
       },
       {
         "id": "forage_food",
@@ -1366,7 +1476,12 @@
         "ticks": 3,
         "energy_cost": 9,
         "output_item": "food",
-        "output_qty": 1
+        "output_qty": 1,
+        "conversion": {
+          "source": "finite soil_fertility extraction: 1 resource units fund at most 1 output units",
+          "external_mass_units": 1,
+          "external_nutrition_units": 1
+        }
       },
       {
         "id": "fell_timber",
@@ -1382,7 +1497,12 @@
         "bonus_output": 1,
         "durable_bonus": true,
         "output_item": "timber",
-        "output_qty": 2
+        "output_qty": 2,
+        "conversion": {
+          "source": "finite timber_stand extraction: 2 resource units fund at most 2 output units",
+          "external_mass_units": 2,
+          "external_nutrition_units": 0
+        }
       },
       {
         "id": "saw_planks",
@@ -1399,7 +1519,10 @@
         "bonus_output": 1,
         "durable_bonus": true,
         "output_item": "plank",
-        "output_qty": 2
+        "output_qty": 2,
+        "conversion": {
+          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
+        }
       },
       {
         "id": "sew_winter_coat",
@@ -1413,7 +1536,10 @@
           "hide": 2
         },
         "output_item": "winter_coat",
-        "output_qty": 1
+        "output_qty": 1,
+        "conversion": {
+          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
+        }
       },
       {
         "id": "mine_ore",
@@ -1426,7 +1552,12 @@
         "ticks": 3,
         "energy_cost": 13,
         "output_item": "ore",
-        "output_qty": 2
+        "output_qty": 2,
+        "conversion": {
+          "source": "finite ore_vein extraction: 2 resource units fund at most 2 output units",
+          "external_mass_units": 2,
+          "external_nutrition_units": 0
+        }
       },
       {
         "id": "deep_shaft_ore",
@@ -1442,7 +1573,12 @@
         "bonus_output": 1,
         "durable_bonus": true,
         "output_item": "ore",
-        "output_qty": 3
+        "output_qty": 3,
+        "conversion": {
+          "source": "finite ore_vein extraction: 3 resource units fund at most 3 output units",
+          "external_mass_units": 3,
+          "external_nutrition_units": 0
+        }
       },
       {
         "id": "forge_tools",
@@ -1457,7 +1593,10 @@
           "timber": 1
         },
         "output_item": "tools",
-        "output_qty": 1
+        "output_qty": 1,
+        "conversion": {
+          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
+        }
       },
       {
         "id": "forge_fine_tools",
@@ -1473,7 +1612,10 @@
           "tools": 1
         },
         "output_item": "fine_tools",
-        "output_qty": 1
+        "output_qty": 1,
+        "conversion": {
+          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
+        }
       },
       {
         "id": "gather_herbs",
@@ -1486,7 +1628,12 @@
         "ticks": 2,
         "energy_cost": 7,
         "output_item": "herb",
-        "output_qty": 2
+        "output_qty": 2,
+        "conversion": {
+          "source": "finite herb_bed extraction: 2 resource units fund at most 2 output units",
+          "external_mass_units": 2,
+          "external_nutrition_units": 0
+        }
       },
       {
         "id": "brew_medicine",
@@ -1501,7 +1648,10 @@
           "water": 1
         },
         "output_item": "medicine",
-        "output_qty": 2
+        "output_qty": 2,
+        "conversion": {
+          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
+        }
       },
       {
         "id": "distill_tonic",
@@ -1517,7 +1667,10 @@
           "medicine": 2
         },
         "output_item": "tonic",
-        "output_qty": 2
+        "output_qty": 2,
+        "conversion": {
+          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
+        }
       },
       {
         "id": "refine_elixir_tonic",
@@ -1529,10 +1682,13 @@
         "energy_cost": 10,
         "inputs": {
           "rare_herb": 1,
-          "water": 1
+          "water": 2
         },
         "output_item": "tonic",
-        "output_qty": 3
+        "output_qty": 3,
+        "conversion": {
+          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
+        }
       },
       {
         "id": "transcribe_scroll",
@@ -1547,7 +1703,10 @@
           "paper": 1
         },
         "output_item": "scroll",
-        "output_qty": 1
+        "output_qty": 1,
+        "conversion": {
+          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
+        }
       },
       {
         "id": "compile_classic",
@@ -1561,7 +1720,10 @@
           "scroll": 1
         },
         "output_item": "classic_tome",
-        "output_qty": 1
+        "output_qty": 1,
+        "conversion": {
+          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
+        }
       },
       {
         "id": "practice_martial_arts",
@@ -1579,7 +1741,10 @@
         "bonus_output": 1,
         "durable_bonus": true,
         "output_item": "martial_manual",
-        "output_qty": 1
+        "output_qty": 1,
+        "conversion": {
+          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
+        }
       },
       {
         "id": "temper_weapon",
@@ -1594,7 +1759,10 @@
           "timber": 1
         },
         "output_item": "weapon",
-        "output_qty": 1
+        "output_qty": 1,
+        "conversion": {
+          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
+        }
       },
       {
         "id": "issue_bounty_writ",
@@ -1611,7 +1779,10 @@
         "bonus_input": "scroll",
         "bonus_output": 1,
         "output_item": "bounty_writ",
-        "output_qty": 1
+        "output_qty": 1,
+        "conversion": {
+          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
+        }
       },
       {
         "growth": {
@@ -1625,7 +1796,8 @@
           "parents": {
             "livestock": 2
           },
-          "source": "UNL Beef: cattle gestation typically 283 days; breeding pair and care inputs declared by this preset"
+          "source": "UNL Beef: cattle gestation typically 283 days; breeding pair and care inputs declared by this preset; scenario care-survival budget: seven continuous days without required care ends the batch; not a measured species mortality threshold",
+          "failure_after_ticks": 672
         },
         "id": "graze_livestock",
         "label": "Graze and breed 1 pasture livestock herd",
@@ -1639,7 +1811,12 @@
         "bonus_input": "water",
         "bonus_output": 1,
         "output_item": "calf",
-        "output_qty": 1
+        "output_qty": 1,
+        "conversion": {
+          "source": "configured biological assimilation from growth supplies, environment and retained parents; UNL Beef: cattle gestation typically 283 days; breeding pair and care inputs declared by this preset",
+          "external_mass_units": 3,
+          "external_nutrition_units": 4
+        }
       },
       {
         "id": "butcher_stock",
@@ -1653,7 +1830,10 @@
           "livestock": 1
         },
         "output_item": "meat",
-        "output_qty": 3
+        "output_qty": 3,
+        "conversion": {
+          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
+        }
       },
       {
         "id": "tan_pasture_hide",
@@ -1667,7 +1847,10 @@
           "livestock": 1
         },
         "output_item": "hide",
-        "output_qty": 2
+        "output_qty": 2,
+        "conversion": {
+          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
+        }
       },
       {
         "id": "net_fish",
@@ -1683,7 +1866,12 @@
         "bonus_output": 1,
         "durable_bonus": true,
         "output_item": "fish",
-        "output_qty": 3
+        "output_qty": 3,
+        "conversion": {
+          "source": "finite fish_stock extraction: 2 resource units fund at most 3 output units",
+          "external_mass_units": 3,
+          "external_nutrition_units": 3
+        }
       },
       {
         "id": "haul_canal_water",
@@ -1696,7 +1884,12 @@
         "ticks": 2,
         "energy_cost": 7,
         "output_item": "water",
-        "output_qty": 4
+        "output_qty": 4,
+        "conversion": {
+          "source": "finite water_table extraction: 2 resource units fund at most 4 output units",
+          "external_mass_units": 4,
+          "external_nutrition_units": 0
+        }
       },
       {
         "id": "hunt_game",
@@ -1712,7 +1905,12 @@
         "bonus_output": 1,
         "durable_bonus": true,
         "output_item": "meat",
-        "output_qty": 2
+        "output_qty": 2,
+        "conversion": {
+          "source": "finite game_herd extraction: 2 resource units fund at most 2 output units",
+          "external_mass_units": 4,
+          "external_nutrition_units": 4
+        }
       },
       {
         "id": "trap_pelts",
@@ -1728,7 +1926,12 @@
         "bonus_output": 1,
         "durable_bonus": true,
         "output_item": "hide",
-        "output_qty": 2
+        "output_qty": 2,
+        "conversion": {
+          "source": "finite game_herd extraction: 1 resource units fund at most 2 output units",
+          "external_mass_units": 2,
+          "external_nutrition_units": 0
+        }
       },
       {
         "id": "forage_rare_herb",
@@ -1741,7 +1944,12 @@
         "ticks": 4,
         "energy_cost": 12,
         "output_item": "rare_herb",
-        "output_qty": 1
+        "output_qty": 1,
+        "conversion": {
+          "source": "finite herb_bed extraction: 2 resource units fund at most 1 output units",
+          "external_mass_units": 1,
+          "external_nutrition_units": 0
+        }
       },
       {
         "id": "prepare_offering",
@@ -1757,7 +1965,10 @@
         "bonus_input": "rare_herb",
         "bonus_output": 1,
         "output_item": "sacrificial_offering",
-        "output_qty": 2
+        "output_qty": 2,
+        "conversion": {
+          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
+        }
       },
       {
         "id": "make_paper",
@@ -1772,7 +1983,10 @@
           "water": 1
         },
         "output_item": "paper",
-        "output_qty": 1
+        "output_qty": 1,
+        "conversion": {
+          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
+        }
       },
       {
         "id": "make_ink",
@@ -1787,7 +2001,10 @@
           "water": 1
         },
         "output_item": "ink",
-        "output_qty": 1
+        "output_qty": 1,
+        "conversion": {
+          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
+        }
       },
       {
         "growth": {
@@ -1798,7 +2015,8 @@
           },
           "resource_pool": "pasture_grass",
           "resource_draw": 2,
-          "source": "Penn State Extension: heifers ready for breeding at 13-15 months; preset uses 450 days"
+          "source": "Penn State Extension: heifers ready for breeding at 13-15 months; preset uses 450 days; scenario care-survival budget: seven continuous days without required care ends the batch; not a measured species mortality threshold",
+          "failure_after_ticks": 672
         },
         "id": "raise_livestock",
         "label": "Raise juvenile stock to breeding maturity",
@@ -1811,7 +2029,12 @@
           "calf": 1
         },
         "output_item": "livestock",
-        "output_qty": 1
+        "output_qty": 1,
+        "conversion": {
+          "source": "configured biological assimilation from growth supplies, environment and retained parents; Penn State Extension: heifers ready for breeding at 13-15 months; preset uses 450 days",
+          "external_mass_units": 4,
+          "external_nutrition_units": 4
+        }
       }
     ],
     "tag_profiles": {
@@ -2736,7 +2959,9 @@
           "summer": 135,
           "winter": 65
         },
-        "depletion_floor_pct": 30
+        "biological": true,
+        "reproduction_source": "fish_stock",
+        "maturity_ticks": 960
       },
       "game_herd": {
         "id": "game_herd",
@@ -2751,13 +2976,16 @@
           "summer": 115,
           "winter": 75
         },
-        "depletion_floor_pct": 25
+        "biological": true,
+        "reproduction_source": "game_herd",
+        "maturity_ticks": 1056
       },
       "herb_bed": {
         "id": "herb_bed",
         "name": "灵药山苗",
         "node_features": [
-          "herb_patch"
+          "herb_patch",
+          "woodland"
         ],
         "regen_permille_per_day": 95,
         "seasonal_regen_pct": {
@@ -2766,7 +2994,9 @@
           "summer": 120,
           "winter": 50
         },
-        "depletion_floor_pct": 30
+        "biological": true,
+        "reproduction_source": "herb_bed",
+        "maturity_ticks": 1056
       },
       "ore_vein": {
         "id": "ore_vein",
@@ -2781,8 +3011,7 @@
           "spring": 100,
           "summer": 100,
           "winter": 100
-        },
-        "depletion_floor_pct": 40
+        }
       },
       "pasture_grass": {
         "id": "pasture_grass",
@@ -2797,7 +3026,9 @@
           "summer": 125,
           "winter": 50
         },
-        "depletion_floor_pct": 30
+        "biological": true,
+        "reproduction_source": "pasture_grass",
+        "maturity_ticks": 960
       },
       "soil_fertility": {
         "id": "soil_fertility",
@@ -2811,8 +3042,7 @@
           "spring": 130,
           "summer": 115,
           "winter": 70
-        },
-        "depletion_floor_pct": 35
+        }
       },
       "timber_stand": {
         "id": "timber_stand",
@@ -2827,7 +3057,9 @@
           "summer": 120,
           "winter": 55
         },
-        "depletion_floor_pct": 35
+        "biological": true,
+        "reproduction_source": "timber_stand",
+        "maturity_ticks": 1344
       },
       "water_table": {
         "id": "water_table",
@@ -2843,8 +3075,7 @@
           "spring": 120,
           "summer": 125,
           "winter": 85
-        },
-        "depletion_floor_pct": 40
+        }
       }
     },
     "encounters": [
@@ -2869,7 +3100,9 @@
           "martial",
           "law"
         ],
-        "bounty_coins": 8
+        "bounty_coins": 8,
+        "source_resource": "game_herd",
+        "resource_per_kill": 1
       },
       {
         "id": "mountain_anomaly",
@@ -2892,7 +3125,9 @@
           "martial",
           "ritual"
         ],
-        "bounty_coins": 12
+        "bounty_coins": 12,
+        "source_resource": "herb_bed",
+        "resource_per_kill": 1
       },
       {
         "id": "river_fiend",
@@ -2915,7 +3150,9 @@
           "law",
           "martial"
         ],
-        "bounty_coins": 10
+        "bounty_coins": 10,
+        "source_resource": "fish_stock",
+        "resource_per_kill": 1
       }
     ],
     "disasters": [
@@ -2944,7 +3181,8 @@
         "sanitation_drop": 24,
         "casualty_permille": 2,
         "mitigated_by_infra": "levee",
-        "relief_item": "food"
+        "relief_item": "food",
+        "flow_kind": "river"
       },
       {
         "id": "drought",
@@ -3200,9 +3438,7 @@
         "energy_cost": 8,
         "ticks": 3,
         "morale_boost": 12,
-        "trust_boost": 1,
-        "disaster_relief_weight_pct": 25,
-        "threat_appease_amount": 8
+        "trust_boost": 1
       },
       {
         "id": "summer_river_rite",
@@ -3216,9 +3452,7 @@
         "energy_cost": 8,
         "ticks": 3,
         "morale_boost": 12,
-        "trust_boost": 1,
-        "disaster_relief_weight_pct": 30,
-        "threat_appease_amount": 14
+        "trust_boost": 1
       },
       {
         "id": "autumn_harvest_rite",
@@ -3232,9 +3466,7 @@
         "energy_cost": 8,
         "ticks": 3,
         "morale_boost": 15,
-        "trust_boost": 2,
-        "disaster_relief_weight_pct": 25,
-        "threat_appease_amount": 10
+        "trust_boost": 2
       },
       {
         "id": "winter_hearth_rite",
@@ -3248,9 +3480,7 @@
         "energy_cost": 8,
         "ticks": 3,
         "morale_boost": 15,
-        "trust_boost": 2,
-        "disaster_relief_weight_pct": 25,
-        "threat_appease_amount": 10
+        "trust_boost": 2
       },
       {
         "id": "crisis_appeasement_rite",
@@ -3265,9 +3495,7 @@
         "energy_cost": 10,
         "ticks": 4,
         "morale_boost": 18,
-        "trust_boost": 2,
-        "disaster_relief_weight_pct": 35,
-        "threat_appease_amount": 18
+        "trust_boost": 2
       }
     ],
     "diseases": [
@@ -3327,6 +3555,23 @@
       "audit_capability": "audit_corruption",
       "racket_tag": "gang",
       "outlaw_tag": "outlaw"
+    },
+    "production": {
+      "facility_capacity": {
+        "forge": 1,
+        "carpentry_bench": 1,
+        "herb_rack": 1,
+        "compost_pit": 1
+      },
+      "field_area_per_batch_m2": 1000,
+      "field_area_per_farmer_m2": 1000,
+      "field_source": "scenario budget: one 1000 m2 field per farmer; one simultaneous crop per field; not agronomic calibration",
+      "facility_source": "scenario equipment budget: each installed facility has one serial workstation; capacity is configured, not inferred from population"
+    },
+    "house_wear": {
+      "interval_ticks": 35040,
+      "condition_loss": 4,
+      "source": "scenario wooden-roof condition budget: 4/100 per 365-day year; NPS Preservation Brief 19 gives 15-30-year wooden-shingle service lives; condition-point interpolation uses a 25-year scenario: https://www.nps.gov/orgs/1739/upload/preservation-brief-19-wood-shingle-roofs.pdf"
     }
   },
   "map": {
@@ -3343,7 +3588,9 @@
           "water_source",
           "yamen",
           "academy",
-          "residential"
+          "residential",
+          "martial_hall",
+          "shrine"
         ]
       },
       {
@@ -3358,7 +3605,10 @@
           "herb_patch",
           "forage_ground",
           "water_source",
-          "residential"
+          "residential",
+          "mine_shaft",
+          "pasture",
+          "hunting_ground"
         ]
       },
       {
@@ -3374,7 +3624,9 @@
           "farmland",
           "yamen",
           "workshop_row",
-          "residential"
+          "residential",
+          "fishery_waters",
+          "canal_wharf"
         ]
       }
     ],
@@ -4190,12 +4442,12 @@
       "prof_level": 2,
       "rank": "Master Grower",
       "population": 180,
-      "avg_energy": 0,
+      "avg_energy": 84,
       "avg_hunger": 0,
       "money_pool": 2400,
       "item_pool": {
         "compost": 200,
-        "food": 1200,
+        "food": 129600,
         "seeds": 360,
         "water": 500
       }
@@ -4210,11 +4462,11 @@
       "prof_level": 2,
       "rank": "River Pilot",
       "population": 90,
-      "avg_energy": 0,
+      "avg_energy": 84,
       "avg_hunger": 0,
       "money_pool": 1600,
       "item_pool": {
-        "food": 600,
+        "food": 64800,
         "plank": 120,
         "tools": 90,
         "water": 300
@@ -4230,11 +4482,11 @@
       "prof_level": 2,
       "rank": "Caravan Factor",
       "population": 60,
-      "avg_energy": 0,
+      "avg_energy": 84,
       "avg_hunger": 0,
       "money_pool": 1800,
       "item_pool": {
-        "food": 400,
+        "food": 43200,
         "seeds": 150,
         "tools": 60,
         "water": 200

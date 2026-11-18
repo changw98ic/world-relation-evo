@@ -2,3 +2,4 @@
 /wre
 *.out
 .codegraph/
+.artifacts/

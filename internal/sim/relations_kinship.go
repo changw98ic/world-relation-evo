@@ -134,20 +134,24 @@ func cloneClanRecord(c *ClanRecord) *ClanRecord {
 
 // GrudgeRecord records a directed causal blood feud or grievance preserving RootEventID.
 type GrudgeRecord struct {
-	ID              string `json:"id"`
-	AggrievedID     string `json:"aggrieved_id"`
-	OffenderID      string `json:"offender_id"`
-	AggrievedClanID string `json:"aggrieved_clan_id,omitempty"`
-	OffenderClanID  string `json:"offender_clan_id,omitempty"`
-	Cause           string `json:"cause"`
-	Intensity       int    `json:"intensity"`
-	RootEventID     int64  `json:"root_event_id"`
-	SourceEventID   int64  `json:"source_event_id"`
-	CreatedTick     int64  `json:"created_tick"`
-	LastActionTick  int64  `json:"last_action_tick,omitempty"`
-	Resolved        bool   `json:"resolved,omitempty"`
-	Resolution      string `json:"resolution,omitempty"`
-	BloodMoneyPaid  int64  `json:"blood_money_paid,omitempty"`
+	ID                  string `json:"id"`
+	AggrievedID         string `json:"aggrieved_id"`
+	OffenderID          string `json:"offender_id"`
+	AggrievedClanID     string `json:"aggrieved_clan_id,omitempty"`
+	OffenderClanID      string `json:"offender_clan_id,omitempty"`
+	Cause               string `json:"cause"`
+	Intensity           int    `json:"intensity"`
+	RootEventID         int64  `json:"root_event_id"`
+	SourceEventID       int64  `json:"source_event_id"`
+	CreatedTick         int64  `json:"created_tick"`
+	LastActionTick      int64  `json:"last_action_tick,omitempty"`
+	Resolved            bool   `json:"resolved,omitempty"`
+	Resolution          string `json:"resolution,omitempty"`
+	BloodMoneyPaid      int64  `json:"blood_money_paid,omitempty"`
+	MediationProposerID string `json:"mediation_proposer_id,omitempty"`
+	MediationCoins      int64  `json:"mediation_coins,omitempty"`
+	OffenderAccepted    bool   `json:"offender_accepted,omitempty"`
+	AggrievedAccepted   bool   `json:"aggrieved_accepted,omitempty"`
 }
 
 // DistrictSovereignty tracks which faction currently controls a district and when control shifted.
@@ -472,8 +476,6 @@ func (rs *RelationEvoState) factionStrengthInDistrict(w *World, factionID, distr
 	score := 0
 	if f.District == districtID {
 		score += 20 + f.Level*12 + f.Influence/12
-	} else {
-		score += f.Level*4 + f.Influence/25
 	}
 	for i := range w.Cohorts {
 		c := &w.Cohorts[i]
@@ -492,7 +494,7 @@ func (rs *RelationEvoState) factionStrengthInDistrict(w *World, factionID, distr
 		if a == nil || a.Dead || w.Tick < a.JailedUntil {
 			continue
 		}
-		if a.Location == districtID {
+		if a.Location == districtID && !a.InTransit() {
 			score += 12 + a.Level*4
 		}
 	}
@@ -502,6 +504,36 @@ func (rs *RelationEvoState) factionStrengthInDistrict(w *World, factionID, distr
 		}
 	}
 	return score
+}
+
+// setDistrictControl updates both social history and the location record used by
+// laws, taxes, perception, and relief. One district's conquest cannot replace the
+// old polity's authority over its other districts.
+func (w *World) setDistrictControl(rs *RelationEvoState, districtID, factionID string, score int) {
+	rs.ControllingFaction[districtID] = factionID
+	ds := rs.DistrictSovereignty[districtID]
+	ds.DistrictID, ds.ControllingFaction = districtID, factionID
+	ds.ControlSinceTick, ds.LastShiftTick = w.Tick, w.Tick
+	ds.ContestedCount++
+	ds.ControllerScore = score
+	rs.DistrictSovereignty[districtID] = ds
+	if w.Polities == nil {
+		w.Polities = &PolityNetwork{}
+	}
+	if w.Polities.NodeByID(factionID) == nil {
+		f := w.faction(factionID)
+		w.Polities.Nodes = append(w.Polities.Nodes, PolityNode{ID: factionID, Name: f.Name, Level: "faction", SeatDistrictID: f.District, LeaderActorID: rs.FactionLeader[factionID]})
+	}
+	for i := range w.Map.Districts {
+		if w.Map.Districts[i].ID == districtID {
+			w.Map.Districts[i].PolityID = factionID
+		}
+	}
+	for i := range w.Map.Venues {
+		if w.Map.Venues[i].DistrictID == districtID {
+			w.Map.Venues[i].PolityID = factionID
+		}
+	}
 }
 
 func (rs *RelationEvoState) actorLeadershipScore(w *World, a *Actor) int {
@@ -596,6 +628,9 @@ func (rs *RelationEvoState) EnsureKinshipSeeded(w *World) {
 	for _, d := range w.Map.Districts {
 		if _, exists := rs.DistrictSovereignty[d.ID]; exists {
 			continue
+		}
+		if pol := w.EffectiveGoverningPolity(d.ID, ""); pol != nil {
+			rs.ControllingFaction[d.ID] = pol.ID
 		}
 		if rs.ControllingFaction[d.ID] != "" {
 			rs.DistrictSovereignty[d.ID] = DistrictSovereignty{
@@ -883,7 +918,7 @@ func (rs *RelationEvoState) settleDeathAndInheritance(w *World, e Event) []Event
 		}
 	}
 
-	if len(claimants) > 0 && (len(ownedHouses) > 0 || deceased.Money > 0 || len(deceased.Items) > 0 || len(deceased.Currencies) > 0) {
+	if len(claimants) > 0 {
 		primaryHeir := claimants[0]
 		var rivalHeir *Actor
 		lowTrust := false
@@ -914,7 +949,6 @@ func (rs *RelationEvoState) settleDeathAndInheritance(w *World, e Event) []Event
 		if inheritedCoins > 0 {
 			deceased.Money = 0
 			primaryHeir.Money += inheritedCoins
-			w.recordLedgerCurrencyProduced("coins", int64(inheritedCoins))
 		}
 		if len(deceased.Currencies) > 0 {
 			curKeys := make([]string, 0, len(deceased.Currencies))
@@ -927,7 +961,6 @@ func (rs *RelationEvoState) settleDeathAndInheritance(w *World, e Event) []Event
 			for _, cur := range curKeys {
 				amt := deceased.Currencies[cur]
 				w.addActorCurrency(primaryHeir, cur, amt)
-				w.recordLedgerCurrencyProduced(cur, amt)
 			}
 			deceased.Currencies = nil
 		}
@@ -945,6 +978,7 @@ func (rs *RelationEvoState) settleDeathAndInheritance(w *World, e Event) []Event
 			primaryHeir.Items[itemID] += deceased.Items[itemID]
 			delete(deceased.Items, itemID)
 		}
+		w.transferGrowingAssets("actor", deceasedID, "actor", primaryHeir.ID)
 		firstHouseID := ""
 		for _, hi := range ownedHouses {
 			w.Houses[hi].OwnerID = primaryHeir.ID
@@ -1005,11 +1039,13 @@ func (rs *RelationEvoState) settleDeathAndInheritance(w *World, e Event) []Event
 			w.NextID++
 			events = append(events, settleEv)
 		}
-	} else if deceased.Money > 0 {
-		// Heirless estate escheats to public treasury so TotalCoins() stays 100% conserved.
-		w.recordLedgerCurrencyProduced("coins", int64(deceased.Money))
-		w.creditTreasury(int64(deceased.Money), "confiscated")
-		deceased.Money = 0
+	} else {
+		// Only an estate with no living claimant escheats to the public treasury.
+		if deceased.Money > 0 {
+			w.creditTreasury(int64(deceased.Money), "confiscated")
+			deceased.Money = 0
+		}
+		w.settleUnclaimedActorEstate(deceased, ownedHouses)
 	}
 
 	// If killed by an assailant, form a high-intensity blood-feud grudge for nearest kin or clan.
@@ -1497,9 +1533,12 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 			if g.Resolved {
 				continue
 			}
-			if x.Text != "" && g.ID == x.Text {
-				grudgeIdx = i
-				break
+			if x.Text != "" {
+				if g.ID == x.Text {
+					grudgeIdx = i
+					break
+				}
+				continue
 			}
 			if x.TargetID != "" && (g.OffenderID == x.TargetID || g.AggrievedID == x.TargetID) {
 				grudgeIdx = i
@@ -1510,6 +1549,15 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 			return fail("no active unresolved feud found to mediate"), true
 		}
 		g := &rs.Grudges[grudgeIdx]
+		if !actorKnowsAboutGrudge(*a, *g) {
+			return fail("actor has no witnessed or reported knowledge of this feud"), true
+		}
+		offender, aggrieved := w.actor(g.OffenderID), w.actor(g.AggrievedID)
+		for _, party := range []*Actor{offender, aggrieved} {
+			if party == nil || party.Dead || w.Tick < party.JailedUntil || !SamePlace(*a, *party) || party.Task != nil && (party.Task.Action.Kind == "sleep" || party.Task.Dormant) {
+				return fail("both feud parties must be present and able to communicate"), true
+			}
+		}
 
 		bloodMoney := int64(x.Price)
 		if bloodMoney <= 0 {
@@ -1518,16 +1566,25 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 		if bloodMoney <= 0 {
 			bloodMoney = maxInt64(2, int64(g.Intensity/5))
 		}
-		paid, ok := rs.transferBloodMoney(w, g.OffenderID, g.AggrievedID, g.OffenderClanID, g.AggrievedClanID, bloodMoney)
+		if g.MediationProposerID == "" || g.MediationCoins != bloodMoney {
+			g.MediationProposerID = a.ID
+			g.MediationCoins = bloodMoney
+			g.OffenderAccepted, g.AggrievedAccepted = false, false
+		}
+		if a.ID == g.OffenderID {
+			g.OffenderAccepted = true
+		}
+		if a.ID == g.AggrievedID {
+			g.AggrievedAccepted = true
+		}
+		if !g.OffenderAccepted || !g.AggrievedAccepted {
+			return emit("feud_mediation_proposed", fmt.Sprintf("%s proposed or accepted %d blood-money coins for feud %s; awaiting both parties", a.Name, bloodMoney, g.ID), map[string]any{
+				"grudge_id": g.ID, "blood_money": bloodMoney, "offender_accepted": g.OffenderAccepted, "aggrieved_accepted": g.AggrievedAccepted,
+			}, offender, aggrieved), true
+		}
+		paid, ok := rs.transferBloodMoney(w, g.OffenderID, g.AggrievedID, "", "", bloodMoney)
 		if !ok {
-			if x.Price > 0 {
-				return fail("offender lacks coins for requested blood-money settlement"), true
-			}
-			if paid > 0 {
-				paid, _ = rs.transferBloodMoney(w, g.OffenderID, g.AggrievedID, g.OffenderClanID, g.AggrievedClanID, paid)
-			} else {
-				paid = 0
-			}
+			return fail("offender lacks coins for the accepted blood-money settlement"), true
 		}
 
 		g.Resolved = true
@@ -1597,23 +1654,15 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 		}
 		if prevFaction != "" && challengerScore < prevScore {
 			return emit("turf_claim_repelled", fmt.Sprintf("%s's bid for %s sovereignty in %s was repelled by %s (%d vs %d)", a.Name, f.Name, districtID, prevFaction, challengerScore, prevScore), map[string]any{
-				"district":          districtID,
-				"challenger":        factionID,
-				"controller":        prevFaction,
-				"challenger_score":  challengerScore,
-				"controller_score":  prevScore,
+				"district":         districtID,
+				"challenger":       factionID,
+				"controller":       prevFaction,
+				"challenger_score": challengerScore,
+				"controller_score": prevScore,
 			}), true
 		}
 
-		rs.ControllingFaction[districtID] = factionID
-		ds := rs.DistrictSovereignty[districtID]
-		ds.DistrictID = districtID
-		ds.ControllingFaction = factionID
-		ds.ControlSinceTick = w.Tick
-		ds.LastShiftTick = w.Tick
-		ds.ContestedCount++
-		ds.ControllerScore = challengerScore
-		rs.DistrictSovereignty[districtID] = ds
+		w.setDistrictControl(rs, districtID, factionID, challengerScore)
 
 		f.Influence += 3
 		f.Level = w.Catalog.FactionLevel(f.Influence)
@@ -1814,16 +1863,6 @@ func (w *World) stepMacroVendettasAndMediation(rs *RelationEvoState) []Event {
 	var events []Event
 	spec := rs.effectiveSpec()
 
-	// Look for an active mediator cohort (public trust duty or scholar/elder).
-	var mediatorCohort *PopulationCohort
-	for i := range w.Cohorts {
-		c := &w.Cohorts[i]
-		if c.EffectivePopulation() > 0 && w.Catalog.HasPublicTrustDuty([]string{c.Profession}) {
-			mediatorCohort = c
-			break
-		}
-	}
-
 	processed := 0
 	for i := range rs.Grudges {
 		if processed >= 4 {
@@ -1837,38 +1876,7 @@ func (w *World) stepMacroVendettasAndMediation(rs *RelationEvoState) []Event {
 			continue
 		}
 
-		// Try mediation first when intensity is moderate and a public-trust mediator exists.
-		if mediatorCohort != nil && g.Intensity < 65 {
-			bloodMoney := maxInt64(spec.DefaultBloodMoneyCoins, int64(g.Intensity/4))
-			if paid, ok := rs.transferBloodMoney(w, g.OffenderID, g.AggrievedID, g.OffenderClanID, g.AggrievedClanID, bloodMoney); ok {
-				g.Resolved = true
-				g.Resolution = "mediated"
-				g.BloodMoneyPaid = paid
-				g.LastActionTick = w.Tick
-				rs.clanTrustDelta(g.AggrievedClanID, g.OffenderClanID, 2)
-				ev := Event{
-					ID:       w.NextID,
-					Tick:     w.Tick,
-					ActorID:  mediatorCohort.ID,
-					TargetID: g.OffenderID,
-					Kind:     "feud_mediated",
-					Action:   Action{Kind: "mediate_feud", TargetID: g.OffenderID, Location: mediatorCohort.District, Price: int(paid)},
-					Payload: map[string]any{
-						"text":          fmt.Sprintf("%s mediated grudge %s between %s and %s (%d blood-money coins)", mediatorCohort.Name, g.ID, g.AggrievedID, g.OffenderID, paid),
-						"grudge_id":     g.ID,
-						"aggrieved_id":  g.AggrievedID,
-						"offender_id":   g.OffenderID,
-						"blood_money":   paid,
-						"root_event_id": g.RootEventID,
-					},
-				}
-				w.NextID++
-				events = append(events, ev)
-				processed++
-				continue
-			}
-		}
-
+		// Settlement requires the parties' explicit acceptance through mediate_feud.
 		// Otherwise escalate to cohort vendetta clash if cohorts exist on both sides.
 		cAgg := rs.findCohort(w, g.AggrievedID)
 		if cAgg == nil && g.AggrievedClanID != "" {
@@ -1892,7 +1900,7 @@ func (w *World) stepMacroVendettasAndMediation(rs *RelationEvoState) []Event {
 				}
 			}
 		}
-		if cAgg != nil && cOff != nil && cAgg.ID != cOff.ID && cAgg.EffectivePopulation() >= 8 && cOff.EffectivePopulation() >= 8 {
+		if cAgg != nil && cOff != nil && cAgg.District == cOff.District && cAgg.ID != cOff.ID && cAgg.EffectivePopulation() >= 8 && cOff.EffectivePopulation() >= 8 {
 			fighters := minInt(maxInt(2, minInt(cAgg.EffectivePopulation(), cOff.EffectivePopulation())/40), 20)
 			wOff, dOff, _ := w.applyCohortCasualtiesWithCause(cOff, maxInt(1, fighters/3), fighters/10, 0, "combat")
 			wAgg, dAgg, _ := w.applyCohortCasualtiesWithCause(cAgg, maxInt(1, fighters/4), fighters/12, 0, "combat")
@@ -2034,15 +2042,7 @@ func (w *World) stepTurfLeadershipAndCharters(rs *RelationEvoState) []Event {
 			}
 			if bestFaction != "" && bestFaction != curFaction && bestScore >= 20 &&
 				(curFaction == "" || curScore == 0 || (bestScore >= curScore+20 && bestScore*100 >= curScore*125)) {
-				rs.ControllingFaction[d.ID] = bestFaction
-				ds := rs.DistrictSovereignty[d.ID]
-				ds.DistrictID = d.ID
-				ds.ControllingFaction = bestFaction
-				ds.ControlSinceTick = w.Tick
-				ds.LastShiftTick = w.Tick
-				ds.ContestedCount++
-				ds.ControllerScore = bestScore
-				rs.DistrictSovereignty[d.ID] = ds
+				w.setDistrictControl(rs, d.ID, bestFaction, bestScore)
 
 				ev := Event{
 					ID:       w.NextID,

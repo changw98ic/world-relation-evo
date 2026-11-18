@@ -17,9 +17,17 @@ type TickDecisionLog struct {
 
 func cloneAction(x Action) Action {
 	out := x
+	if x.DueTick != nil {
+		deadline := *x.DueTick
+		out.DueTick = &deadline
+	}
 	if x.Statement != nil {
 		st := *x.Statement
 		out.Statement = &st
+	}
+	if x.Care != nil {
+		care := *x.Care
+		out.Care = &care
 	}
 	return out
 }
@@ -158,15 +166,33 @@ func (r *ReplayDecider) Decide(_ context.Context, p Perception) (Action, error) 
 	return cloneAction(act), nil
 }
 
+// DecodeWorldSnapshot restores simulation state and locates residents saved
+// before cohort expansion assigned a venue. Plain JSON decoding remains
+// available to audits that inspect the original archived facts.
+func DecodeWorldSnapshot(raw []byte) (*World, error) {
+	var w World
+	if err := json.Unmarshal(raw, &w); err != nil {
+		return nil, err
+	}
+	if err := w.InitCohortResidents(); err != nil {
+		return nil, fmt.Errorf("restore cohort residents: %w", err)
+	}
+	w.PlaceResidents()
+	return &w, nil
+}
+
 // ReplayFromCheckpoint restores a World from checkpointJSON and steps deterministically forward
 // to targetTick using only the recorded decisions in logs (zero live model calls).
 func ReplayFromCheckpoint(checkpointJSON []byte, logs []TickDecisionLog, targetTick int64) (*World, []Event, error) {
 	if len(checkpointJSON) == 0 {
 		return nil, nil, fmt.Errorf("checkpoint JSON is empty")
 	}
-	var w World
-	if err := json.Unmarshal(checkpointJSON, &w); err != nil {
+	w, err := DecodeWorldSnapshot(checkpointJSON)
+	if err != nil {
 		return nil, nil, fmt.Errorf("decode checkpoint: %w", err)
+	}
+	if err := w.VerifyHoldingBounds(); err != nil {
+		return nil, nil, fmt.Errorf("invalid checkpoint holdings: %w", err)
 	}
 	if targetTick < w.Tick {
 		return nil, nil, fmt.Errorf("target tick %d precedes checkpoint tick %d", targetTick, w.Tick)
@@ -181,7 +207,7 @@ func ReplayFromCheckpoint(checkpointJSON []byte, logs []TickDecisionLog, targetT
 		}
 		allEvents = append(allEvents, evs...)
 	}
-	return &w, allEvents, nil
+	return w, allEvents, nil
 }
 
 // MemoryInspection exposes an actor memory with explicit epistemic separation between
@@ -703,12 +729,12 @@ type CohortSummary struct {
 
 // ConservationInspection reports global demographic and M0 monetary invariants of a World.
 type ConservationInspection struct {
-	WorldID           string          `json:"world_id"`
-	Tick              int64           `json:"tick"`
-	TotalPopulation   int             `json:"total_population"`
-	LivingActors      int             `json:"living_actors"`
-	DeadActors        int             `json:"dead_actors"`
-	CohortPopulation  int             `json:"cohort_population"`
+	WorldID           string           `json:"world_id"`
+	Tick              int64            `json:"tick"`
+	TotalPopulation   int              `json:"total_population"`
+	LivingActors      int              `json:"living_actors"`
+	DeadActors        int              `json:"dead_actors"`
+	CohortPopulation  int              `json:"cohort_population"`
 	TotalCoins        int64            `json:"total_coins"`
 	ActorCoins        int64            `json:"actor_coins"`
 	CohortCoins       int64            `json:"cohort_coins"`
@@ -719,9 +745,9 @@ type ConservationInspection struct {
 	LedgerConserved   bool             `json:"ledger_conserved"`
 	LedgerError       string           `json:"ledger_error,omitempty"`
 	ActiveOffers      int              `json:"active_offers"`
-	HouseCount        int             `json:"house_count"`
-	CohortCount       int             `json:"cohort_count"`
-	Cohorts           []CohortSummary `json:"cohorts,omitempty"`
+	HouseCount        int              `json:"house_count"`
+	CohortCount       int              `json:"cohort_count"`
+	Cohorts           []CohortSummary  `json:"cohorts,omitempty"`
 }
 
 // InspectWorldConservation computes population, M0 coin conservation, treasury, active offers,

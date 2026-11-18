@@ -49,30 +49,50 @@ func (a Attributes) Meets(req map[string]int) (bool, string) {
 	return true, ""
 }
 
+// EquipSlotSpec declares an equipment slot available to qualifying actors in a world pack.
+type EquipSlotSpec struct {
+	ID            string   `json:"id"`
+	Name          string   `json:"name,omitempty"`
+	GrantedByTags []string `json:"granted_by_tags,omitempty"`
+}
+
 // ItemSpec defines generic item properties. Tier is the goods grade (1–5).
 type ItemSpec struct {
-	ID                 string   `json:"id"`
-	Name               string   `json:"name"`
-	Tier               int      `json:"tier"`
-	Edible             bool     `json:"edible,omitempty"`
-	HungerRelief       int      `json:"hunger_relief,omitempty"`
-	Potable            bool     `json:"potable,omitempty"`
-	ThirstRelief       int      `json:"thirst_relief,omitempty"`
-	WarmthBonus        int      `json:"warmth_bonus,omitempty"`
-	MedicinalHeal      int      `json:"medicinal_heal,omitempty"`
-	DiseaseCure        int      `json:"disease_cure,omitempty"`
-	SafetyBonusPct     int      `json:"safety_bonus_pct,omitempty"`
-	CombatBonus        int      `json:"combat_bonus,omitempty"`
-	Tradeable          bool     `json:"tradeable,omitempty"`
-	BatchQty           int      `json:"batch_qty,omitempty"`
-	BatchPrice         int      `json:"batch_price,omitempty"`
-	OfferThreshold     int      `json:"offer_threshold,omitempty"`
-	SurplusThreshold   int      `json:"surplus_threshold,omitempty"`
-	ShortageThreshold  int      `json:"shortage_threshold,omitempty"`
-	AcceptedCurrencies []string `json:"accepted_currencies,omitempty"`
-	BuyerRequiredTag   string   `json:"buyer_required_tag,omitempty"`
-	DualUseCurrency    string   `json:"dual_use_currency,omitempty"`
-	DualUseRate        int      `json:"dual_use_rate,omitempty"`
+	MassUnits          int64       `json:"mass_units,omitempty"`
+	NutritionUnits     int64       `json:"nutrition_units,omitempty"`
+	Living             *LivingRule `json:"living,omitempty"`
+	DurabilityBatches  int64       `json:"durability_batches,omitempty"`
+	ID                 string      `json:"id"`
+	Name               string      `json:"name"`
+	Tier               int         `json:"tier"`
+	Edible             bool                   `json:"edible,omitempty"`
+	HungerRelief       int                    `json:"hunger_relief,omitempty"`
+	Potable            bool                   `json:"potable,omitempty"`
+	ThirstRelief       int                    `json:"thirst_relief,omitempty"`
+	EnergyRelief       int                    `json:"energy_relief,omitempty"`
+	SlotChanges        map[string]int         `json:"slot_changes,omitempty"`
+	WarmthBonus        int                    `json:"warmth_bonus,omitempty"`
+	MedicinalHeal      int                    `json:"medicinal_heal,omitempty"`
+	DiseaseCure        int                    `json:"disease_cure,omitempty"`
+	SafetyBonusPct     int                    `json:"safety_bonus_pct,omitempty"`
+	CombatBonus        int                    `json:"combat_bonus,omitempty"`
+	EquipSlot          string                 `json:"equip_slot,omitempty"`
+	EquipRequiredTags  []string               `json:"equip_required_tags,omitempty"`
+	EquipMinAttributes map[string]int         `json:"equip_min_attributes,omitempty"`
+	EquipRequiredForms []string               `json:"equip_required_forms,omitempty"`
+	EquipDefenseByType map[string]DefenseRule `json:"equip_defense_by_type,omitempty"`
+	EquipSpeedBonusPct int                    `json:"equip_speed_bonus_pct,omitempty"`
+	EquipYieldBonusPct int                    `json:"equip_yield_bonus_pct,omitempty"`
+	Tradeable          bool                   `json:"tradeable,omitempty"`
+	BatchQty           int         `json:"batch_qty,omitempty"`
+	BatchPrice         int         `json:"batch_price,omitempty"`
+	OfferThreshold     int         `json:"offer_threshold,omitempty"`
+	SurplusThreshold   int         `json:"surplus_threshold,omitempty"`
+	ShortageThreshold  int         `json:"shortage_threshold,omitempty"`
+	AcceptedCurrencies []string    `json:"accepted_currencies,omitempty"`
+	BuyerRequiredTag   string      `json:"buyer_required_tag,omitempty"`
+	DualUseCurrency    string      `json:"dual_use_currency,omitempty"`
+	DualUseRate        int         `json:"dual_use_rate,omitempty"`
 }
 
 // Profession is a leveled trade (Tier 1 base or Tier 2+ advanced) with attribute entry requirements,
@@ -133,26 +153,27 @@ func (f *Faction) HasMember(id string) bool {
 
 // Recipe defines a production action with profession, guild, and location requirements.
 type Recipe struct {
-	Growth             *GrowthRule    `json:"growth,omitempty"`
-	ID                 string         `json:"id"`
-	Label              string         `json:"label"`
-	Profession         string         `json:"profession,omitempty"`
-	RequiredTag        string         `json:"required_tag,omitempty"`
-	MinProfessionLevel int            `json:"min_profession_level,omitempty"`
-	MinFactionLevel    int            `json:"min_faction_level,omitempty"`
-	NodeFeature        string         `json:"node_feature,omitempty"`
-	HouseFacility      string         `json:"house_facility,omitempty"`
-	ResourcePool       string         `json:"resource_pool,omitempty"`
-	ResourceDraw       int            `json:"resource_draw,omitempty"`
-	Ticks              int            `json:"ticks"`
-	EnergyCost         int            `json:"energy_cost"`
-	MoneyCost          int            `json:"money_cost,omitempty"`
-	Inputs             map[string]int `json:"inputs,omitempty"`
-	BonusInput         string         `json:"bonus_input,omitempty"`
-	BonusOutput        int            `json:"bonus_output,omitempty"`
-	DurableBonus       bool           `json:"durable_bonus,omitempty"`
-	OutputItem         string         `json:"output_item"`
-	OutputQty          int            `json:"output_qty"`
+	Conversion         *MaterialConversion `json:"conversion,omitempty"`
+	Growth             *GrowthRule         `json:"growth,omitempty"`
+	ID                 string              `json:"id"`
+	Label              string              `json:"label"`
+	Profession         string              `json:"profession,omitempty"`
+	RequiredTag        string              `json:"required_tag,omitempty"`
+	MinProfessionLevel int                 `json:"min_profession_level,omitempty"`
+	MinFactionLevel    int                 `json:"min_faction_level,omitempty"`
+	NodeFeature        string              `json:"node_feature,omitempty"`
+	HouseFacility      string              `json:"house_facility,omitempty"`
+	ResourcePool       string              `json:"resource_pool,omitempty"`
+	ResourceDraw       int                 `json:"resource_draw,omitempty"`
+	Ticks              int                 `json:"ticks"`
+	EnergyCost         int                 `json:"energy_cost"`
+	MoneyCost          int                 `json:"money_cost,omitempty"`
+	Inputs             map[string]int      `json:"inputs,omitempty"`
+	BonusInput         string              `json:"bonus_input,omitempty"`
+	BonusOutput        int                 `json:"bonus_output,omitempty"`
+	DurableBonus       bool                `json:"durable_bonus,omitempty"`
+	OutputItem         string              `json:"output_item"`
+	OutputQty          int                 `json:"output_qty"`
 }
 
 // TagProfile describes the economic and social role of an identity tag or profession.
@@ -166,6 +187,8 @@ type TagProfile struct {
 
 // Catalog holds all declarative rules for capabilities, items, professions, recipes, ecology, logistics, rituals, and lifecycle.
 type Catalog struct {
+	HouseWear              *HouseWearRule                `json:"house_wear,omitempty"`
+	Production             ProductionSpec                `json:"production"`
 	TagActions             map[string][]string           `json:"tag_actions"`
 	Items                  map[string]ItemSpec           `json:"items"`
 	Professions            []Profession                  `json:"professions"`
@@ -189,6 +212,7 @@ type Catalog struct {
 	CommChannels           map[string]CommChannelSpec    `json:"comm_channels,omitempty"`
 	CombatProfiles         []CombatProfileSpec           `json:"combat_profiles,omitempty"`
 	ActionSpecs            map[string]ActionSpec         `json:"action_specs,omitempty"`
+	EquipSlots             map[string]EquipSlotSpec      `json:"equip_slots,omitempty"`
 	StateSlots             map[string]StateSlotSpec      `json:"state_slots,omitempty"`
 	Forms                  map[string]FormSpec           `json:"forms,omitempty"`
 	Transitions            map[string]TransitionSpec     `json:"transitions,omitempty"`
@@ -198,9 +222,11 @@ type Catalog struct {
 }
 
 func DefaultCatalog() Catalog {
-	return Catalog{
+	catalog := Catalog{
+		HouseWear:  func() *HouseWearRule { rule := DefaultHouseWearRule(); return &rule }(),
+		Production: DefaultProductionSpec(),
 		TagActions: map[string][]string{
-			"resident": {"refuel", "harvest", "start_plan", "abandon_plan", "wait", "move", "move_venue", "enter_house", "leave_house", "sleep", "eat", "drink", "relieve", "medicate", "speak", "repair_house", "transfer_house", "upgrade_house", "maintain_infra", "join_faction", "join_profession", "marry", "swear_bond", "mediate_feud"},
+			"resident": {"equip", "unequip", "refuel", "harvest", "propose_growth_care", "accept_growth_care", "dispatch_harvest", "start_plan", "abandon_plan", "wait", "move", "move_venue", "enter_house", "leave_house", "sleep", "begin_rest", "end_rest", "eat", "drink", "relieve", "medicate", "speak", "repair_house", "transfer_house", "upgrade_house", "maintain_infra", "join_faction", "join_profession", "marry", "swear_bond", "mediate_feud"},
 			"trader":   {"propose_agreement", "accept_agreement", "reject_agreement", "fulfill_agreement", "accept_loan", "reject_loan", "cancel_loan", "offer", "accept", "reject", "borrow_loan", "repay_loan", "foreclose_collateral"},
 			"fighter":  {"attack", "avenge_feud", "claim_turf"},
 			"healer":   {"heal"},
@@ -231,7 +257,7 @@ func DefaultCatalog() Catalog {
 			"nightsoil": {ID: "nightsoil", Name: "collected organic waste", Tier: 1},
 			"paper":     {ID: "paper", Name: "paper sheets", Tier: 1, Tradeable: true, BatchQty: 1, BatchPrice: 1},
 			"ink":       {ID: "ink", Name: "writing ink", Tier: 1, Tradeable: true, BatchQty: 1, BatchPrice: 1},
-			"calf":      {ID: "calf", Name: "cattle calf", Tier: 1, Tradeable: true, BatchQty: 1, BatchPrice: 2},
+			"calf":      {ID: "calf", Name: "cattle calf", Tier: 1, Tradeable: true, BatchQty: 1, BatchPrice: 2, Living: DefaultCattleLivingRule()},
 
 			"food": {ID: "food", Name: "grain rations", Tier: 1, Edible: true, HungerRelief: 1,
 				Tradeable: true, BatchQty: 2, BatchPrice: 2, OfferThreshold: 6, SurplusThreshold: 8, ShortageThreshold: 4},
@@ -247,15 +273,15 @@ func DefaultCatalog() Catalog {
 				Tradeable: true, BatchQty: 2, BatchPrice: 3, OfferThreshold: 3, SurplusThreshold: 3, ShortageThreshold: 1},
 			"ore": {ID: "ore", Name: "ironstone ore", Tier: 1,
 				Tradeable: true, BatchQty: 2, BatchPrice: 2, OfferThreshold: 4, SurplusThreshold: 4, ShortageThreshold: 1},
-			"tools": {ID: "tools", Name: "hand tools", Tier: 3, SafetyBonusPct: 20,
+			"tools": {ID: "tools", Name: "hand tools", Tier: 3, SafetyBonusPct: 20, DurabilityBatches: 24,
 				Tradeable: true, BatchQty: 1, BatchPrice: 4, OfferThreshold: 2, SurplusThreshold: 2, ShortageThreshold: 1},
 			"herb": {ID: "herb", Name: "mountain herbs", Tier: 1,
 				Tradeable: true, BatchQty: 2, BatchPrice: 2, OfferThreshold: 4, SurplusThreshold: 4, ShortageThreshold: 2},
 			"medicine": {ID: "medicine", Name: "herbal medicine", Tier: 3, MedicinalHeal: 20, DiseaseCure: 1,
 				Tradeable: true, BatchQty: 1, BatchPrice: 3, OfferThreshold: 3, SurplusThreshold: 3, ShortageThreshold: 1},
-			"choice_grain": {ID: "choice_grain", Name: "choice grain", Tier: 2, Edible: true, HungerRelief: 2,
+			"choice_grain": {ID: "choice_grain", Name: "choice grain", Tier: 2, Edible: true, HungerRelief: 1,
 				Tradeable: true, BatchQty: 2, BatchPrice: 4, OfferThreshold: 4, SurplusThreshold: 5, ShortageThreshold: 2},
-			"fine_tools": {ID: "fine_tools", Name: "fine tool sets", Tier: 4, SafetyBonusPct: 40, CombatBonus: 2,
+			"fine_tools": {ID: "fine_tools", Name: "fine tool sets", Tier: 4, SafetyBonusPct: 40, CombatBonus: 2, DurabilityBatches: 24,
 				Tradeable: true, BatchQty: 1, BatchPrice: 8, OfferThreshold: 2, SurplusThreshold: 2, ShortageThreshold: 1},
 			"tonic": {ID: "tonic", Name: "herbal tonics", Tier: 4, MedicinalHeal: 35, DiseaseCure: 2,
 				Tradeable: true, BatchQty: 1, BatchPrice: 8, OfferThreshold: 2, SurplusThreshold: 2, ShortageThreshold: 1},
@@ -269,7 +295,7 @@ func DefaultCatalog() Catalog {
 				Tradeable: true, BatchQty: 1, BatchPrice: 5, OfferThreshold: 2, SurplusThreshold: 2, ShortageThreshold: 1},
 			"bounty_writ": {ID: "bounty_writ", Name: "yamen bounty writ", Tier: 3,
 				Tradeable: true, BatchQty: 1, BatchPrice: 5, OfferThreshold: 2, SurplusThreshold: 2, ShortageThreshold: 1},
-			"livestock": {ID: "livestock", Name: "adult cattle", Tier: 2,
+			"livestock": {ID: "livestock", Name: "adult cattle", Tier: 2, Living: DefaultCattleLivingRule(),
 				Tradeable: true, BatchQty: 1, BatchPrice: 5, OfferThreshold: 3, SurplusThreshold: 4, ShortageThreshold: 1},
 			"meat": {ID: "meat", Name: "cured meat", Tier: 2, Edible: true, HungerRelief: 2,
 				Tradeable: true, BatchQty: 2, BatchPrice: 4, OfferThreshold: 4, SurplusThreshold: 5, ShortageThreshold: 2},
@@ -327,11 +353,11 @@ func DefaultCatalog() Catalog {
 			{ID: "gang_boss", Name: "帮主", Tier: 2, Guild: "gang_guild", ParentProfession: "gangster", MinParentLevel: 2, Requirements: map[string]int{"strength": 10, "insight": 8, "spirit": 9}, MaxLevel: 6, YieldEvery: 2, BaseYieldBonus: 1, CombatBonusPerLevel: 3, Grants: []string{"fighter", "outlaw", "gang"}, Ranks: []string{"分堂舵主", "双花大红棍", "帮派龙头"}},
 		},
 		Recipes: []Recipe{
-			{ID: "compost_waste", Label: "Mature collected organic waste into compost", Profession: "farmer", MinProfessionLevel: 1, HouseFacility: "compost_pit", Ticks: 2, EnergyCost: 6, Inputs: map[string]int{"nightsoil": 3}, OutputItem: "compost", OutputQty: 1, Growth: &GrowthRule{DurationTicks: 60 * TicksPerDay, MaintenanceIntervalTicks: TicksPerDay, Supplies: map[string]int{"water": 1}, Source: "UMN Extension: well-managed warm-season compost 2-4 months; preset uses 60 days"}},
+			{ID: "compost_waste", Label: "Mature collected organic waste into compost", Profession: "farmer", MinProfessionLevel: 1, HouseFacility: "compost_pit", Ticks: 2, EnergyCost: 6, Inputs: map[string]int{"nightsoil": 3}, OutputItem: "compost", OutputQty: 1, Growth: &GrowthRule{CareWorkersPerBatch: 1, FailureAfterTicks: 7 * TicksPerDay, DurationTicks: 60 * TicksPerDay, MaintenanceIntervalTicks: TicksPerDay, Supplies: map[string]int{"water": 1}, Source: "UMN Extension: well-managed warm-season compost 2-4 months; preset uses 60 days"}},
 
 			{ID: "make_paper", Label: "Prepare paper from timber pulp", Profession: "scholar", MinProfessionLevel: 1, NodeFeature: "academy", Ticks: 3, EnergyCost: 8, Inputs: map[string]int{"timber": 1, "water": 1}, OutputItem: "paper", OutputQty: 1},
 			{ID: "make_ink", Label: "Prepare writing ink from plant pigment", Profession: "scholar", MinProfessionLevel: 1, NodeFeature: "academy", Ticks: 3, EnergyCost: 8, Inputs: map[string]int{"herb": 1, "water": 1}, OutputItem: "ink", OutputQty: 1},
-			{ID: "raise_livestock", Label: "Raise juvenile stock to breeding maturity", Profession: "herder", MinProfessionLevel: 1, NodeFeature: "pasture", Ticks: 3, EnergyCost: 11, Inputs: map[string]int{"calf": 1}, Growth: &GrowthRule{DurationTicks: 450 * TicksPerDay, MaintenanceIntervalTicks: TicksPerDay, Supplies: map[string]int{"water": 1}, ResourcePool: "pasture_grass", ResourceDraw: 2, Source: "Penn State Extension: heifers ready for breeding at 13-15 months; preset uses 450 days"}, OutputItem: "livestock", OutputQty: 1},
+			{ID: "raise_livestock", Label: "Raise juvenile stock to breeding maturity", Profession: "herder", MinProfessionLevel: 1, NodeFeature: "pasture", Ticks: 3, EnergyCost: 11, Inputs: map[string]int{"calf": 1}, Growth: &GrowthRule{CareWorkersPerBatch: 1, FailureAfterTicks: 7 * TicksPerDay, DurationTicks: 450 * TicksPerDay, MaintenanceIntervalTicks: TicksPerDay, Supplies: map[string]int{"water": 1}, ResourcePool: "pasture_grass", ResourceDraw: 2, Source: "Penn State Extension: heifers ready for breeding at 13-15 months; preset uses 450 days"}, OutputItem: "livestock", OutputQty: 1},
 
 			{
 				ID: "save_seeds", Label: "Select crop seed from stored grain",
@@ -350,7 +376,7 @@ func DefaultCatalog() Catalog {
 				ID: "make_compost", Label: "Turn 2 compost in the yard compost pit",
 				Profession: "farmer", MinProfessionLevel: 1, HouseFacility: "compost_pit",
 				Ticks: 2, EnergyCost: 6, Inputs: map[string]int{"food": 2},
-				Growth:     &GrowthRule{DurationTicks: 60 * TicksPerDay, MaintenanceIntervalTicks: TicksPerDay, Supplies: map[string]int{"water": 1}, Source: "UMN Extension: well-managed warm-season compost 2-4 months; preset uses 60 days"},
+				Growth:     &GrowthRule{CareWorkersPerBatch: 1, FailureAfterTicks: 7 * TicksPerDay, DurationTicks: 60 * TicksPerDay, MaintenanceIntervalTicks: TicksPerDay, Supplies: map[string]int{"water": 1}, Source: "UMN Extension: well-managed warm-season compost 2-4 months; preset uses 60 days"},
 				OutputItem: "compost", OutputQty: 2,
 			},
 			{
@@ -360,8 +386,8 @@ func DefaultCatalog() Catalog {
 				Ticks: 4, EnergyCost: 14,
 				Inputs:     map[string]int{"seeds": 1, "water": 1},
 				BonusInput: "compost", BonusOutput: 1,
-				OutputItem: "food", OutputQty: 2,
-				Growth: &GrowthRule{DurationTicks: 120 * TicksPerDay, MaintenanceIntervalTicks: TicksPerDay, Supplies: map[string]int{"water": 1}, Source: "FAO crop water needs: wheat 120-150 days; preset uses 120 days"},
+				OutputItem: "food", OutputQty: 1200,
+				Growth: &GrowthRule{CareWorkersPerBatch: 1, FailureAfterTicks: 7 * TicksPerDay, DurationTicks: 120 * TicksPerDay, MaintenanceIntervalTicks: TicksPerDay, Supplies: map[string]int{"water": 1}, Source: "FAO crop water needs: wheat 120-150 days; preset uses 120 days"},
 			},
 			{
 				ID: "thresh_choice_grain", Label: "Thresh 2 choice grain for the guild stores",
@@ -455,7 +481,7 @@ func DefaultCatalog() Catalog {
 				ID: "refine_elixir_tonic", Label: "Refine 3 spirit tonics from rare mountain herbs",
 				Profession: "alchemist", MinProfessionLevel: 1, HouseFacility: "herb_rack",
 				Ticks: 3, EnergyCost: 10,
-				Inputs:     map[string]int{"rare_herb": 1, "water": 1},
+				Inputs:     map[string]int{"rare_herb": 1, "water": 2},
 				OutputItem: "tonic", OutputQty: 3,
 			},
 			{
@@ -502,7 +528,7 @@ func DefaultCatalog() Catalog {
 				Ticks: 3, EnergyCost: 11,
 				BonusInput: "water", BonusOutput: 1,
 				OutputItem: "calf", OutputQty: 1,
-				Growth: &GrowthRule{DurationTicks: 283 * TicksPerDay, MaintenanceIntervalTicks: TicksPerDay, Supplies: map[string]int{"water": 1}, ResourcePool: "pasture_grass", ResourceDraw: 2, Parents: map[string]int{"livestock": 2}, Source: "UNL Beef: cattle gestation typically 283 days; breeding pair and care inputs declared by this preset"},
+				Growth: &GrowthRule{CareWorkersPerBatch: 1, FailureAfterTicks: 7 * TicksPerDay, DurationTicks: 283 * TicksPerDay, MaintenanceIntervalTicks: TicksPerDay, Parents: map[string]int{"livestock": 2}, Source: "UNL Beef: cattle gestation typically 283 days; breeding pair and care inputs declared by this preset"},
 			},
 			{
 				ID: "butcher_stock", Label: "Dress 1 livestock into 3 cured meat rations",
@@ -776,6 +802,7 @@ func DefaultCatalog() Catalog {
 			},
 		},
 	}
+	return withProductionMaterials(catalog)
 }
 
 // DefaultFactions returns the village guilds. Members and levels are seeded by Village.
@@ -1014,35 +1041,19 @@ func (c Catalog) ProfessionGating(a Actor, r Recipe) (bool, string) {
 	return true, ""
 }
 
-// RecipeYield returns the settled output count including bonus input, profession mastery, advanced career tier, and guild standing.
-func (c Catalog) RecipeYield(a Actor, r Recipe, bonus bool) int {
-	if r.Growth != nil {
-		return r.OutputQty
-	}
+// RecipeYield is the declared material conversion per batch. Skill and guild
+// standing grant access and experience, never additional matter or nutrition.
+// A biological bonus is an explicit addition to the configured growth budget.
+func (c Catalog) RecipeYield(_ Actor, r Recipe, bonus bool) int {
 	yield := r.OutputQty
-	if bonus {
+	if bonus && c.ConsumablesYieldBonus(r) {
 		yield += r.BonusOutput
 	}
-	if prof, ok := c.ProfessionByID(r.Profession); ok {
-		yield += prof.BaseYieldBonus
-		if level := a.Professions[r.Profession]; level > 1 && prof.YieldEvery > 0 {
-			yield += (level - 1) / prof.YieldEvery
-		}
-		for _, adv := range c.Professions {
-			if adv.ParentProfession == r.Profession {
-				if advLevel := a.Professions[adv.ID]; advLevel > 0 {
-					yield += adv.BaseYieldBonus
-					if advLevel > 1 && adv.YieldEvery > 0 {
-						yield += (advLevel - 1) / adv.YieldEvery
-					}
-				}
-			}
-		}
-		if guildLevel := a.GuildLevels[prof.Guild]; guildLevel > 1 {
-			yield += (guildLevel - 1) / 2
-		}
-	}
 	return yield
+}
+
+func (c Catalog) ConsumablesYieldBonus(r Recipe) bool {
+	return r.Growth != nil && r.BonusInput != "" && !r.DurableBonus && r.BonusOutput > 0
 }
 
 // CraftXP returns the profession experience earned by completing a recipe.
@@ -1131,6 +1142,7 @@ func (c Catalog) DesiredStock(tags []string, item string) int {
 
 func CloneCatalog(c Catalog) Catalog {
 	out := Catalog{
+		Production:             c.Production,
 		TagActions:             make(map[string][]string, len(c.TagActions)),
 		Items:                  make(map[string]ItemSpec, len(c.Items)),
 		Professions:            make([]Profession, len(c.Professions)),
@@ -1142,14 +1154,33 @@ func CloneCatalog(c Catalog) Catalog {
 		Lifecycle:              c.Lifecycle,
 		Governance:             c.Governance,
 	}
+	if c.HouseWear != nil {
+		rule := *c.HouseWear
+		out.HouseWear = &rule
+	}
+	out.Production.FacilityCapacity = cloneInt64Map(c.Production.FacilityCapacity)
 	for k, v := range c.TagActions {
 		out.TagActions[k] = append([]string(nil), v...)
 	}
 	for k, v := range c.Items {
 		ic := v
+		if v.Living != nil {
+			living := *v.Living
+			living.Supplies = cloneInt64Map(v.Living.Supplies)
+			ic.Living = &living
+		}
 		if v.AcceptedCurrencies != nil {
 			ic.AcceptedCurrencies = append([]string(nil), v.AcceptedCurrencies...)
 		}
+		ic.SlotChanges = cloneIntMap(v.SlotChanges)
+		if v.EquipRequiredTags != nil {
+			ic.EquipRequiredTags = append([]string(nil), v.EquipRequiredTags...)
+		}
+		ic.EquipMinAttributes = cloneIntMap(v.EquipMinAttributes)
+		if v.EquipRequiredForms != nil {
+			ic.EquipRequiredForms = append([]string(nil), v.EquipRequiredForms...)
+		}
+		ic.EquipDefenseByType = cloneDefenseMap(v.EquipDefenseByType)
 		out.Items[k] = ic
 	}
 	for i, p := range c.Professions {
@@ -1166,6 +1197,10 @@ func CloneCatalog(c Catalog) Catalog {
 	}
 	for i, r := range c.Recipes {
 		rc := r
+		if r.Conversion != nil {
+			conversion := *r.Conversion
+			rc.Conversion = &conversion
+		}
 		rc.Growth = cloneGrowthRule(r.Growth)
 		if r.Inputs != nil {
 			rc.Inputs = make(map[string]int, len(r.Inputs))
@@ -1238,6 +1273,10 @@ func CloneCatalog(c Catalog) Catalog {
 			dc.TriggerSeasons = append([]string(nil), dis.TriggerSeasons...)
 			dc.TargetFeatures = append([]string(nil), dis.TargetFeatures...)
 			dc.ResourceDamagePct = cloneIntMap(dis.ResourceDamagePct)
+			if dis.YieldPct != nil {
+				yp := *dis.YieldPct
+				dc.YieldPct = &yp
+			}
 			out.Disasters[i] = dc
 		}
 	}
@@ -1317,6 +1356,16 @@ func CloneCatalog(c Catalog) Catalog {
 		out.ActionSpecs = make(map[string]ActionSpec, len(c.ActionSpecs))
 		for k, spec := range c.ActionSpecs {
 			out.ActionSpecs[k] = CloneActionSpec(spec)
+		}
+	}
+	if c.EquipSlots != nil {
+		out.EquipSlots = make(map[string]EquipSlotSpec, len(c.EquipSlots))
+		for k, es := range c.EquipSlots {
+			ec := es
+			if es.GrantedByTags != nil {
+				ec.GrantedByTags = append([]string(nil), es.GrantedByTags...)
+			}
+			out.EquipSlots[k] = ec
 		}
 	}
 	if c.StateSlots != nil {

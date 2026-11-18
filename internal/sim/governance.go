@@ -173,6 +173,11 @@ func (w *World) TotalCoins() int64 {
 	}
 	for i := range w.Cohorts {
 		total += w.Cohorts[i].MoneyPool
+		for _, member := range w.Cohorts[i].Members {
+			if !member.Dead {
+				total += int64(member.Money)
+			}
+		}
 	}
 	return total
 }
@@ -590,12 +595,11 @@ func (w *World) stepCohortProtectionRackets() []Event {
 				smashedItem = itemIDs[0]
 				smashedQty = minInt64(smashBatches*2, victim.ItemPool[smashedItem]/25)
 				if smashedQty > 0 {
-					victim.ItemPool[smashedItem] -= smashedQty
-					if primaryGang.ItemPool == nil {
-						primaryGang.ItemPool = map[string]int64{}
-					}
-					primaryGang.ItemPool[smashedItem] += smashedQty / 2 // half looted, half ruined in stall smash
-					w.recordLedgerItemConsumed(smashedItem, smashedQty-smashedQty/2)
+					looted := smashedQty / 2 // half looted, half ruined in stall smash
+					ruined := smashedQty - looted
+					w.adjustCohortItem(victim, smashedItem, -looted, false)
+					w.adjustCohortItem(primaryGang, smashedItem, looted, false)
+					w.adjustCohortItem(victim, smashedItem, -ruined, true)
 				}
 			}
 

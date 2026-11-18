@@ -18,6 +18,7 @@ import (
 
 	"github.com/changw98ic/world-relation-evo/internal/agent"
 	"github.com/changw98ic/world-relation-evo/internal/pack"
+	"github.com/changw98ic/world-relation-evo/internal/runtrace"
 	"github.com/changw98ic/world-relation-evo/internal/sim"
 	"github.com/changw98ic/world-relation-evo/internal/store"
 )
@@ -59,12 +60,14 @@ func runArgs(args []string, stdout, stderr io.Writer) error {
 			return runInspect(args[1:], stdout, stderr)
 		case "replay":
 			return runReplay(args[1:], stdout, stderr)
+		case "audit-trace":
+			return runTraceAudit(args[1:], stdout, stderr)
 		}
 	}
 	return runSim(args, stdout, stderr)
 }
 
-func runSim(args []string, stdout, stderr io.Writer) error {
+func runSim(args []string, stdout, stderr io.Writer) (runErr error) {
 	fs := flag.NewFlagSet("wre", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	id := fs.String("world", "village-30", "world ID")
@@ -72,7 +75,7 @@ func runSim(args []string, stdout, stderr io.Writer) error {
 	steps := fs.Int("steps", 24, "quarter-hour ticks (15m each) to run; 0 runs continuously")
 	pace := fs.Duration("pace", time.Second, "real delay per simulation tick")
 	mode := fs.String("decider", "jev", "jev (production) or rules (offline test)")
-	focalLimit := fs.Int("focal-limit", 0, "max focal Jev/LLM calls per tick (0 auto-caps at 8 when pop > 30)")
+	focalLimit := fs.Int("focal-limit", 0, "max focal actors using Jev per tick (0 auto-caps at 8 when pop > 30)")
 	focalStride := fs.Int("focal-stride", 1, "run focal Jev/LLM calls every N ticks when tiered LOD is active")
 	compact := fs.Bool("compact-events", false, "persist only high-value causal/economic/progression events")
 	quiet := fs.Bool("quiet", false, "suppress per-event stdout NDJSON and log periodic day summaries to stderr")
@@ -83,9 +86,13 @@ func runSim(args []string, stdout, stderr io.Writer) error {
 	outCheckpoint := fs.String("out-checkpoint", "", "optional path to write initial World checkpoint JSON before stepping")
 	outDecisions := fs.String("out-decisions", "", "optional path to write recorded per-tick TickDecisionLog JSON array")
 	outEvents := fs.String("out-events", "", "optional path to write emitted events JSON array")
+	traceDir := fs.String("trace-dir", "", "write original model calls, perceptions and settled world states to a new evidence directory")
 
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected arguments: %q", fs.Args())
 	}
 	if *steps < 0 || *pace < 0 || *pop <= 0 || *checkpointEvery < 0 {
 		return fmt.Errorf("steps, pace, pop, and checkpoint-every must be valid nonnegative/positive values")
@@ -100,7 +107,34 @@ func runSim(args []string, stdout, stderr io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	d, err := buildDecider(*mode)
+	var evidence *runtrace.Writer
+	var traceTick int64
+	var completedSteps int
+	if *traceDir != "" {
+		var err error
+		evidence, err = runtrace.Create(*traceDir)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			message := ""
+			if runErr != nil {
+				message = runErr.Error()
+			} else if ctx.Err() != nil {
+				message = ctx.Err().Error()
+			}
+			endErr := evidence.Record("run_end", traceTick, "", map[string]any{
+				"completed": runErr == nil && *steps > 0 && completedSteps == *steps,
+				"error":     message,
+			})
+			runErr = errors.Join(runErr, endErr, evidence.Close())
+		}()
+	}
+	if err := evidence.Record("run_start", 0, "", map[string]any{"decider": *mode, "requested_steps": *steps}); err != nil {
+		return err
+	}
+
+	d, err := buildDecider(*mode, evidence)
 	if err != nil {
 		return err
 	}
@@ -191,6 +225,15 @@ func runSim(args []string, stdout, stderr io.Writer) error {
 	if err := w.Catalog.ValidatePhysicalRules(w.FlowGrid); err != nil {
 		return err
 	}
+	if err := w.VerifyHoldingBounds(); err != nil {
+		return fmt.Errorf("invalid initial world holdings: %w", err)
+	}
+	traceTick = w.Tick
+	if evidence != nil {
+		if err := evidence.WriteJSON("initial.json", w); err != nil {
+			return err
+		}
+	}
 	if *outCheckpoint != "" {
 		if err := writeJSONFile(*outCheckpoint, w); err != nil {
 			return fmt.Errorf("write checkpoint file: %w", err)
@@ -200,12 +243,18 @@ func runSim(args []string, stdout, stderr io.Writer) error {
 	var td *agent.TieredDecider
 	if *mode == "jev" && (*focalLimit > 0 || *focalStride > 1 || w.TotalPopulation() > 30) {
 		td = agent.NewTieredDecider(d, *focalLimit)
+		active := agent.Offline()
+		active.Trace = evidence
+		td.Active = active
 		if *focalStride > 1 {
 			td.FocalStride = *focalStride
 		}
 		d = td
 	}
 
+	if err := evidence.Record("run_world", w.Tick, "", map[string]any{"world_id": w.ID, "population": w.TotalPopulation(), "tiered": td != nil}); err != nil {
+		return err
+	}
 	enc := json.NewEncoder(stdout)
 	summary := sim.NewScaleSummary()
 	var (
@@ -217,13 +266,22 @@ func runSim(args []string, stdout, stderr io.Writer) error {
 		if td != nil && w.SpotlightRumor != nil {
 			td.SetSpotlightPriority(w.Actors, w.SpotlightRumor.ActorSalience, w.Tick)
 		}
-		events, tickLog, err := w.StepRecorded(ctx, d)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil
-			}
+		traceTick = w.Tick
+		if err := evidence.Record("tick_begin", traceTick, "", map[string]any{"world": w}); err != nil {
 			return err
 		}
+		events, tickLog, err := w.StepRecorded(ctx, d)
+		if err != nil {
+			traceErr := evidence.Record("step_error", traceTick, "", map[string]any{"error": err.Error()})
+			if ctx.Err() != nil {
+				return traceErr
+			}
+			return errors.Join(err, traceErr)
+		}
+		if err := evidence.Record("tick_settled", traceTick, "", map[string]any{"world": w, "events": events, "decisions": tickLog}); err != nil {
+			return err
+		}
+		traceTick = w.Tick
 		if err := w.VerifyLedgerConservation(); err != nil {
 			return fmt.Errorf("world %q tick %d accounting: %w", w.ID, w.Tick, err)
 		}
@@ -250,7 +308,11 @@ func runSim(args []string, stdout, stderr io.Writer) error {
 					return err
 				}
 			}
+			if err := evidence.Record("tick_persisted", tickLog.Tick, "", map[string]any{"world_id": w.ID, "tick": w.Tick}); err != nil {
+				return err
+			}
 		}
+		completedSteps++
 		if !*quiet {
 			for _, e := range persisted {
 				if err = enc.Encode(e); err != nil {
@@ -321,13 +383,20 @@ func runSim(args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("write events file: %w", err)
 		}
 	}
+	if evidence != nil {
+		if err := evidence.WriteJSON("final.json", w); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-func buildDecider(mode string) (sim.Decider, error) {
+func buildDecider(mode string, evidence *runtrace.Writer) (sim.Decider, error) {
 	switch mode {
 	case "rules":
-		return agent.Offline(), nil
+		pipeline := agent.Offline()
+		pipeline.Trace = evidence
+		return pipeline, nil
 	case "jev":
 		endpoint, name := os.Getenv("WRE_MODEL_URL"), os.Getenv("WRE_MODEL")
 		if endpoint == "" || name == "" {
@@ -346,8 +415,9 @@ func buildDecider(mode string) (sim.Decider, error) {
 			return nil, fmt.Errorf("jev mode requires WRE_JEV_KEY")
 		}
 		return agent.Pipeline{
-			Selector:  agent.Jev{Endpoint: jevURL, Name: jevName, APIKey: key},
-			Generator: agent.ContentModel{Endpoint: endpoint, Name: name, APIKey: os.Getenv("WRE_MODEL_KEY")},
+			Selector:  agent.Jev{Endpoint: jevURL, Name: jevName, APIKey: key, Trace: evidence},
+			Generator: agent.ContentModel{Endpoint: endpoint, Name: name, APIKey: os.Getenv("WRE_MODEL_KEY"), Trace: evidence},
+			Trace:     evidence,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown decider %q", mode)
@@ -368,6 +438,9 @@ func runInspect(args []string, stdout, stderr io.Writer) error {
 
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected arguments: %q", fs.Args())
 	}
 	if *kind == "" {
 		return fmt.Errorf("inspect requires -kind (actor|lineage|polity|conservation)")
@@ -525,6 +598,9 @@ func runReplay(args []string, stdout, stderr io.Writer) error {
 
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected arguments: %q", fs.Args())
 	}
 	if *toTick < 0 {
 		return fmt.Errorf("replay requires -to-tick >= 0")

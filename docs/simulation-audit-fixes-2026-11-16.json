@@ -1,0 +1,2156 @@
+{
+  "date": "2026-11-16",
+  "historical": true,
+  "superseded_by": "docs/testing/README.md",
+  "validity_statement": "本文件保存上一阶段修复及当时的测试证据。引用的旧测试已清理重建，不代表当前覆盖或模拟合理性。真实模型运行发现的问题见 docs/testing/live-trace-review-2026-11-16.md。",
+  "record_count": 73,
+  "fixed_record_count": 73,
+  "scope": "73条原始记录逐条关联实现与回归。含重复记录，不表示73个独立缺陷。",
+  "records": [
+    {
+      "id": "ECO-01",
+      "group": "ecology",
+      "original_title": "普通灾害和兽潮只伤群体，已展开人物免疫",
+      "original_classification": "implementation_error",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "人物、收起的人物和匿名群体按相同暴露率受灾，人数只记一次。",
+      "code": [
+        "ecology.go: applyDisasterImpactAndRelief, applyThreatSurge",
+        "ecology_process.go: shared per-person exposure rates and actor settlement",
+        "shared population integration: anonymousCohort, reconcileCohortMemberChanges, environmental injury census and ScaleSummary actor-count subtraction"
+      ],
+      "tests": [
+        "TestEcologyAudit01ActorsAndMembersShareDisasterExposure",
+        "TestEcologyAudit01ChildrenHaveSameDisasterExposure",
+        "TestEcologyAudit01ThreatSurgeActorsAndMembers"
+      ],
+      "test_evidence": [
+        "TestEcologyAudit01ActorsAndMembersShareDisasterExposure",
+        "TestEcologyAudit01ThreatSurgeActorsAndMembers",
+        "TestEcologyAudit01ChildrenHaveSameDisasterExposure"
+      ],
+      "checks_limit_basis": [
+        "Individuals, retained cohort members and anonymous residents use the same declared exposure rates; retained members are excluded from anonymous counts.",
+        "Individual deaths use markDeadIfZero. Main hazard events include actor_wounded/actor_deaths so the population summary does not also count individual events as anonymous casualties.",
+        "Transit exclusion follows the existing Actor.InTransit stationary-exposure rule; no new numeric limit."
+      ]
+    },
+    {
+      "id": "ECO-02",
+      "group": "ecology",
+      "original_title": "一份救济水保护整个千人群体",
+      "original_classification": "implementation_error",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "减灾效果按实际物资覆盖人数计算；一份物资只保护对应人数。",
+      "code": [
+        "ecology.go: actual relief use and demand",
+        "ecology_process.go: disasterExposureRates"
+      ],
+      "tests": [
+        "TestEcologyAudit02ReliefCoverageFollowsAmount"
+      ],
+      "test_evidence": [
+        "TestEcologyAudit02ReliefCoverageFollowsAmount"
+      ],
+      "checks_limit_basis": [
+        "Coverage scales by used/needed supply. One relief unit per eight residents and the full 55 percent reduction are the existing model's parameters.",
+        "Scarce supply no longer grants full-cohort protection; zero, one and full-demand supplies are tested."
+      ]
+    },
+    {
+      "id": "ECO-03",
+      "group": "ecology",
+      "original_title": "猎人瞬间剿兽至不连通地区",
+      "original_classification": "implementation_error",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "巡山保存真实去程、工作、回程和驻地，并占用共同劳动力。战利品随队返回。",
+      "code": [
+        "ecology_patrol.go: persistent travel/work/return tasks, actual location exposure, energy, cargo delivery and worker reservations",
+        "ecology.go: per-tick patrol advancement",
+        "shared productionFreeWorkers/ecologyReservedWorkers integration"
+      ],
+      "tests": [
+        "TestEcologyAudit03PatrolExposureUsesActualLocation",
+        "TestEcologyAudit03PatrolTravelsWorksAndReturns"
+      ],
+      "test_evidence": [
+        "TestEcologyAudit03PatrolTravelsWorksAndReturns",
+        "TestEcologyAudit03PatrolExposureUsesActualLocation"
+      ],
+      "checks_limit_basis": [
+        "A patrol needs a real outbound and return route because its workers and cargo must return to the receiving cohort.",
+        "Movement uses WorldMap.NextHop and effectiveRoadCost. Work duration and energy come from an existing catalog extraction recipe for the encounter source.",
+        "Workers use the shared production labor budget and stay reserved through travel and return. Existing squad policy is retained; no new queue length, concurrency cap or retry limit was introduced.",
+        "Cargo is delivered and recorded as a completed item only after return; a lost patrol emits an explicit event."
+      ]
+    },
+    {
+      "id": "ECO-04",
+      "group": "ecology",
+      "original_title": "野外遭遇掉落不扣来源且漏记产出",
+      "original_classification": "implementation_error",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "人物和群体狩猎共用有限动物来源扣除及真实产出记账。",
+      "code": [
+        "ecology_process.go: drawEncounterLoot and harvestEncounterSource",
+        "ecology.go: actual working encounters",
+        "main-thread world.go hunt_threat uses the same finite-source helper"
+      ],
+      "tests": [
+        "TestEcologyAudit04EncounterConsumesFiniteSourceAndAccountsOutput",
+        "TestEcologyAudit04IndividualHuntUsesSourceAndLedger"
+      ],
+      "test_evidence": [
+        "TestEcologyAudit04EncounterConsumesFiniteSourceAndAccountsOutput",
+        "TestEcologyAudit04IndividualHuntUsesSourceAndLedger"
+      ],
+      "checks_limit_basis": [
+        "EncounterSpec explicitly declares SourceResource and ResourcePerKill. Each killed source is deducted before loot is considered.",
+        "Available source quantity and creature activity bound actual kills; a source with no remaining units produces no item.",
+        "All delivered loot records actual item production and passes ledger conservation."
+      ]
+    },
+    {
+      "id": "ECO-05",
+      "group": "ecology",
+      "original_title": "零掉落概率仍掉落",
+      "original_classification": "implementation_error",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "按声明概率处理掉落，取消强制最少一份；零概率没有掉落。",
+      "code": [
+        "ecology_process.go: deterministic fractional probability rounding, no forced one-item minimum",
+        "ecology_patrol.go: same loot helper for suppression"
+      ],
+      "tests": [
+        "TestEcologyAudit05ZeroAndFractionalDrops"
+      ],
+      "test_evidence": [
+        "TestEcologyAudit05ZeroAndFractionalDrops"
+      ],
+      "checks_limit_basis": [
+        "RareDropPermille is the declared probability. Zero produces zero; a one-per-thousand expectation across one thousand actual source units produces one item.",
+        "The source-boundary test permits the maximum funded kills and leaves the unfundable remainder untouched."
+      ]
+    },
+    {
+      "id": "ECO-06",
+      "group": "ecology",
+      "original_title": "停工休养仍遭受职业事故",
+      "original_classification": "implementation_error",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "职业事故只作用于实际地点中正在参与对应工作的人员。",
+      "code": [
+        "ecology_process.go: ecologyWorkingPopulation",
+        "ecology.go: task-matched accident and encounter exposure"
+      ],
+      "tests": [
+        "TestEcologyAudit06AccidentsRequireActualAvailableWork"
+      ],
+      "test_evidence": [
+        "TestEcologyAudit06AccidentsRequireActualAvailableWork"
+      ],
+      "checks_limit_basis": [
+        "Occupational exposure requires a real local, active, unstalled work reservation with matching recipe/site and actual participating workers.",
+        "RestUntilTick follows the existing rest rule. Profession alone no longer exposes idle or resting residents.",
+        "A declared zero accident probability is no longer raised to a hidden minimum."
+      ]
+    },
+    {
+      "id": "ECO-07",
+      "group": "ecology",
+      "original_title": "灾害到期后继续影响产量",
+      "original_classification": "implementation_error",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "灾害在声明到期的那个tick停止生效。",
+      "code": [
+        "ecology.go: per-tick disaster expiration and expiry-aware EcologicalYieldMultiplierPct"
+      ],
+      "tests": [
+        "TestEcologyAudit07DisasterExpiresAtItsExactTick"
+      ],
+      "test_evidence": [
+        "TestEcologyAudit07DisasterExpiresAtItsExactTick"
+      ],
+      "checks_limit_basis": [
+        "ExpiresTick is the already declared lifetime boundary. The effect ends exactly at that tick, including outside the daily ecology update."
+      ]
+    },
+    {
+      "id": "ECO-08",
+      "group": "ecology",
+      "original_title": "显式零天气产量被忽略",
+      "original_classification": "implementation_error",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "明确的零天气或季节倍率保留为停产；个人和群体在扣费前停止开工。",
+      "code": [
+        "ecology.go: map-presence checks for explicit seasonal/weather zero, removal of final 25 percent floor, morale cannot revive stopped output",
+        "main-thread production entry integration preserves explicit environmental stoppage"
+      ],
+      "tests": [
+        "TestEcologyAudit08ExplicitZeroYieldStopsProduction",
+        "TestEcologyAudit08ZeroYieldBlocksIndividualAndCohortWork"
+      ],
+      "test_evidence": [
+        "TestEcologyAudit08ExplicitZeroYieldStopsProduction",
+        "TestEcologyAudit08ZeroYieldBlocksIndividualAndCohortWork"
+      ],
+      "checks_limit_basis": [
+        "A present map entry with value zero is an explicit production stop. An absent entry remains neutral.",
+        "No new numeric limit; the hidden lower yield clamp was removed."
+      ]
+    },
+    {
+      "id": "ECO-09",
+      "group": "ecology",
+      "original_title": "计算受灾人数为零仍至少伤两人",
+      "original_classification": "implementation_error",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "取消每群体保底伤亡；零暴露产生零伤亡。",
+      "code": [
+        "ecology_process.go: shared expected-count exposure without forced injury/death minima",
+        "ecology.go: disaster settlement"
+      ],
+      "tests": [
+        "TestEcologyAudit09ZeroExposureHasNoMinimumInjuries"
+      ],
+      "test_evidence": [
+        "TestEcologyAudit09ZeroExposureHasNoMinimumInjuries"
+      ],
+      "checks_limit_basis": [
+        "Zero exposure implies zero casualties. Fractional expectations use the existing deterministic world hash instead of forcing injuries per cohort."
+      ]
+    },
+    {
+      "id": "ECO-10",
+      "group": "ecology",
+      "original_title": "林地可采集标志没有对应资源",
+      "original_classification": "implementation_error",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "可采集地形与实际资源来源同步，林地有声明的采集来源。",
+      "code": [
+        "ecology.go: DefaultResourceSpecs soil_fertility includes forage_ground"
+      ],
+      "tests": [
+        "TestEcologyAudit10ForageFeatureHasSource"
+      ],
+      "test_evidence": [
+        "TestEcologyAudit10ForageFeatureHasSource"
+      ],
+      "checks_limit_basis": [
+        "无；resource distribution now matches the existing forage_food consumption mapping."
+      ]
+    },
+    {
+      "id": "ECO-11",
+      "group": "ecology",
+      "original_title": "生物补充不依赖繁殖来源及成熟期",
+      "original_classification": "mechanism_gap",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "生物资源依赖声明亲本，新增个体先等待成熟，灭绝不再自行逆转。",
+      "code": [
+        "ecology.go: Biological/MaturityTicks/ReproductionSource resource declarations and cloned/persisted Recruitment",
+        "ecology_process.go: parent-dependent birth, pending maturation and actual mature-resource accounting",
+        "packs/mortal_watershed.json, packs/xianxia_sect.json, packs/wasteland_sector.json: explicit biological resource declarations (main thread)",
+        "internal/sim/ecology_validation.go and ValidatePhysicalRules configuration admission (main thread)"
+      ],
+      "tests": [
+        "TestEcologyAudit11ReproductionRequiresParentsAndMaturation"
+      ],
+      "test_evidence": [
+        "TestEcologyAudit11ReproductionRequiresParentsAndMaturation"
+      ],
+      "checks_limit_basis": [
+        "A biological pool reproduces only from its declared mature parent pool, and recruits become harvestable only after MaturityTicks.",
+        "Default maturity is explicitly derived as ceil(1000/RegenPermillePerDay) days, one existing configured replenishment cycle. This is a scenario period, not empirical species-age calibration.",
+        "Mature plus pending population cannot exceed the declared regional capacity. Extinction with no surviving recruits no longer spontaneously reverses.",
+        "Both the no-parent case and the legal living-parent maturation case are tested."
+      ]
+    },
+    {
+      "id": "ECO-12",
+      "group": "ecology",
+      "original_title": "所有地区自动生成可饮用水源",
+      "original_classification": "mechanism_gap",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "取消全地区自动饮水；只有真实水源或显式配置的存量可饮用。",
+      "code": [
+        "ecology.go: InitEcology removes universal potable-water seeding and respects explicit zero capacities"
+      ],
+      "tests": [
+        "TestEcologyAudit12WaterNeedsDeclaredSource"
+      ],
+      "test_evidence": [
+        "TestEcologyAudit12WaterNeedsDeclaredSource"
+      ],
+      "checks_limit_basis": [
+        "Water requires a matching declared source feature or explicit resource capacity; potable classification alone is not a water source.",
+        "Explicit zero capacity remains zero. Legitimate source-feature and explicitly declared supply cases remain usable, and source recharge is tested."
+      ]
+    },
+    {
+      "id": "ECO-13",
+      "group": "ecology",
+      "original_title": "日常天气补水与洪水不连接真实水系",
+      "original_classification": "mechanism_gap",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "真实水量沿河流或含水层移动；上游取水影响下游，洪水需要实际溢流。",
+      "code": [
+        "ecology_process.go: finite water movement over actual river/aquifer GeoFlows, simultaneous withdrawals, bounded storage and overflow",
+        "ecology.go: daily water routing before disaster triggers; DisasterSpec.FlowKind"
+      ],
+      "tests": [
+        "TestEcologyAudit13FloodRequiresConnectedOverflow",
+        "TestEcologyAudit13UpstreamExtractionChangesDownstreamWater"
+      ],
+      "test_evidence": [
+        "TestEcologyAudit13UpstreamExtractionChangesDownstreamWater",
+        "TestEcologyAudit13FloodRequiresConnectedOverflow"
+      ],
+      "checks_limit_basis": [
+        "Flow uses existing GeoFlows.Kind and ConductancePermille. Multiple outlets share the actual source stock, rather than copying it.",
+        "Recharge retains declared resource and weather parameters. Each daily update advances one flow edge; no new hidden flow speed is imposed.",
+        "Flow-linked flooding requires actual overflow in a connected water system. Storage is bounded by the existing MaxResources capacity.",
+        "Upstream extraction, full source depletion, downstream overflow, disconnected weather and ledger conservation are tested."
+      ]
+    },
+    {
+      "id": "ECO-14",
+      "group": "ecology",
+      "original_title": "所有资源保留5%不可开采",
+      "original_classification": "declared_simplification",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "移除隐藏的5%禁采份额，最后一单位资源可以正常使用。",
+      "code": [
+        "ecology.go: AvailableResource returns the full physically remaining resource"
+      ],
+      "tests": [
+        "TestEcologyAudit14LastResourceUnitCanBeExtracted"
+      ],
+      "test_evidence": [
+        "TestEcologyAudit14LastResourceUnitCanBeExtracted"
+      ],
+      "checks_limit_basis": [
+        "无；the undeclared five-percent reserve was removed uniformly for every pool. The last legal unit can be extracted and cannot be spent twice."
+      ]
+    },
+    {
+      "id": "ECO-15",
+      "group": "ecology",
+      "original_title": "默认仪式直接改变灾害持续时间和普通野兽活动",
+      "original_classification": "declared_model_rule_cross_genre",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "普通仪式只改变社会状态；物理减灾和安抚野兽需要显式超自然规则。",
+      "code": [
+        "ecology.go: ordinary default rituals retain social effects and require explicit Supernatural for objective nature effects",
+        "main-thread world.go individual ritual uses the same capability gate",
+        "main-thread world-pack ritual declarations and validation"
+      ],
+      "tests": [
+        "TestEcologyAudit15IndividualOrdinaryRitualCannotChangeNature",
+        "TestEcologyAudit15RitualObjectiveEffectsRequireExplicitCapability"
+      ],
+      "test_evidence": [
+        "TestEcologyAudit15RitualObjectiveEffectsRequireExplicitCapability",
+        "TestEcologyAudit15IndividualOrdinaryRitualCannotChangeNature"
+      ],
+      "checks_limit_basis": [
+        "The task explicitly requires ordinary historical rituals to affect morale/trust only. Objective disaster/threat effects require the world's explicit Supernatural capability declaration.",
+        "Both ordinary individual and cohort ceremonies retain social effects. The explicitly supernatural positive case still works."
+      ]
+    },
+    {
+      "id": "AG1",
+      "group": "agriculture",
+      "original_title": "异地所有者的作物成熟后没有收获出口",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "异地收获保留当地货权；授权群体经共享路容运输，个人到实际地点领取。",
+      "code": [
+        "internal/sim/growth.go: AdvanceGrowth / harvestGrowth",
+        "internal/sim/production.go: SetGrowthCare / canHarvestGrowth",
+        "internal/sim/farming_delivery.go: DispatchHarvest / dispatchCohortHarvests",
+        "internal/sim/growth_care_actions.go: 主线程接入提议、接受、代收和派送行动",
+        "internal/sim/logistics.go: 空间代理共享逐边运输容量"
+      ],
+      "tests": [
+        "TestAgricultureProductionAbsentCaretakerShareStaysLocal",
+        "TestAgricultureProductionAutomaticRemoteDelivery",
+        "TestAgricultureProductionHarvestSharesFreightCapacity",
+        "TestAgricultureProductionRemoteHarvestAndDelivery",
+        "TestAgricultureProductionStoredOwnerUsesOwnLabor",
+        "TestFreightCapacitySharesEdgesAndSurvivesSnapshot",
+        "TestFreightMarketSharesCapacityAcrossCallsAndOtherDispatches"
+      ],
+      "test_evidence": [
+        "TestAgricultureProductionRemoteHarvestAndDelivery",
+        "TestAgricultureProductionAutomaticRemoteDelivery",
+        "TestAgricultureProductionHarvestSharesFreightCapacity",
+        "TestAgricultureProductionStoredOwnerUsesOwnLabor",
+        "TestAgricultureProductionAbsentCaretakerShareStaysLocal",
+        "TestFreightCapacitySharesEdgesAndSurvivesSnapshot",
+        "TestFreightMarketSharesCapacityAcrossCallsAndOtherDispatches"
+      ],
+      "checks_limit_basis": [
+        "代收必须有双方接受且Harvest=true的协议，依据明确授权需求",
+        "货物保留产地、货主和实物分成；个人货主本人到场领取，依据不瞬移需求",
+        "宏观群体照料者代收后安排实际Shipment，时程来自道路，运量来自共享逐边FreightCapacity；无路、禁运或容量满发明确阻塞事件并留货",
+        "离场照料者的报酬作为原地已收获货权保留，不向远程库存记入"
+      ]
+    },
+    {
+      "id": "AG2",
+      "group": "agriculture",
+      "original_title": "展开群体最后一人会把在产作物留给零人口群体",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "最后匿名成员展开时迁移既有作物、田产和亲畜；具名成员仍保留个人产权。",
+      "code": [
+        "internal/sim/production.go: transferGrowingAssets",
+        "internal/sim/scale.go: HydrateActor / DehydrateActor，由人口代理集成",
+        "internal/sim/population_members.go: 完整成员保存及最后匿名人口资产转移，由人口代理集成"
+      ],
+      "tests": [
+        "TestAgricultureProductionTransferPreservesAssetsAndCare",
+        "TestAgricultureProductionTransferRetainsAnimalBatchDebt",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner",
+        "TestPopulationLastAnonymousHydrationTransfersGrowingAssets"
+      ],
+      "test_evidence": [
+        "TestAgricultureProductionTransferPreservesAssetsAndCare",
+        "TestPopulationLastAnonymousHydrationTransfersGrowingAssets",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner",
+        "TestAgricultureProductionTransferRetainsAnimalBatchDebt"
+      ],
+      "checks_limit_basis": [
+        "最后匿名人口展开时转移在产批次、田产和使用权，依据零人口群体不能继续持有在产资产",
+        "完整具名人物进入Members仅改变表示，保留原actor产权，不生成照料同意",
+        "迁移不改变批次物理产地，不清空Parents、数量、工具磨损或维护债务"
+      ]
+    },
+    {
+      "id": "AG3",
+      "group": "agriculture",
+      "original_title": "死亡继承遗漏在产作物与保留亲畜",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "死亡继承同时迁移在产作物、田产权利、保留亲畜及照料债务。",
+      "code": [
+        "internal/sim/production.go: transferGrowingAssets",
+        "internal/sim/relations_kinship.go: 人口代理继承入口",
+        "internal/sim/population_members.go: 具名成员死亡及最后匿名资产转移"
+      ],
+      "tests": [
+        "TestAgricultureProductionTransferPreservesAssetsAndCare",
+        "TestAgricultureProductionTransferRetainsAnimalBatchDebt",
+        "TestPopulationFix02InheritancePrecedesEscheat",
+        "TestPopulationFix02StoredHeirAndUnclaimedEstate",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce"
+      ],
+      "test_evidence": [
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner",
+        "TestPopulationFix02InheritancePrecedesEscheat",
+        "TestPopulationFix02StoredHeirAndUnclaimedEstate",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce",
+        "TestAgricultureProductionTransferPreservesAssetsAndCare",
+        "TestAgricultureProductionTransferRetainsAnimalBatchDebt"
+      ],
+      "checks_limit_basis": [
+        "继承流程调用统一迁移方法，转移在产物、田产、使用权、协议及维护状态，依据原有财产继承语义",
+        "原Parents映射和货物数量保留；人口集成回归直接覆盖Growth/Fields，Parents保留由农业迁移测试覆盖"
+      ]
+    },
+    {
+      "id": "AG4",
+      "group": "agriculture",
+      "original_title": "田产面积、占用与使用权没有进入农业结算",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "田块保存面积、地点、所有权和使用权；播种占地，收获前不能重复使用。",
+      "code": [
+        "internal/sim/production.go: FieldAsset / InitProductionAssets / fieldAvailable",
+        "internal/sim/growth.go: FieldID / AreaM2及待收占地",
+        "internal/sim/world.go: Task.FieldID及craft入口",
+        "internal/sim/village_food.go: 初始在产田作绑定田块",
+        "internal/pack/pack.go: 主线程场景田产接入"
+      ],
+      "tests": [
+        "TestAgricultureProductionFieldAreaAndPersistence",
+        "TestAgricultureProductionZeroInitialLandBudget",
+        "TestPopulationLastAnonymousHydrationTransfersGrowingAssets"
+      ],
+      "test_evidence": [
+        "TestAgricultureProductionFieldAreaAndPersistence",
+        "TestAgricultureProductionZeroInitialLandBudget",
+        "TestPopulationLastAnonymousHydrationTransfersGrowingAssets"
+      ],
+      "checks_limit_basis": [
+        "田块为持久资产，独立记录所有者、使用者、位置与面积，依据任务明确需求",
+        "准备阶段、在产阶段与成熟待收持续占用同一面积；收获才释放，依据一地不能重复播种",
+        "默认每批1000平方米、初始每农民1000平方米来自目录的明确场景预算，非现实农学标定；不随人口变化或播种自动扩地",
+        "显式0初始分地合法，不创建0面积田块；每批用地仍须为正，外部校验由主线程负责"
+      ]
+    },
+    {
+      "id": "AG5",
+      "group": "agriculture",
+      "original_title": "被监禁或零劳动人口仍能照料和自动收获",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "照料和收获使用真实可用劳动，监禁、休养和零劳力不能继续劳动。",
+      "code": [
+        "internal/sim/production.go: productionFreeWorkers / reserveProductionWorkers / canHarvestGrowth",
+        "internal/sim/growth.go: 当地照料、准备劳动、普通加工劳动及收获劳动",
+        "internal/sim/scale.go: 使用匿名有效劳动人数",
+        "internal/sim/ecology_patrol.go: 与生态巡山共享劳动占用"
+      ],
+      "tests": [
+        "TestAgricultureProductionCareUsesLaborAndExplicitConsent",
+        "TestAgricultureProductionEnergyExcludesStoredMembers",
+        "TestAgricultureProductionStoredOwnerUsesOwnLabor",
+        "TestPhysicalCohortWorkTakesConfiguredTime"
+      ],
+      "test_evidence": [
+        "TestAgricultureProductionCareUsesLaborAndExplicitConsent",
+        "TestAgricultureProductionStoredOwnerUsesOwnLabor",
+        "TestPhysicalCohortWorkTakesConfiguredTime",
+        "TestAgricultureProductionEnergyExcludesStoredMembers"
+      ],
+      "checks_limit_basis": [
+        "监禁、休养、途中、异地和正在执行个人任务者不能承担当tick额外照料，依据当前可达的实际劳动冲突",
+        "同一批准备或加工占用的工人与当tick照料/收获劳动合计不能超过可用人数；群体排除具名Members和已派巡山人员",
+        "照料需求来自GrowthRule.CareWorkersPerBatch；默认场景每批每维护间隔1人；明确0表示无需人工，负值拒绝"
+      ]
+    },
+    {
+      "id": "AG6",
+      "group": "agriculture",
+      "original_title": "生物配方消耗肥料与工具却丢弃增产结果",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "实际肥料投入进入生物配方的声明产量预算；不再扣肥后丢弃结果。",
+      "code": [
+        "internal/sim/catalog.go: RecipeYield / ConsumablesYieldBonus",
+        "internal/sim/world.go: 个人craft肥料消耗",
+        "internal/sim/scale.go: 群体部分施肥消费与数量",
+        "internal/sim/growth.go: FertilizerBonus持久化"
+      ],
+      "tests": [
+        "TestAgricultureProductionFertilizerEnvironmentAndSnapshot",
+        "TestAgricultureProductionPartialFertilizerAndBatchParity",
+        "TestBiologicalOutputUsesConfiguredQuantity",
+        "TestFarmerDiversifiedTasksAndCompostYield"
+      ],
+      "test_evidence": [
+        "TestAgricultureProductionFertilizerEnvironmentAndSnapshot",
+        "TestAgricultureProductionPartialFertilizerAndBatchParity",
+        "TestBiologicalOutputUsesConfiguredQuantity",
+        "TestFarmerDiversifiedTasksAndCompostYield"
+      ],
+      "checks_limit_basis": [
+        "只有有明确定义增产结果的消耗型生长投入才消费并增加潜在产量；不再为无效果的耐用工具/普通加工增产材料扣库存",
+        "群体按实际肥料库存施肥相应批数，不要求所有批次都有肥料",
+        "施肥增产量随批次保存，不被成熟结算覆盖，依据复现的投入消耗但效果丢失错误"
+      ]
+    },
+    {
+      "id": "AG7",
+      "group": "agriculture",
+      "original_title": "农业环境产量规则被固定产量覆盖",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "按生长过程的实际环境计算减产，个人和群体采用相同的逐批取整。",
+      "code": [
+        "internal/sim/growth.go: EnvironmentTotal / EnvironmentTicks及逐批成熟产量",
+        "internal/sim/production.go: productionStartBlockReason的零环境倍率检查",
+        "internal/sim/scale.go: 开工前零生态倍率检查及非生长逐批取整",
+        "internal/sim/world.go: 共享开工规则"
+      ],
+      "tests": [
+        "TestAgricultureProductionFertilizerEnvironmentAndSnapshot",
+        "TestAgricultureProductionPartialFertilizerAndBatchParity",
+        "TestEcologyAudit08ZeroYieldBlocksIndividualAndCohortWork"
+      ],
+      "test_evidence": [
+        "TestAgricultureProductionFertilizerEnvironmentAndSnapshot",
+        "TestAgricultureProductionPartialFertilizerAndBatchParity",
+        "TestEcologyAudit08ZeroYieldBlocksIndividualAndCohortWork"
+      ],
+      "checks_limit_basis": [
+        "按生长推进时长累计当时环境倍率，跨JSON保存，依据整段生长期间应受环境影响",
+        "成熟时按每批和已施肥批数分别取整，避免合并群体与逐个计算不一致",
+        "产量不超过目录材料转换预算，100%为已声明最大转化量，不另设经验增产上限",
+        "当前环境明确0时开工前阻止扣材料和费用；在产作物已遭遇的0倍率仍计入环境影响"
+      ]
+    },
+    {
+      "id": "AG8",
+      "group": "agriculture",
+      "original_title": "家畜作为库存没有持续生存成本，缺料生物只暂停",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "库存牲畜持续吃喝；缺料累积短缺时间并按声明规则死亡。",
+      "code": [
+        "internal/sim/farming_living.go: LivingRule / LivingCareState / maintainLivingStocks / carryLivingCare",
+        "internal/sim/growth.go: FailureAfterTicks、亲畜预留和领回维护状态",
+        "internal/sim/catalog.go: calf/livestock存活预算",
+        "internal/sim/production_validation.go: 主线程外部生物参数校验"
+      ],
+      "tests": [
+        "TestAgricultureProductionAnimalClockSurvivesReservationAndReturn",
+        "TestAgricultureProductionEmptyLivingCareSnapshot",
+        "TestAgricultureProductionLivingStockCostsAndDeath",
+        "TestAgricultureProductionParentDeathPreservesMatureGoods",
+        "TestAgricultureProductionTransferRetainsAnimalBatchDebt",
+        "TestPhysicalGrowthCannotAdvanceWithoutSupplies"
+      ],
+      "test_evidence": [
+        "TestAgricultureProductionLivingStockCostsAndDeath",
+        "TestAgricultureProductionTransferRetainsAnimalBatchDebt",
+        "TestAgricultureProductionAnimalClockSurvivesReservationAndReturn",
+        "TestAgricultureProductionParentDeathPreservesMatureGoods",
+        "TestAgricultureProductionEmptyLivingCareSnapshot",
+        "TestPhysicalGrowthCannotAdvanceWithoutSupplies"
+      ],
+      "checks_limit_basis": [
+        "库存、完整Members私产、保留亲畜和原地成熟活体按目录维护间隔消耗实际库存/有限资源",
+        "默认牛类每96tick每头用1水和2草、缺供预算672tick，来自显式场景饲养预算，非兽医标定；其他物种需独立声明",
+        "成长批次按配置FailureAfterTicks在持续缺供时失去产物；明确0可用于非活体无限暂停规则",
+        "缺供债务和除法余数持久化，预留、领回、产权转移不重置维护时钟；死亡计入物品消耗账本",
+        "亲畜死亡只终止未成熟批次，不能抹去独立已成熟货物；最后维护记录清除后保持严格JSON往返"
+      ]
+    },
+    {
+      "id": "AG9",
+      "group": "agriculture",
+      "original_title": "公会自动接管照料没有同意、报酬或补给归属协议",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "照料协议明确双方接受、当地补给人、收获权和分成；公会身份不等于同意。",
+      "code": [
+        "internal/sim/production.go: GrowthCareAgreement / SetGrowthCare / transferGrowingAssets",
+        "internal/sim/growth.go: 删除同职业同公会自动接管，按协议维护与分成",
+        "internal/sim/growth_care_actions.go: 主线程显式提议/接受行动"
+      ],
+      "tests": [
+        "TestAgricultureProductionAbsentCaretakerShareStaysLocal",
+        "TestAgricultureProductionCareUsesLaborAndExplicitConsent",
+        "TestAgricultureProductionRemoteHarvestAndDelivery",
+        "TestPhysicalRemoteOwnerCannotSupplyAbsentLocalCaretaker",
+        "TestPhysicalRemoteOwnerUsesLocalCaretakerAfterDehydration",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner"
+      ],
+      "test_evidence": [
+        "TestAgricultureProductionCareUsesLaborAndExplicitConsent",
+        "TestAgricultureProductionRemoteHarvestAndDelivery",
+        "TestPhysicalRemoteOwnerUsesLocalCaretakerAfterDehydration",
+        "TestPhysicalRemoteOwnerCannotSupplyAbsentLocalCaretaker",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner",
+        "TestAgricultureProductionAbsentCaretakerShareStaysLocal"
+      ],
+      "checks_limit_basis": [
+        "普通代管必须双方接受，明确照料者、补给来源、代收权限与实物分成，依据不能从同公会推导劳动义务",
+        "分成0..1000来自千分比定义；0和全额都合法，不新增更严数值",
+        "供给来自接受协议的当地照料者，避免未同意第三方库存被扣",
+        "完整成员表示变化不自动生成同意；离场报酬保留原地货权"
+      ]
+    },
+    {
+      "id": "AG10",
+      "group": "agriculture",
+      "original_title": "第二个兼并债权人覆盖第一个债权人的收益权",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": "E2",
+      "result": "同E2：按债权人分别保存收益份额，不再覆盖先前债权人。",
+      "code": [
+        "internal/sim/market_credit.go: MarketCreditState/NewMarketCreditState/CloneMarketCreditState/ensureInit/TotalAnnexedSharePermille",
+        "internal/sim/market_credit.go: World.stepDailyCreditAndAnnexation",
+        "internal/sim/market_credit_test.go"
+      ],
+      "tests": [
+        "TestEconomyAnnexationCapPreservesEarlierCreditors",
+        "TestEconomyMultipleCreditorsRetainSharesAndReceiveRent",
+        "TestEconomyRentRoundingDoesNotMultiplyMinimum"
+      ],
+      "test_evidence": [
+        "TestEconomyMultipleCreditorsRetainSharesAndReceiveRent",
+        "TestEconomyAnnexationCapPreservesEarlierCreditors",
+        "TestEconomyRentRoundingDoesNotMultiplyMinimum",
+        "现有MarketCredit序列化及深复制测试已适配唯一新结构"
+      ],
+      "checks_limit_basis": [
+        {
+          "check": "本次实际新增份额必须大于0，才把债务标为annexed。",
+          "basis": "既有MaxTenantSharePermille上限和实际资产转让，不能以0份额假装结清。",
+          "normal_operations_affected": "总份额已满时，后续债务继续active；剩余1‰仍能正常登记并达到合法上限。"
+        }
+      ]
+    },
+    {
+      "id": "POP-01",
+      "group": "population",
+      "original_title": "群体恢复供水后仍持续脱水死亡",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "供水恢复后解除脱水状态，按实际饮水及余数推进。",
+      "code": [
+        "internal/sim/lifecycle.go:stepCohortPhysiologySanitationAndLifecycle",
+        "internal/sim/scale.go:PopulationCohort.ThirstReliefRemainder"
+      ],
+      "tests": [
+        "TestPopulationFix01WaterRestoresExistingThirst"
+      ],
+      "test_evidence": [
+        "TestPopulationFix01WaterRestoresExistingThirst"
+      ],
+      "checks_limit_basis": [
+        "无。没有新增供水上限、重试或失败兜底。"
+      ]
+    },
+    {
+      "id": "POP-02",
+      "group": "population",
+      "original_title": "死亡处理抢先转走继承现金",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "死亡先按真实继承关系分配现金和资产，剩余部分才进入公共处置。",
+      "code": [
+        "internal/sim/world.go:markDeadIfZero",
+        "internal/sim/relations_kinship.go:settleDeathAndInheritance",
+        "internal/sim/population_members.go:settleUnclaimedActorEstate",
+        "internal/sim/population_members.go:transferLastCohortAssets"
+      ],
+      "tests": [
+        "TestPopulationFix02InheritancePrecedesEscheat",
+        "TestPopulationFix02StoredHeirAndUnclaimedEstate",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce"
+      ],
+      "test_evidence": [
+        "TestPopulationFix02InheritancePrecedesEscheat",
+        "TestPopulationFix02StoredHeirAndUnclaimedEstate",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce"
+      ],
+      "checks_limit_basis": [
+        "无。无主资产账户是明确的最终归属，不是出错后改用默认数据。"
+      ]
+    },
+    {
+      "id": "POP-03",
+      "group": "population",
+      "original_title": "自动降级使已婚配偶永久失联",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "收起后保留具名成员和亲属引用，配偶仍能被正常找到。",
+      "code": [
+        "internal/sim/scale.go:PopulationCohort.Members",
+        "internal/sim/scale.go:DehydrateActor",
+        "internal/sim/scale.go:HydrateActor",
+        "internal/sim/world.go:actor"
+      ],
+      "tests": [
+        "TestPopulationFix03MarriageKeepsResolvableIdentity",
+        "TestPopulationStoredMembersSurviveCohortPromotion",
+        "TestPopulationStoredMembersSurviveReintegration"
+      ],
+      "test_evidence": [
+        "TestPopulationFix03MarriageKeepsResolvableIdentity",
+        "TestPopulationStoredMembersSurviveReintegration",
+        "TestPopulationStoredMembersSurviveCohortPromotion"
+      ],
+      "checks_limit_basis": [
+        "Apply要求存储成员先展开后再主动执行个人动作，防止同一成员同时作为宏观人口和额外个人执行者。TestPopulationStoredActorMustHydrateBeforeIndividualExecution证明正常展开后能执行。"
+      ]
+    },
+    {
+      "id": "POP-04",
+      "group": "population",
+      "original_title": "LOD 把老人转成年轻人并清除口渴",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "年龄、口渴及其他个人状态原样保存；匿名人口的生理平均不受表示转换影响。",
+      "code": [
+        "internal/sim/scale.go:HydrateActor",
+        "internal/sim/scale.go:DehydrateActor",
+        "internal/sim/population_members.go:adjustCohortMember",
+        "internal/sim/population_members.go:anonymousCohort"
+      ],
+      "tests": [
+        "TestPhysicalDigestedFoodSurvivesHydrationRoundTrip",
+        "TestPopulationAnonymousDeathsSettleEnergyRemainder",
+        "TestPopulationAnonymousEnergySurvivesPromotionAndUprising",
+        "TestPopulationAnonymousEnergySurvivesReintegration",
+        "TestPopulationAnonymousHydrationPreservesPaidEnergy",
+        "TestPopulationFix04AgeAndPhysiologySurviveLOD",
+        "TestPopulationNamedLODLeavesAnonymousEnergyUnchanged",
+        "TestPopulationStoredMembersSurviveCohortPromotion",
+        "TestPopulationUprisingOnlyMovesAnonymousAdults"
+      ],
+      "test_evidence": [
+        "TestPopulationFix04AgeAndPhysiologySurviveLOD",
+        "TestPhysicalDigestedFoodSurvivesHydrationRoundTrip",
+        "TestPopulationStoredMembersSurviveCohortPromotion",
+        "TestPopulationUprisingOnlyMovesAnonymousAdults",
+        "TestPopulationAnonymousHydrationPreservesPaidEnergy",
+        "TestPopulationNamedLODLeavesAnonymousEnergyUnchanged",
+        "TestPopulationAnonymousEnergySurvivesPromotionAndUprising",
+        "TestPopulationAnonymousEnergySurvivesReintegration",
+        "TestPopulationAnonymousDeathsSettleEnergyRemainder"
+      ],
+      "checks_limit_basis": [
+        "无。没有增加年龄或人数上限。匿名人口晋升、起义按匿名人数迁移；完整并群显式迁移全部Members。"
+      ]
+    },
+    {
+      "id": "POP-05",
+      "group": "population",
+      "original_title": "病伤人口被排除在饥荒和老年死亡之外",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "病伤人口也参与真实饥荒、老年及其他死亡，并分别记清状态死亡数。",
+      "code": [
+        "internal/sim/lifecycle.go:applyCohortCasualtiesWithCause",
+        "internal/sim/population_members.go:drainCohortMortalityEvents",
+        "internal/sim/scale.go:ScaleSummary.RecordEvents",
+        "internal/sim/world.go:Step"
+      ],
+      "tests": [
+        "TestPopulationFix05SickAndWoundedCanDie",
+        "TestPopulationMortalityReportsRemovedStatuses",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce",
+        "TestSpotlightRumorThreeDayMillionPopConservation"
+      ],
+      "test_evidence": [
+        "TestPopulationFix05SickAndWoundedCanDie",
+        "TestPopulationMortalityReportsRemovedStatuses",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce",
+        "TestSpotlightRumorThreeDayMillionPopConservation"
+      ],
+      "checks_limit_basis": [
+        "无。死因人数来自当前可受影响人口，不新增任意阈值。"
+      ]
+    },
+    {
+      "id": "POP-06",
+      "group": "population",
+      "original_title": "新生儿进入异区同职业群体",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "新生儿只进入实际出生地区的相应群体。",
+      "code": [
+        "internal/sim/lifecycle.go:stepActorPhysiologyAndLifecycleFor"
+      ],
+      "tests": [
+        "TestPopulationFix06NewbornStaysInLocalDistrict"
+      ],
+      "test_evidence": [
+        "TestPopulationFix06NewbornStaysInLocalDistrict"
+      ],
+      "checks_limit_basis": [
+        "目的群体必须同地区，依据是已复现的异区新生儿错误。不同职业的本区群体仍可接收，不新增职业限制。"
+      ]
+    },
+    {
+      "id": "POP-07",
+      "group": "population",
+      "original_title": "直接合并病伤人物重复扣除同一个人",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "病与伤的重叠人数单独保存，同一个人不会重复扣除劳动人口。",
+      "code": [
+        "internal/sim/scale.go:PopulationCohort.WoundedSick",
+        "internal/sim/scale.go:PopulationCohort.EffectivePopulation",
+        "internal/sim/population_members.go:adjustCohortMember",
+        "internal/sim/justice_revolt.go:cohortFreeHealthyAdults"
+      ],
+      "tests": [
+        "TestPopulationFix07WoundedSickOverlapCountsOnce",
+        "TestPopulationMortalityReportsRemovedStatuses",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce"
+      ],
+      "test_evidence": [
+        "TestPopulationFix07WoundedSickOverlapCountsOnce",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce",
+        "TestPopulationMortalityReportsRemovedStatuses"
+      ],
+      "checks_limit_basis": [
+        "无。没有通过禁止病伤人物LOD掩盖重复扣数。"
+      ]
+    },
+    {
+      "id": "POP-08",
+      "group": "population",
+      "original_title": "小群体年龄层永远停止成熟",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "小群体保留年龄推进余数，人数不足整批时仍会逐步长大和衰老。",
+      "code": [
+        "internal/sim/scale.go:PopulationCohort.ChildAgeRemainder",
+        "internal/sim/scale.go:PopulationCohort.AdultAgeRemainder",
+        "internal/sim/lifecycle.go:stepCohortPhysiologySanitationAndLifecycle"
+      ],
+      "tests": [
+        "TestPopulationFix08SmallCohortsKeepAgeRemainders",
+        "TestPopulationStoredMembersSurviveReintegration"
+      ],
+      "test_evidence": [
+        "TestPopulationFix08SmallCohortsKeepAgeRemainders",
+        "TestPopulationStoredMembersSurviveReintegration"
+      ],
+      "checks_limit_basis": [
+        "无。12和32来自原模型的转换率，本次没有新增年限。"
+      ]
+    },
+    {
+      "id": "POP-09",
+      "group": "population",
+      "original_title": "监禁无需食物和水仍能恢复",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "监禁人员仍需要食物和水，恢复受真实生理状态约束。",
+      "code": [
+        "internal/sim/world.go:Step",
+        "internal/sim/population_members.go:advanceActorHunger",
+        "internal/sim/population_members.go:consumeActorRation",
+        "internal/sim/lifecycle.go:stepActorPhysiologyAndLifecycleFor"
+      ],
+      "tests": [
+        "TestPopulationFix09PrisonersConsumeRealRations",
+        "TestPopulationStoredSentenceExpiresExactlyOnce"
+      ],
+      "test_evidence": [
+        "TestPopulationFix09PrisonersConsumeRealRations",
+        "TestPopulationStoredSentenceExpiresExactlyOnce"
+      ],
+      "checks_limit_basis": [
+        "监禁自动回血要求Hunger<=2且Thirst<=1，依据是已复现的断粮断水仍回血。缺供给时回血会被阻止，充足供给时仍可恢复。没有新增库存大小或供给次数限制。"
+      ]
+    },
+    {
+      "id": "POP-10",
+      "group": "population",
+      "original_title": "冷伤在临死前停止",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "低体温继续作用于濒死者，不再因低健康值免疫。",
+      "code": [
+        "internal/sim/lifecycle.go:stepActorPhysiologyAndLifecycleFor",
+        "internal/sim/world.go:canonicalDeathCause",
+        "internal/sim/world.go:markDeadIfZero"
+      ],
+      "tests": [
+        "TestPopulationFix10ColdExposureCanKill",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce"
+      ],
+      "test_evidence": [
+        "TestPopulationFix10ColdExposureCanKill",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce"
+      ],
+      "checks_limit_basis": [
+        "无。移除临死前停止扣血的错误条件。"
+      ]
+    },
+    {
+      "id": "POP-11",
+      "group": "population",
+      "original_title": "LOD 清除身体形态和资源槽，改变生理规则并凭空补充资源",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "收起和展开保存身体形态、明确零值资源槽及个人生理规则。",
+      "code": [
+        "internal/sim/scale.go:PopulationCohort.Members",
+        "internal/sim/scale.go:CloneCohort",
+        "internal/sim/scale.go:HydrateActor",
+        "internal/sim/scale.go:DehydrateActor",
+        "internal/sim/lifecycle.go:stepActorPhysiologyAndLifecycle",
+        "internal/sim/world.go:Step"
+      ],
+      "tests": [
+        "TestPopulationEmptyMembersHaveCanonicalJSON",
+        "TestPopulationFix11FormAndResourceSlotsSurvivePersistentLOD",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner",
+        "TestPopulationLastAnonymousHydrationTransfersGrowingAssets",
+        "TestPopulationStoredActorMustHydrateBeforeIndividualExecution"
+      ],
+      "test_evidence": [
+        "TestPopulationFix11FormAndResourceSlotsSurvivePersistentLOD",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner",
+        "TestPopulationLastAnonymousHydrationTransfersGrowingAssets",
+        "TestPopulationStoredActorMustHydrateBeforeIndividualExecution",
+        "TestPopulationEmptyMembersHaveCanonicalJSON"
+      ],
+      "checks_limit_basis": [
+        "没有新增形态白名单或禁止LOD。成员主动个人动作要求先展开的依据及合法路径测试见POP-03。"
+      ]
+    },
+    {
+      "id": "POP-12",
+      "group": "population",
+      "original_title": "LOD 丢失个人知识、附加职业与职业经验",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "个人知识、附加职业及经验保存在成员身份中，不再重建为职业模板。",
+      "code": [
+        "internal/sim/scale.go:PopulationCohort.Members",
+        "internal/sim/scale.go:HydrateActor",
+        "internal/sim/scale.go:DehydrateActor",
+        "internal/sim/world.go:actor",
+        "internal/sim/governance.go:TotalCoins"
+      ],
+      "tests": [
+        "TestPopulationFix12KnowledgeAndProfessionXPSurviveLOD",
+        "TestPopulationStoredMembersSurviveCohortPromotion",
+        "TestPopulationStoredMembersSurviveReintegration",
+        "TestPopulationUprisingOnlyMovesAnonymousAdults"
+      ],
+      "test_evidence": [
+        "TestPopulationFix12KnowledgeAndProfessionXPSurviveLOD",
+        "TestPopulationStoredMembersSurviveCohortPromotion",
+        "TestPopulationStoredMembersSurviveReintegration",
+        "TestPopulationUprisingOnlyMovesAnonymousAdults"
+      ],
+      "checks_limit_basis": [
+        "无。没有删除附加职业、重置经验或使用新ID作为兼容分支。"
+      ]
+    },
+    {
+      "id": "PROD-01",
+      "group": "production",
+      "original_title": "生长配方吃掉增产材料，但增产量被强制清零",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": "AG6",
+      "result": "同AG6：实际投入的肥料增益进入生物产出预算。",
+      "code": [
+        "internal/sim/catalog.go: RecipeYield / ConsumablesYieldBonus",
+        "internal/sim/scale.go: 部分肥料批数",
+        "internal/sim/growth.go: FertilizerBonus及成熟结算"
+      ],
+      "tests": [
+        "TestAgricultureProductionFertilizerEnvironmentAndSnapshot",
+        "TestAgricultureProductionPartialFertilizerAndBatchParity",
+        "TestBiologicalOutputUsesConfiguredQuantity"
+      ],
+      "test_evidence": [
+        "TestAgricultureProductionFertilizerEnvironmentAndSnapshot",
+        "TestAgricultureProductionPartialFertilizerAndBatchParity",
+        "TestBiologicalOutputUsesConfiguredQuantity"
+      ],
+      "checks_limit_basis": [
+        "同AG6：增产消费必须对应持久的实际效果；无效可选加工投入不扣除"
+      ]
+    },
+    {
+      "id": "PROD-02",
+      "group": "production",
+      "original_title": "群体与个体的同等级同配方产量不同",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "相同投入与配方对个人和群体使用同一材料预算和逐批环境计算。",
+      "code": [
+        "internal/sim/catalog.go: 共享RecipeYield",
+        "internal/sim/world.go: 个人逐批转化",
+        "internal/sim/scale.go: 群体使用同一单批产量",
+        "internal/sim/growth.go: 环境影响逐批取整"
+      ],
+      "tests": [
+        "TestAgricultureProductionMaterialAndNutritionBudgets",
+        "TestAgricultureProductionParityEnergyAndFacilityCapacity",
+        "TestAgricultureProductionPartialFertilizerAndBatchParity"
+      ],
+      "test_evidence": [
+        "TestAgricultureProductionParityEnergyAndFacilityCapacity",
+        "TestAgricultureProductionPartialFertilizerAndBatchParity",
+        "TestAgricultureProductionMaterialAndNutritionBudgets"
+      ],
+      "checks_limit_basis": [
+        "同配方、同投入、同环境的个体与群体共享一套单批数量规则，依据明确一致性需求",
+        "移除群体专用职业分母、工具百分比增产与技能材料增产；群体只乘实际开工批数"
+      ]
+    },
+    {
+      "id": "PROD-03",
+      "group": "production",
+      "original_title": "制作技能直接增加物品件数，缺少物质和营养约束",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "物品声明质量及营养单位，配方声明转换预算；技能、工具和设施不再凭空加件。",
+      "code": [
+        "internal/sim/production_materials.go: MaterialConversion / ValidateProductionConversion",
+        "internal/sim/catalog.go: MassUnits / NutritionUnits及默认转换",
+        "internal/sim/world.go: CheckRecipe入口",
+        "internal/sim/scale.go: 群体配方验证",
+        "internal/sim/production_validation.go: 主线程外部目录验证",
+        "packs/mortal_watershed.json、packs/wasteland_sector.json、packs/xianxia_sect.json: 主线程显式目录迁移"
+      ],
+      "tests": [
+        "TestAgricultureProductionMaterialAndNutritionBudgets",
+        "TestCareerProgressionScholarToXiucaiAndBlacksmithRanks",
+        "TestCustomProfessionWorksWithoutCodeChanges",
+        "TestGenreDecoupledSciFiColonyPackWithoutCodeChanges"
+      ],
+      "test_evidence": [
+        "TestAgricultureProductionMaterialAndNutritionBudgets",
+        "TestCustomProfessionWorksWithoutCodeChanges",
+        "TestCareerProgressionScholarToXiucaiAndBlacksmithRanks",
+        "TestGenreDecoupledSciFiColonyPackWithoutCodeChanges"
+      ],
+      "checks_limit_basis": [
+        "每配方必须声明材料转换和来源；产出质量/营养不能超过输入与已声明资源/生物同化预算，依据任务明确的材料守恒要求",
+        "食物HungerRelief不超过其NutritionUnits；choice_grain不再通过精加工翻倍营养",
+        "炼药原输入质量不足时增加真实水投入，未自动补一个虚构外源预算",
+        "职业、公会、耐用工具和技术不增加件数；技术运行效果由生产代理迁为工时变化"
+      ]
+    },
+    {
+      "id": "PROD-04",
+      "group": "production",
+      "original_title": "电网遇到无效最短路径后放弃有效旁路",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "电网按实际可送达量排除无效路径，并继续使用有效旁路。",
+      "code": [
+        "internal/sim/states_ledgers.go:recomputeFlowGrid"
+      ],
+      "tests": [
+        "TestProductionPowerBypassesUndeliverablePaths"
+      ],
+      "test_evidence": [
+        "PASS TestProductionPowerBypassesUndeliverablePaths: 1000/999 permille direct loss, valid bypass, integer loss boundary, multiple generators"
+      ],
+      "checks_limit_basis": [
+        "按每条边容量及整数损耗计算可实际送达量，不让无效路径遮蔽有效旁路；依据审计反例和既有LossPermille物理规则。无新增数值限制。"
+      ]
+    },
+    {
+      "id": "PROD-05",
+      "group": "production",
+      "original_title": "设施停电只阻止开工，已开工生产照常完成",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "长任务每tick检查供电，断电暂停有效工作，恢复后继续且不重复扣料。",
+      "code": [
+        "internal/sim/world.go:Advance",
+        "internal/sim/world.go:craftingTaskOperational",
+        "internal/sim/production.go:productionSiteOperational (agriculture agent)",
+        "internal/sim/growth.go:AdvanceGrowth (agriculture agent)"
+      ],
+      "tests": [
+        "TestProductionCraftPausesThroughPowerCut"
+      ],
+      "test_evidence": [
+        "PASS TestProductionCraftPausesThroughPowerCut: five unpowered ticks preserve Remaining/task/inputs; restored supply completes once; item ledger stays balanced"
+      ],
+      "checks_limit_basis": [
+        "每tick复用设施完好和供电规则，停电暂停有效工时，不再次扣料、不清空任务；依据长任务停电仍完成的反例。",
+        "收紧行为：已开工任务不能在无电期间继续完成；恢复供电后继续。未设置超时或停工期限。"
+      ]
+    },
+    {
+      "id": "PROD-06",
+      "group": "production",
+      "original_title": "有射程但缺坐标时跳过范围限制",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "有限射程需要可验证的同地、坐标或实际距离，缺坐标不能视为无限射程。",
+      "code": [
+        "internal/sim/effects_combat.go:locationsWithinActionRange",
+        "internal/sim/effects_combat.go:declarativeTargetFailure",
+        "internal/sim/knowledge_laws.go:applyTeachKnowledge"
+      ],
+      "tests": [
+        "TestProductionFiniteAttackRangeNeedsKnownDistance",
+        "TestProductionKnowledgeTeachingNeedsKnownChannelDistance"
+      ],
+      "test_evidence": [
+        "PASS TestProductionFiniteAttackRangeNeedsKnownDistance: actor/cohort/venue/district targets; missing both or one coordinate; exact co-location; declared route and coordinate at/beyond range",
+        "PASS TestProductionKnowledgeTeachingNeedsKnownChannelDistance"
+      ],
+      "checks_limit_basis": [
+        "有射程动作必须能证明同场所、坐标距离或显式公里路程；依据缺坐标不能等同无限射程的反例。瞬移路线不证明物理邻近。",
+        "收紧行为：无可验证距离的跨地点攻击和教学现在失败；确切同场所和距离等于射程的合法动作仍通过。"
+      ]
+    },
+    {
+      "id": "PROD-07",
+      "group": "production",
+      "original_title": "多tick攻击只在开始检查距离，结算能命中已离开的目标",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "延迟攻击在结算前重新检查目标存活、位置和距离；失效则明确失败。",
+      "code": [
+        "internal/sim/effects_combat.go:declarativeTargetFailure",
+        "internal/sim/effects_combat.go:finishDeclarativeAction"
+      ],
+      "tests": [
+        "TestProductionDelayedAttackRevalidatesTarget",
+        "TestRootAuditFirearmLawCoversDeclarativeAndDelayedActions"
+      ],
+      "test_evidence": [
+        "PASS TestProductionDelayedAttackRevalidatesTarget: departure/transit/death/imprisonment cancel effects; valid delayed target still receives damage",
+        "PASS TestRootAuditFirearmLawCoversDeclarativeAndDelayedActions"
+      ],
+      "checks_limit_basis": [
+        "结算前复用开工目标可用性和射程规则，失效时在任何资源槽收益、效果和伤害前返回action_failed；依据普通近战击中已离场目标的反例。",
+        "同时重核可能在任务运行中改变的世界法则，与主线程ROOT-05挂接。收紧行为：普通攻击不再自动追踪离场目标。"
+      ]
+    },
+    {
+      "id": "PROD-08",
+      "group": "production",
+      "original_title": "群体生产不检查配方所需体力，合法高耗能配方会扣到负值",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "群体开工批数受实际体力支持，不会把合法高耗能工作扣成负数。",
+      "code": [
+        "internal/sim/scale.go: stepCohorts / cohortRecipeBatches / runCohortProduction",
+        "internal/sim/production.go: EnergyRemainder持久余数",
+        "internal/sim/population_members.go: 人口代理负责余数的人口拆分/合并/死亡迁移"
+      ],
+      "tests": [
+        "TestAgricultureProductionEnergyExcludesStoredMembers",
+        "TestAgricultureProductionParityEnergyAndFacilityCapacity",
+        "TestAgricultureProductionShiftUsesActualEnergyCost"
+      ],
+      "test_evidence": [
+        "TestAgricultureProductionParityEnergyAndFacilityCapacity",
+        "TestAgricultureProductionShiftUsesActualEnergyCost",
+        "TestAgricultureProductionEnergyExcludesStoredMembers"
+      ],
+      "checks_limit_basis": [
+        "实际开工按Recipe.EnergyCost及匿名池真实可付体力预算计算，不再只看固定24门槛",
+        "群体每名开工工人支付同个人相同配方成本；扣费除匿名人数，具名Members不分摊他人生产体力",
+        "平均扣费的除法余数持久化，避免小批次免费劳动；0成本配方合法，不为旧余数额外收费"
+      ]
+    },
+    {
+      "id": "PROD-09",
+      "group": "production",
+      "original_title": "设施没有并行容量，0耐久房屋设施仍可生产",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "设施使用声明的工位容量；损坏、无电或已满的工位不能再开工。",
+      "code": [
+        "internal/sim/production.go: productionSiteOperational / facilityFree / productionFacility / productionStartBlockReason",
+        "internal/sim/world.go: craft开工共享入口",
+        "internal/sim/growth.go: 进行中群体持续设施检查",
+        "internal/agent/pipeline.go及rules.go: 主线程感知/候选共享原因"
+      ],
+      "tests": [
+        "TestAgricultureProductionCohortPowerPauseAndRestore",
+        "TestAgricultureProductionParityEnergyAndFacilityCapacity",
+        "TestPhysicalCohortWorkTakesConfiguredTime",
+        "TestPhysicalCompostIsProcessedAfterDeclaredCycle"
+      ],
+      "test_evidence": [
+        "TestAgricultureProductionParityEnergyAndFacilityCapacity",
+        "TestAgricultureProductionCohortPowerPauseAndRestore",
+        "TestPhysicalCohortWorkTakesConfiguredTime",
+        "TestPhysicalCompostIsProcessedAfterDeclaredCycle"
+      ],
+      "checks_limit_basis": [
+        "工位并行容量由Catalog.Production.FacilityCapacity明确声明，默认每安装设施1工位是场景设备预算，不按人口虚构容量",
+        "同房屋同设施类型的个人Task和群体在产批次共享占用；不同设施类型不相互占位",
+        "Condition=0或设施供电中断不得开工/推进，依据明确完好与持续供能需求；0工位是合法停用配置",
+        "设施恢复后保留原投入继续有效工时，不重复产出"
+      ]
+    },
+    {
+      "id": "PROD-10",
+      "group": "production",
+      "original_title": "工具磨损按批次向上取整，规模越小工具消耗率越高",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "工具磨损跨批次保留余数，拆成小批次不会额外消耗工具。",
+      "code": [
+        "internal/sim/catalog.go: ItemSpec.DurabilityBatches",
+        "internal/sim/production.go: wearProductionTool / ToolWear",
+        "internal/sim/world.go及scale.go: 个人与群体共享磨损入口"
+      ],
+      "tests": [
+        "TestAgricultureProductionToolWearIndependentOfBatchSize",
+        "TestAgricultureProductionTransferPreservesAssetsAndCare"
+      ],
+      "test_evidence": [
+        "TestAgricultureProductionToolWearIndependentOfBatchSize",
+        "TestAgricultureProductionTransferPreservesAssetsAndCare"
+      ],
+      "checks_limit_basis": [
+        "工具寿命来自物品目录，默认24批损耗1件为场景工具预算",
+        "保存累计余数，不再每小批向上取整，依据复现的批次拆分损耗偏差",
+        "最多耗用实际工具寿命，无工具时不累积未来工具债务；产权转移合并已有余数"
+      ]
+    },
+    {
+      "id": "PROD-11",
+      "group": "production",
+      "original_title": "研发与建设实际消耗材料，但完全漏记物品消耗账",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "研究和建设的真实材料消耗进入物品账。",
+      "code": [
+        "internal/sim/knowledge_laws.go:applyResearchTech",
+        "internal/sim/knowledge_laws.go:applyAdoptFacility"
+      ],
+      "tests": [
+        "TestProductionResearchAndBuildRecordMaterialConsumption"
+      ],
+      "test_evidence": [
+        "PASS TestProductionResearchAndBuildRecordMaterialConsumption: one ore research plus two ore construction, exact available inventory boundary and ledger conservation"
+      ],
+      "checks_limit_basis": [
+        "无新增检查、限制、兜底或重试；实际扣料时调用既有物品消耗记账入口。"
+      ]
+    },
+    {
+      "id": "PROD-12",
+      "group": "production",
+      "original_title": "采用房屋设施只检查同地区，允许跨地点施工",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "施工必须处于实际地点；离开现场后暂停，返回后可以继续。",
+      "code": [
+        "internal/sim/knowledge_laws.go:facilityAdoptionSiteFailure",
+        "internal/sim/knowledge_laws.go:applyAdoptFacility",
+        "internal/sim/knowledge_laws.go:finishAdoptFacility",
+        "internal/sim/world.go:Advance"
+      ],
+      "tests": [
+        "TestProductionHouseConstructionRequiresActualSite"
+      ],
+      "test_evidence": [
+        "PASS TestProductionHouseConstructionRequiresActualSite: remote venue rejected without consuming materials, same venue allowed, departure pauses and return completes once"
+      ],
+      "checks_limit_basis": [
+        "房屋声明场所时，施工者须在该场所；离开施工现场后长任务暂停。依据跨场所施工反例和既有venue施工现场规则。",
+        "访问权限仍由House.CanAccess负责；未新增产权限制或强制进入房屋要求。收紧行为：同地区异场所不再允许远程施工。"
+      ]
+    },
+    {
+      "id": "PROD-13",
+      "group": "production",
+      "original_title": "消耗环境资源的设施耗尽资源后仍保留全部增产效果",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "运行投入按tick完整支付后才获得加速；耗尽或停电后停止当期增益。",
+      "code": [
+        "internal/sim/knowledge_laws.go:TechSpec.AmbientFieldInputsPerTick",
+        "internal/sim/knowledge_laws.go:KnowledgeRecord.OperatingTicks",
+        "internal/sim/knowledge_laws.go:stepAdoptedFacilities",
+        "internal/sim/knowledge_laws.go:FacilityProductionBonusPct",
+        "internal/sim/world.go:Task.WorkCredit",
+        "internal/sim/world.go:advanceCraftingWork",
+        "internal/sim/physical_config.go:ValidatePhysicalRules"
+      ],
+      "tests": [
+        "TestMultiGenre_SciFiTechDiffusion_AndImmutableWorldLaws",
+        "TestMultiGenre_XianxiaSpiritArray_DiscoveryTeachBuildAndAmbientDrain",
+        "TestProductionCraftAccelerationStopsWhenOperatingInputsRunOut",
+        "TestProductionFacilityConsumesOnlyFundedPoweredOperatingTicks",
+        "TestProductionFacilityInputDefinitionValidation",
+        "TestProductionFacilityInputsCompeteAndEffectsAreIndependent"
+      ],
+      "test_evidence": [
+        "PASS TestProductionFacilityConsumesOnlyFundedPoweredOperatingTicks: stock 0/3/5/10, atomic multiple inputs, power cut, repeated calls and expired operating tick",
+        "PASS TestProductionFacilityInputsCompeteAndEffectsAreIndependent: competing sites, independent cleanup, JSON round-trip and clone isolation",
+        "PASS TestProductionCraftAccelerationStopsWhenOperatingInputsRunOut: one funded tick does not accelerate the unfunded remainder; sustained supply retains fractional acceleration",
+        "PASS TestProductionFacilityInputDefinitionValidation: negative/zero inputs rejected, positive legal quantity accepted",
+        "PASS TestMultiGenre_XianxiaSpiritArray_DiscoveryTeachBuildAndAmbientDrain",
+        "PASS TestMultiGenre_SciFiTechDiffusion_AndImmutableWorldLaws"
+      ],
+      "checks_limit_basis": [
+        "运行投入使用正数AmbientFieldInputsPerTick；所有投入充足且供电成功才原子扣取并登记当tick运行。少一份时不扣部分库存、不授予收益。依据剩3但需求5仍运行的反例。",
+        "AmbientFieldDeltaPerTick仅表示污染、净化等环境效果，不把所有负环境变化视为燃料。聚灵阵旧负delta用法已迁移为显式inputs。三个世界包没有需迁移的负delta燃料定义。",
+        "与农业代理PROD-03新规则一致，设施收益作用到有效工时，不凭空增加物质量；每tick只根据成功运行状态累计WorkCredit，资源耗尽恢复普通速度。",
+        "外部输入定义必须使用非空字段和正消耗量，依据资源消耗语义；没有任意数量上限。字段缺省表示无此项运行投入。",
+        "收紧行为：不足完整运行投入、停电、只有往期运行记录的设施不再提供当期收益；正好够一份的边界保持成功。"
+      ]
+    },
+    {
+      "id": "E1",
+      "group": "economy",
+      "original_title": "无抵押贷款可以没收未约定房屋",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "抵押执行只使用贷款双方原先确认的房屋，无抵押不能临时指定房屋。",
+      "code": [
+        "internal/sim/market_credit.go: World.ApplyMarketCreditAction foreclose_collateral"
+      ],
+      "tests": [
+        "TestEconomyUnsecuredLoanCannotSeizeLaterHouse",
+        "TestMarketCreditDynamicPricingHoardingUsuryAndAnnexation"
+      ],
+      "test_evidence": [
+        "TestEconomyUnsecuredLoanCannotSeizeLaterHouse",
+        "现有TestMarketCreditDynamicPricingHoardingUsuryAndAnnexation中的合法抵押执行测试"
+      ],
+      "checks_limit_basis": [
+        {
+          "check": "贷款必须已有约定抵押房才能执行抵押。",
+          "basis": "E1实测及已确认贷款合同的CollateralHouse字段。",
+          "normal_operations_affected": "无抵押贷款不能再没收后来取得或临时指定的房屋；正常有抵押且到期的执行不受影响。"
+        }
+      ]
+    },
+    {
+      "id": "E2",
+      "group": "economy",
+      "original_title": "第二债权人覆盖第一债权人的产权",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "每个债权人的份额单独保存，现金与实物租金按各自份额分配。",
+      "code": [
+        "internal/sim/market_credit.go: MarketCreditState/NewMarketCreditState/CloneMarketCreditState/ensureInit/TotalAnnexedSharePermille",
+        "internal/sim/market_credit.go: World.stepDailyCreditAndAnnexation",
+        "internal/sim/market_credit_test.go"
+      ],
+      "tests": [
+        "TestEconomyAnnexationCapPreservesEarlierCreditors",
+        "TestEconomyMultipleCreditorsRetainSharesAndReceiveRent",
+        "TestEconomyRentRoundingDoesNotMultiplyMinimum"
+      ],
+      "test_evidence": [
+        "TestEconomyMultipleCreditorsRetainSharesAndReceiveRent",
+        "TestEconomyAnnexationCapPreservesEarlierCreditors",
+        "TestEconomyRentRoundingDoesNotMultiplyMinimum",
+        "现有MarketCredit序列化及深复制测试已适配唯一新结构"
+      ],
+      "checks_limit_basis": [
+        {
+          "check": "本次实际新增份额必须大于0，才把债务标为annexed。",
+          "basis": "既有MaxTenantSharePermille上限和实际资产转让，不能以0份额假装结清。",
+          "normal_operations_affected": "总份额已满时，后续债务继续active；剩余1‰仍能正常登记并达到合法上限。"
+        }
+      ]
+    },
+    {
+      "id": "E3",
+      "group": "economy",
+      "original_title": "救济支付了余额但没有粮食交付",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "救济采购同时交货付款，不足完整批价时保留国库资金。",
+      "code": [
+        "internal/sim/scale.go: World.clearFocalActorCohortTrades 食物救济分支"
+      ],
+      "tests": [
+        "TestEconomyReliefFindsAffordableFoodWithExistingRation",
+        "TestEconomyReliefPaysOnlyForDeliveredBatch"
+      ],
+      "test_evidence": [
+        "TestEconomyReliefPaysOnlyForDeliveredBatch",
+        "TestEconomyReliefFindsAffordableFoodWithExistingRation"
+      ],
+      "checks_limit_basis": [
+        {
+          "check": "救济前国库余额至少覆盖完整批价。",
+          "basis": "E3实测空付款；当前交易按完整批量定价，没有部分批量合同。",
+          "normal_operations_affected": "余额不足一个完整批次时不采购、不扣款；刚好够款以及1币批价可通过。"
+        },
+        {
+          "check": "救济卖方当前库存至少达到实际批量。",
+          "basis": "E4同类实测，旧人口门槛不保证批量库存。",
+          "normal_operations_affected": "不足批量不交付、不付款；整批等于全部库存时仍可通过原有粮仓门槛。"
+        }
+      ]
+    },
+    {
+      "id": "E4",
+      "group": "economy",
+      "original_title": "药品销售可使库存负数",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "销售检查实际整批库存，库存正好够时允许卖完，库存不够时不扣货。",
+      "code": [
+        "internal/sim/scale.go: World.clearFocalActorCohortTrades 药品购入/人物自动售货/救济"
+      ],
+      "tests": [
+        "TestEconomyAutomaticFoodSaleCannotExceedActorStock",
+        "TestEconomyMedicineSaleHonorsEntireAvailableInventory",
+        "TestEconomyReliefPaysOnlyForDeliveredBatch"
+      ],
+      "test_evidence": [
+        "TestEconomyMedicineSaleHonorsEntireAvailableInventory",
+        "TestEconomyAutomaticFoodSaleCannotExceedActorStock",
+        "TestEconomyReliefPaysOnlyForDeliveredBatch"
+      ],
+      "checks_limit_basis": [
+        {
+          "check": "卖方库存必须至少达到本次实际BatchQty。",
+          "basis": "E4实测11→-9；人物食物自动销售存在相同固定门槛覆盖批量的可达路径。",
+          "normal_operations_affected": "不足整批的销售被拒绝，库存刚好等于批量时可卖出全部；未引入额外库存上限。"
+        }
+      ]
+    },
+    {
+      "id": "E5",
+      "group": "economy",
+      "original_title": "人物工资忽略财政预算",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "人物与群体共用原有工资预算，全部支付与截留合计不超过该预算。",
+      "code": [
+        "internal/sim/lifecycle.go: World.settleDailyCivicPayrollAndRetailUpkeep",
+        "人口代理协作: World.stepActorPhysiologyAndLifecycle每日调用入口"
+      ],
+      "tests": [
+        "TestEconomyActorOnlyWorldPaysCivicSalaryDaily",
+        "TestEconomyPayrollDiversionStaysInsideBudget",
+        "TestEconomyPayrollSharesOneBudget"
+      ],
+      "test_evidence": [
+        "TestEconomyPayrollSharesOneBudget",
+        "TestEconomyPayrollDiversionStaysInsideBudget",
+        "TestEconomyActorOnlyWorldPaysCivicSalaryDaily"
+      ],
+      "checks_limit_basis": [
+        {
+          "check": "所有收款人的分配共用同一工资预算，最多为min(既有每日预算,总应领额)。",
+          "basis": "E5实测人物绕过群体已使用的财政预算。",
+          "normal_operations_affected": "国库紧张时人物工资也会按预算缩减；足额预算可支付全部，1币预算可完整分配，百万群体和多人物合计不超额。"
+        }
+      ]
+    },
+    {
+      "id": "E6",
+      "group": "economy",
+      "original_title": "群体购买人物商品没有更新生产销售计划",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "群体实际买入人物商品后记录真实卖方和交付数量，销售计划随成交推进。",
+      "code": [
+        "internal/sim/scale.go: World.clearRegionalCohortMarket 人物公开报价成交事件",
+        "internal/sim/scale.go: World.clearFocalActorCohortTrades 双向成交事件"
+      ],
+      "tests": [
+        "TestEconomyCohortPurchaseCompletesActorProductionPlan"
+      ],
+      "test_evidence": [
+        "TestEconomyCohortPurchaseCompletesActorProductionPlan的posted_offer和automatic_sale两条实际成交路径"
+      ],
+      "checks_limit_basis": "无"
+    },
+    {
+      "id": "E7",
+      "group": "economy",
+      "original_title": "有群体时先转走死者金币导致子女继承为零",
+      "original_classification": null,
+      "status": "fixed",
+      "same_repair_as": "POP-02",
+      "result": "同POP-02：现金先按继承关系分配，不能先被群体统一转走。",
+      "code": [
+        "internal/sim/world.go:markDeadIfZero",
+        "internal/sim/relations_kinship.go:settleDeathAndInheritance",
+        "internal/sim/population_members.go:settleUnclaimedActorEstate",
+        "internal/sim/population_members.go:transferLastCohortAssets"
+      ],
+      "tests": [
+        "TestPopulationFix02InheritancePrecedesEscheat",
+        "TestPopulationFix02StoredHeirAndUnclaimedEstate",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce"
+      ],
+      "test_evidence": [
+        "TestPopulationFix02InheritancePrecedesEscheat",
+        "TestPopulationFix02StoredHeirAndUnclaimedEstate",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce"
+      ],
+      "checks_limit_basis": [
+        "无。无主资产账户是明确的最终归属，不是出错后改用默认数据。"
+      ]
+    },
+    {
+      "id": "SS-01",
+      "group": "space-society",
+      "original_title": "同一地图的地区移动可绕过场所路线能力与耗时",
+      "original_classification": "实测，生产路径",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "地区移动复用实际场所路线，保留能力要求、能量与旅行工时。",
+      "code": [
+        "internal/sim/geography_polity.go:applyMoveDistrict/applyMoveVenue",
+        "internal/sim/world.go:Apply(move)/View",
+        "internal/sim/scale.go:viewIndexed"
+      ],
+      "tests": [
+        "TestMultiGenre_MortalWatershed_VenueIsolationAndCrossBorderFlood",
+        "TestMultiGenre_XianxiaSectDomain_DivineSenseSwordFlightAndEpistemicFirewall",
+        "TestSpaceSocietyDistrictMoveUsesVenueRoutes"
+      ],
+      "test_evidence": [
+        "TestSpaceSocietyDistrictMoveUsesVenueRoutes",
+        "TestMultiGenre_MortalWatershed_VenueIsolationAndCrossBorderFlood",
+        "TestMultiGenre_XianxiaSectDomain_DivineSenseSwordFlightAndEpistemicFirewall"
+      ],
+      "checks_limit_basis": [
+        {
+          "check": "有场所图时，地区移动使用当前位置能够直接走通的场所路线；保留该路线的能力、时间、能量和在途任务。视图只提供场所路线。",
+          "basis": "审计复现的地区道路绕过河道能力和五 tick 路程。数值完全沿用现有 VenueRoute/LocomotionSpec。",
+          "normal_operations_affected": "不能从未接通出入口的场所直接跨区；可以先通过正常场所移动到出入口，再完成有权使用的路线。",
+          "new_numeric_limit": "无"
+        }
+      ]
+    },
+    {
+      "id": "SS-02",
+      "group": "space-society",
+      "original_title": "暴动可以从没有道路连接的远区粮仓直接抢粮",
+      "original_classification": "实测，生产路径",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "暴动只抢当地实际存在的粮仓，不能即时取得异地库存。",
+      "code": [
+        "internal/sim/justice_revolt.go:triggerGranaryRiot",
+        "internal/sim/geography_polity.go:presentLawCollector"
+      ],
+      "tests": [
+        "TestSpaceSocietyRiotOnlySeizesLocalGranary"
+      ],
+      "test_evidence": [
+        "TestSpaceSocietyRiotOnlySeizesLocalGranary"
+      ],
+      "checks_limit_basis": [
+        {
+          "check": "抢粮候选和参与执法群体必须实际驻在暴动地区；远处更大粮仓不能覆盖当地候选。",
+          "basis": "无道路时仍能从异地粮仓取得粮食的审计反例。",
+          "normal_operations_affected": "群体不能即时抢夺异地库存；当地库存和人物已有移动机制仍可正常使用。",
+          "new_numeric_limit": "无"
+        }
+      ]
+    },
+    {
+      "id": "SS-03",
+      "group": "space-society",
+      "original_title": "宏观战斗、镇压、法院绕过空间和实际辖区",
+      "original_classification": "实测，生产路径",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "宏观战斗、法院、申诉和镇压需要真实在场人员与当前辖区。",
+      "code": [
+        "internal/sim/scale.go:stepCohortConflicts/stepCohortConflictsAt/promoteEligibleCohorts",
+        "internal/sim/justice_revolt.go:stepMacroCourtTrials/stepMacroAppeals/stepPacificationAndAmnesty/courtPartiesPresent",
+        "internal/sim/relations_kinship.go:stepMacroVendettasAndMediation",
+        "internal/sim/geography_polity.go:cohortHasJurisdiction/presentLawCollector",
+        "internal/sim/world_test.go:TestMillionPopulationSimulationAndHydration",
+        "internal/sim/justice_revolt_test.go:TestJusticeRevoltWrongfulFramingAppealUprisingAndAmnesty"
+      ],
+      "tests": [
+        "TestAgricultureProductionEmptyLivingCareSnapshot",
+        "TestIntegratedFourPillarsMillionPopConservation",
+        "TestJusticeRevoltWrongfulFramingAppealUprisingAndAmnesty",
+        "TestMillionPopulationSimulationAndHydration",
+        "TestRelationsKinshipMarriageVendettaTurfAndMonopoly",
+        "TestSpaceSocietyCourtAndSuppressionRequirePresentAuthority",
+        "TestSpaceSocietyMacroCombatRequiresPresence",
+        "TestSpaceSocietyMacroSparringRequiresPresence",
+        "TestSpaceSocietyPromotionKeepsGraduatesInTheirDistrict",
+        "TestSpaceSocietyScheduledConflictsRequirePresence",
+        "TestSpaceSocietyVendettaAndMacroMediationCannotReachRemoteParties"
+      ],
+      "test_evidence": [
+        "TestSpaceSocietyMacroCombatRequiresPresence",
+        "TestSpaceSocietyMacroSparringRequiresPresence",
+        "TestSpaceSocietyScheduledConflictsRequirePresence",
+        "TestSpaceSocietyPromotionKeepsGraduatesInTheirDistrict",
+        "TestSpaceSocietyCourtAndSuppressionRequirePresentAuthority",
+        "TestSpaceSocietyVendettaAndMacroMediationCannotReachRemoteParties",
+        "TestRelationsKinshipMarriageVendettaTurfAndMonopoly",
+        "TestMillionPopulationSimulationAndHydration",
+        "TestJusticeRevoltWrongfulFramingAppealUprisingAndAmnesty",
+        "TestIntegratedFourPillarsMillionPopConservation",
+        "TestAgricultureProductionEmptyLivingCareSnapshot"
+      ],
+      "checks_limit_basis": [
+        {
+          "check": "宏观战斗按地区挑选参与者；法院、申诉和镇压需要当地人员及实际辖区。明确隶属于某个 Polity 的执法群体不能执行另一政权的辖区。仇杀要求双方同区。",
+          "basis": "无道路跨区劫掠、跨世界挑被告、远处驻军镇压及异区仇杀的可达执行路径。",
+          "normal_operations_affected": "取消异地即时攻击、拘捕、切磋和法院执行；同区合法参与者仍能正常执行，人物的移动和货运机制保留。",
+          "new_numeric_limit": "无"
+        }
+      ]
+    },
+    {
+      "id": "SS-04",
+      "group": "space-society",
+      "original_title": "任何居民可对未知远处仇怨强制扣款结案",
+      "original_classification": "实测，生产路径",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "调解需要已知仇怨、实际沟通及双方同额接受，第三人只能提出方案。",
+      "code": [
+        "internal/sim/relations_kinship.go:GrudgeRecord/ApplyRelationAction(mediate_feud)/stepMacroVendettasAndMediation",
+        "internal/sim/relations_kinship_test.go:CausalGrudgeVendettaRetaliationAndBloodMoneyMediation",
+        "internal/sim/mediation_options.go:mediationActions",
+        "internal/sim/world.go:Perception.MediationActions",
+        "internal/agent/pipeline.go:Options/RuleSelector.Select",
+        "internal/agent/mediation_integration_test.go"
+      ],
+      "tests": [
+        "TestMediationOptionsReachBilateralSettlement",
+        "TestRelationsKinshipMarriageVendettaTurfAndMonopoly",
+        "TestSpaceSocietyMediationNeedsKnowledgePresenceAndBothAcceptances",
+        "TestSpaceSocietyVendettaAndMacroMediationCannotReachRemoteParties"
+      ],
+      "test_evidence": [
+        "TestSpaceSocietyMediationNeedsKnowledgePresenceAndBothAcceptances",
+        "TestSpaceSocietyVendettaAndMacroMediationCannotReachRemoteParties",
+        "TestRelationsKinshipMarriageVendettaTurfAndMonopoly",
+        "TestMediationOptionsReachBilateralSettlement"
+      ],
+      "checks_limit_basis": [
+        {
+          "check": "执行复用 actorKnowsAboutGrudge。双方必须同地并能沟通。第三人只能提议；双方分别执行 mediate_feud 接受相同金额后才从付款者账户转款并结案。金额变化会清除旧确认。",
+          "basis": "未知远处仇怨可由任意居民直接强制扣款结案的公开 Apply 反例，以及需求明确要求实际沟通和接受。",
+          "normal_operations_affected": "取消第三人和宏观每日流程的强制扣款。没有可解析个人代表的匿名群体不会被自动调解扣款；已有仇杀仍按实际同区执行。",
+          "new_numeric_limit": "无；默认赔款仍沿用现有公式。"
+        }
+      ]
+    },
+    {
+      "id": "SS-05",
+      "group": "space-society",
+      "original_title": "夺取主权后旧政权法律继续控制领地",
+      "original_classification": "实测，生产路径",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "控制权变更同步实际辖区，税法、宵禁与禁运立即读取新控制方。",
+      "code": [
+        "internal/sim/relations_kinship.go:setDistrictControl/EnsureKinshipSeeded/ApplyRelationAction(claim_turf)/stepTurfLeadershipAndCharters/factionStrengthInDistrict",
+        "internal/sim/geography_polity.go:EffectiveGoverningPolity/EffectiveMarketTaxPermille/IsCurfewActiveAt/IsItemEmbargoedAt"
+      ],
+      "tests": [
+        "TestSpaceSocietyTerritorialControlChangesLawAndPerception"
+      ],
+      "test_evidence": [
+        "TestSpaceSocietyTerritorialControlChangesLawAndPerception"
+      ],
+      "checks_limit_basis": [
+        {
+          "check": "显式和每日自动主权切换共用 setDistrictControl，同时更新地区及场所的实际辖区、社会历史。法律、禁运、税率和两种视图立即读取新辖区。远处名望不再单独产生当地控制力量。",
+          "basis": "控制方已经更换但旧宵禁和税率继续生效的公开 Apply 反例。",
+          "normal_operations_affected": "失去控制的政权不再对被夺地区执法收税；该政权其他地区保持各自实际归属。",
+          "new_numeric_limit": "无"
+        }
+      ]
+    },
+    {
+      "id": "SS-06",
+      "group": "space-society",
+      "original_title": "有限距离通信在缺少坐标时变成无限距离",
+      "original_classification": "实测，生产路径",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "有限距离通信和教学共用距离判断，不能因缺坐标变成无限距离。",
+      "code": [
+        "internal/sim/geography_polity.go:communicationRangeAllows/applyTransmitMessage",
+        "生产代理接入：internal/sim/knowledge_laws.go:applyTeachKnowledge"
+      ],
+      "tests": [
+        "TestProductionKnowledgeTeachingNeedsKnownChannelDistance",
+        "TestSpaceSocietyCommunicationRequiresVerifiedRange"
+      ],
+      "test_evidence": [
+        "TestSpaceSocietyCommunicationRequiresVerifiedRange",
+        "TestProductionKnowledgeTeachingNeedsKnownChannelDistance"
+      ],
+      "checks_limit_basis": [
+        {
+          "check": "正距离上限的通信和教学共用距离判断。确切同地可直接通信；其他地点需要两端可验证坐标。点对点无法验证或超距时明确 action_failed，广播只向范围成立的接收者交付。",
+          "basis": "缺坐标绕过有限 RangeKm 的通信和教学路径。距离沿用既有 GeoDistanceKm 整数公里度量。",
+          "normal_operations_affected": "跨地点但缺坐标的有限通信不能交付；确切同地、已有的零范围同区模式、恰好五公里的最大距离已验证通过。",
+          "new_numeric_limit": "无；使用各通道原有 RangeKm。"
+        }
+      ]
+    },
+    {
+      "id": "SS-07",
+      "group": "space-society",
+      "original_title": "人物与两种模型都收到远处实时活动效果的完整状态",
+      "original_classification": "实测，生产路径",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "两种感知入口只提供可见效果；他人的内部强度和维持来源不再泄露。",
+      "code": [
+        "internal/sim/geography_polity.go:perceivedActiveEffects",
+        "internal/sim/world.go:View",
+        "internal/sim/scale.go:viewIndexed"
+      ],
+      "tests": [
+        "TestSpaceSocietyEffectAppearancePreservesPersonalCapabilities",
+        "TestSpaceSocietyEffectsExposeOnlyPerceivedAppearance"
+      ],
+      "test_evidence": [
+        "TestSpaceSocietyEffectsExposeOnlyPerceivedAppearance",
+        "TestSpaceSocietyEffectAppearancePreservesPersonalCapabilities"
+      ],
+      "checks_limit_basis": [
+        {
+          "check": "两个视图共用效果筛选。只保留本地可见、本人维持/产生、本人实际获得的能力或合法感官可见效果。非本人效果只展示外观和锚点，不展示施法者、完整强度和维持成本；本人获得的有效能力仍保留并深拷贝。",
+          "basis": "远处 secret_remote_barrier、施法者和 Integrity=777 同时进入两种感知序列化的审计复现。",
+          "normal_operations_affected": "模型不能从视图读取未知远处的实时效果和他人的内部状态；合法感官在最大距离可看见效果外观，实际获得的动作能力不受脱敏影响。",
+          "new_numeric_limit": "无"
+        }
+      ]
+    },
+    {
+      "id": "SS-08",
+      "group": "space-society",
+      "original_title": "远距感知公共方法不检查观察者自身屏蔽",
+      "original_classification": "实测公共方法缺陷；当前仅测试调用，不作生产已触发结论",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "远感同时检查观察者自身和目标的室内屏蔽及穿透能力。",
+      "code": [
+        "internal/sim/geography_polity.go:CanSenseVenueRemotely/perceivedActiveEffects"
+      ],
+      "tests": [
+        "TestSpaceSocietyRemoteSenseChecksObserverEnclosureAtMaximumRange"
+      ],
+      "test_evidence": [
+        "TestSpaceSocietyRemoteSenseChecksObserverEnclosureAtMaximumRange"
+      ],
+      "checks_limit_basis": [
+        {
+          "check": "远感同时检查观察者和目标的室内穿透规则及屏蔽强度。效果感知还检查目标人物所在房屋的屏蔽。",
+          "basis": "Shielding=100 的封闭观察者以 PenetrationPower=1 且无室内穿透仍能远感的公共方法反例。",
+          "normal_operations_affected": "被自己所在场所屏蔽的感官不能出射；能力恰好达到屏蔽值且距离恰好达到最大值的合法观察已通过。",
+          "new_numeric_limit": "无；使用既有 SensorySpec/房屋/场所屏蔽值。"
+        }
+      ]
+    },
+    {
+      "id": "SS-09",
+      "group": "space-society",
+      "original_title": "宏观贸易直接绕过属地禁运",
+      "original_classification": "实测，生产调用函数链",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "宏观交易和货运遵守相同属地禁运规则，并保留合法绕行。",
+      "code": [
+        "internal/sim/logistics.go:planFreightRoute/freightRouteAvailableBatches/reserveFreightRoute/FreightCapacityUsage",
+        "internal/sim/world.go:World.FreightUsage",
+        "internal/sim/scale.go:clearRegionalCohortMarket",
+        "农业接入：internal/sim/farming_delivery.go:DispatchHarvest"
+      ],
+      "tests": [
+        "TestFreightCapacitySharesEdgesAndSurvivesSnapshot",
+        "TestFreightMarketSharesCapacityAcrossCallsAndOtherDispatches",
+        "TestSnapshotJSONRoundTripPreservesAllFields",
+        "TestSpaceSocietyFreightHonorsEndpointAndTransitEmbargoes",
+        "TestSpaceSocietyFreightKeepsLegalBypassAroundEmbargo"
+      ],
+      "test_evidence": [
+        "TestSpaceSocietyFreightHonorsEndpointAndTransitEmbargoes",
+        "TestSpaceSocietyFreightKeepsLegalBypassAroundEmbargo",
+        "TestFreightCapacitySharesEdgesAndSurvivesSnapshot",
+        "TestFreightMarketSharesCapacityAcrossCallsAndOtherDispatches",
+        "TestSnapshotJSONRoundTripPreservesAllFields"
+      ],
+      "checks_limit_basis": [
+        {
+          "check": "宏观本地成交和跨区路线使用与个人交易同一 IsItemEmbargoedAt。路线查找按货物排除受禁起点、终点和过境辖区；仍可选择合法绕行路线。",
+          "basis": "属地明确禁运 timber 时宏观清算仍扣货收款发运的审计反例。",
+          "normal_operations_affected": "被禁运的货物不再成交或穿越受禁辖区；不受禁运的可达路线和绕行路径已验证可用。",
+          "new_numeric_limit": "无"
+        }
+      ]
+    },
+    {
+      "id": "SS-10",
+      "group": "space-society",
+      "original_title": "宏观货运采用另一税率和收税主体",
+      "original_classification": "实测，生产调用函数链",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "宏观市场按实际属地税率收税，通行税单列并进入真实财政账户。",
+      "code": [
+        "internal/sim/scale.go:clearRegionalCohortMarket",
+        "共用来源：internal/sim/geography_polity.go:EffectiveMarketTaxPermille/EffectiveGoverningPolity"
+      ],
+      "tests": [
+        "TestSpaceSocietyFreightUsesPolityMarketTax"
+      ],
+      "test_evidence": [
+        "TestSpaceSocietyFreightUsesPolityMarketTax"
+      ],
+      "checks_limit_basis": [
+        {
+          "check": "宏观市场税按买方成交地的实际辖区税率结算并入该 Polity 财政和账本。通行税另列 transit_tax，只对路线实际跨辖区边收取并交进入的辖区；同一政权内跨区不产生通行税。",
+          "basis": "500‰ 属地市场税被全局税率替代、税款进入 PublicTreasury 而非辖区财政的审计反例。",
+          "normal_operations_affected": "宏观货运不能绕过已经颁布的税法。保留既有税款不超过成交价的约束。",
+          "new_numeric_limit": "无；使用既有属地市场税和 Governance.TransitCustomsPermille。"
+        }
+      ]
+    },
+    {
+      "id": "SS-11",
+      "group": "space-society",
+      "original_title": "叛军并回平民群体后在途货物仍交给零人口旧群体",
+      "original_classification": "实测，生产调用函数链",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "同地完全并群同步迁移已付款在途货权和农业资产，货物仍会真实到达。",
+      "code": [
+        "internal/sim/justice_revolt.go:reintegrateRebels",
+        "internal/sim/shipments.go:transferShipmentOwnership",
+        "农业共用接口：transferGrowingAssets(fromKind,fromID,toKind,toID)"
+      ],
+      "tests": [
+        "TestSpaceSocietyAmnestyTransfersIncomingCargo"
+      ],
+      "test_evidence": [
+        "TestSpaceSocietyAmnestyTransfersIncomingCargo"
+      ],
+      "checks_limit_basis": [
+        {
+          "check": "并群目的地必须同地。完全并群同时迁移已付款 Shipment.BuyerID 和农业生产资产；部分并群保留仍有人口的原收货账户。",
+          "basis": "大赦后旧叛军人口为零但在途二十粮仍交旧群体的实际执行反例。",
+          "normal_operations_affected": "不能无路把叛军人口及手头资产直接并入异地群体；同地完全并群后，普通库存、在途货物、在产批次、照料职责和保留亲畜都保留。",
+          "new_numeric_limit": "无"
+        }
+      ]
+    },
+    {
+      "id": "ROOT-01",
+      "group": "root",
+      "original_title": "资源槽耗尽后按默认值自动补满，零再生也生效",
+      "original_classification": "实测实现错误",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "明确的零值表示耗尽，只有缺少键才初始化，保存恢复后不补满。",
+      "code": [
+        "internal/sim/states_ledgers.go:setActorSlotValue",
+        "internal/sim/effects_combat.go:stepActiveEffects"
+      ],
+      "tests": [
+        "TestRootAuditExhaustedSlotStaysZero",
+        "TestRootAuditSustainedEffectDoesNotRefillExhaustedSlot"
+      ],
+      "test_evidence": [
+        "TestRootAuditExhaustedSlotStaysZero",
+        "TestRootAuditSustainedEffectDoesNotRefillExhaustedSlot"
+      ],
+      "checks_limit_basis": [
+        "明确的零值表示耗尽，只有缺少键才初始化；依据零再生资源槽反复回满的审计反例。正好够一次消耗仍能执行，零值经保存恢复不丢失。没有新增数量上限。"
+      ]
+    },
+    {
+      "id": "ROOT-02",
+      "group": "root",
+      "original_title": "自动阈值转换绕过同一转换声明的材料、条件与工时",
+      "original_classification": "实测实现错误",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "主动、自动和声明式转换共用前置条件、实际扣料及转换工时。",
+      "code": [
+        "internal/sim/transition_rules.go:transitionRequirementReason",
+        "internal/sim/states_ledgers.go:stepActorStateSlotsAndForm",
+        "internal/sim/states_ledgers.go:applyAttemptTransition",
+        "internal/sim/effects_combat.go:applyDeclarativeAction",
+        "internal/sim/effects_combat.go:finishDeclarativeAction"
+      ],
+      "tests": [
+        "TestRootAuditAutomaticTransitionDoesNotReplaceBusyTask",
+        "TestRootAuditAutomaticTransitionUsesPrerequisitesCostsAndTime",
+        "TestRootAuditDeclarativeTransitionUsesItsOwnCostsAndDuration"
+      ],
+      "test_evidence": [
+        "TestRootAuditAutomaticTransitionUsesPrerequisitesCostsAndTime",
+        "TestRootAuditAutomaticTransitionDoesNotReplaceBusyTask",
+        "TestRootAuditDeclarativeTransitionUsesItsOwnCostsAndDuration"
+      ],
+      "checks_limit_basis": [
+        "主动、阈值自动及声明式动作附带转换共用前置条件和扣料入口，并执行声明工时；依据绕过材料与40tick工期的审计反例。忙碌、监禁和死亡人物不能同时启动自动转换。已达成的目标形态不重复转换。收紧了原本免费、瞬间、可覆盖忙碌任务的路径，没有新增任意工时。"
+      ]
+    },
+    {
+      "id": "ROOT-03",
+      "group": "root",
+      "original_title": "同一动作的两份金币成本分开校验，合计可透支",
+      "original_classification": "实测实现错误",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "同币种成本先合计，再按同一结果校验和扣款。",
+      "code": [
+        "internal/sim/declarative_costs.go:declarativeCurrencyCosts",
+        "internal/sim/effects_combat.go:ActorMeetsDeclarativeCosts",
+        "internal/sim/effects_combat.go:deductDeclarativeCosts"
+      ],
+      "tests": [
+        "TestRootAuditCombinedCoinCosts"
+      ],
+      "test_evidence": [
+        "TestRootAuditCombinedCoinCosts"
+      ],
+      "checks_limit_basis": [
+        "MoneyCost和CurrencyCosts的同币种成本先合计，再按同一结果校验和扣款；依据8+8用10币透支的反例。16币正好足额仍通过，合计使用int64，无新增金额上限。"
+      ]
+    },
+    {
+      "id": "ROOT-04",
+      "group": "root",
+      "original_title": "总量账本不检查持有人负库存，也不证明交付或物理单位守恒",
+      "original_classification": "实测检查能力不足",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "先检查每个持有人非负，再比较总量；交付及材料预算由对应结算规则检查。",
+      "code": [
+        "internal/sim/ledger_holdings.go:VerifyHoldingBounds",
+        "internal/sim/states_ledgers.go:VerifyLedgerConservation",
+        "internal/sim/states_ledgers.go:totalItemHeld",
+        "internal/pack/pack.go:Validate",
+        "internal/pack/production_validation.go:validateProductionAssets",
+        "internal/sim/production_materials.go:ValidateProductionConversion",
+        "internal/sim/production_validation.go:ValidateProductionRules"
+      ],
+      "tests": [
+        "TestGrowthCareCandidatesRequireSeparateAssentAndPreserveLocalGoods",
+        "TestProductionExternalBudgetsPreserveExplicitZeroAndPositiveBoundaries",
+        "TestProductionExternalBudgetsRejectInvalidConsumptionDefinitions",
+        "TestProductionPackValidatesRightsMembersAndHoldings",
+        "TestRootAuditNegativeHoldingsCannotCancelAcrossOwners"
+      ],
+      "test_evidence": [
+        "TestRootAuditNegativeHoldingsCannotCancelAcrossOwners",
+        "TestProductionPackValidatesRightsMembersAndHoldings",
+        "TestProductionExternalBudgetsRejectInvalidConsumptionDefinitions",
+        "TestProductionExternalBudgetsPreserveExplicitZeroAndPositiveBoundaries",
+        "TestGrowthCareCandidatesRequireSeparateAssentAndPreserveLocalGoods",
+        "经济/农业/材料的真实交付与转换回归见对应原始记录"
+      ],
+      "checks_limit_basis": [
+        "总量比较前按持有人检查现金、库存、在产、在途、自然资源和能源非负；依据-5与15掩盖错误的反例，0仍合法，无数量上限。",
+        "外部世界包校验成员身份唯一性、人口覆盖、田块地点/正面积/权利引用及初始持有量；依据本轮新增持久资产与成员结构的外部输入边界。不存在旧结构静默兜底。",
+        "真实交付与物质/营养转换由经济和生产规则各自检查；总量平衡只证明声明模型的账目，不宣称真实单位或现实校准。",
+        "外部饲养间隔、存活预算和消耗项须为正且声明来源；依据当前循环必须前进、消耗项成为除数及物质预算不能为负的实际路径。工位容量、非食物营养、无需人工的照料人数和非活体无限期成熟仍可明确为0，最小正数1可通过，没有新增数量上限。"
+      ]
+    },
+    {
+      "id": "ROOT-05",
+      "group": "root",
+      "original_title": "同一禁枪世界法则能被声明式射击动作绕过",
+      "original_classification": "实测实现错误",
+      "status": "fixed",
+      "same_repair_as": null,
+      "result": "内置与声明式枪械动作共用禁枪法则，候选和延迟结算均遵守。",
+      "code": [
+        "internal/sim/knowledge_laws.go:IsActionBlockedByWorldLaw",
+        "internal/sim/world.go:Apply",
+        "internal/sim/effects_combat.go:finishDeclarativeAction",
+        "internal/agent/pipeline.go:Options"
+      ],
+      "tests": [
+        "TestRootAuditFirearmLawCoversDeclarativeAndDelayedActions",
+        "TestWorldLawBlocksDeclarativeFirearmCandidate"
+      ],
+      "test_evidence": [
+        "TestRootAuditFirearmLawCoversDeclarativeAndDelayedActions",
+        "TestWorldLawBlocksDeclarativeFirearmCandidate"
+      ],
+      "checks_limit_basis": [
+        "内置与声明式枪械动作统一执行禁枪法则，长任务在结算前重核可能已经改变的法则；依据声明式射击绕过禁枪的反例。允许枪械时仍能开工，没有新增射程或数值限制。"
+      ]
+    }
+  ],
+  "verification": {
+    "runs": [
+      {
+        "command": "go build -o /tmp/wre-audit-fixed ./cmd/wre",
+        "result": "通过。"
+      },
+      {
+        "command": "go vet ./...",
+        "result": "通过。"
+      },
+      {
+        "command": "go test ./internal/agent -count=1",
+        "result": "通过，4.003秒。"
+      },
+      {
+        "command": "go test ./internal/sim -run '^TestRootAudit|^TestPopulation|^TestAgricultureProduction|^TestProduction|^TestEcologyAudit|^TestEconomy|^TestSpaceSociety|^TestFreight' -count=1",
+        "result": "全部匹配回归通过，0.333秒。"
+      },
+      {
+        "command": "go test ./internal/sim ./internal/agent ./internal/pack -run 'Physical|GrowthCare|External|Reference|WorldLaw' -count=1",
+        "result": "三个包全部匹配测试通过；含真实照料选择到结算、外部参数边界、世界包32tick运行和严格保存恢复。"
+      },
+      {
+        "command": "go test -json ./...",
+        "result": "全仓5个包通过，392个测试及子用例通过，6个可选测试跳过；internal/sim 307.965秒。退出码0。"
+      },
+      {
+        "command": "go test -race -json -timeout 30m ./...",
+        "result": "全仓5个包通过，392个测试及子用例通过，6个可选测试跳过；internal/sim 1201.981秒。退出码0，未发现并发数据竞争。"
+      },
+      {
+        "command": "逐条比对正式清单与两轮完整测试日志",
+        "result": "73条记录列出的命名回归全部出现在普通测试和并发竞争检测的通过结果中，没有遗漏或仅凭名称推定通过的测试。"
+      },
+      {
+        "command": "git diff --check",
+        "result": "通过。"
+      }
+    ],
+    "database_note": "未设置WRE_TEST_DATABASE_URL。PostgreSQL专用测试会按项目约定跳过；本轮不把数据库持久化集成记为通过。250天可选粮食周期测试未启用。",
+    "complete": true
+  },
+  "fallbacks": "无",
+  "retries": "无"
+}

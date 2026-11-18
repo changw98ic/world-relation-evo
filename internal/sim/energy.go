@@ -38,16 +38,12 @@ func (w *World) supplyEnergy() {
 			continue
 		}
 		if s.FuelItem != "" {
-			n.FuelStock -= units
-			w.recordLedgerItemConsumed(s.FuelItem, units)
+			w.adjustFlowNodeFuel(n, -units, true)
 		} else {
 			w.drawDistrictResource(n.DistrictID, s.ResourcePool, units)
 		}
 		energy := units * s.EnergyPerUnit
-		n.StoredEnergy += energy
-		if w.LedgerAudit != nil {
-			w.LedgerAudit.Energy.Produced += energy
-		}
+		w.adjustFlowNodeEnergy(n, energy, true)
 		n.NextSupplyTick = w.Tick + s.CycleTicks
 	}
 }

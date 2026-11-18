@@ -73,7 +73,8 @@ type WeatherSpec struct {
 	ColdDamage            int            `json:"cold_damage,omitempty"`
 }
 
-// ResourcePoolSpec defines a finite regional ecological pool with daily regeneration and depletion floor.
+// ResourcePoolSpec defines a finite regional resource pool. Biological recruitment
+// requires a mature source pool and completes only after MaturityTicks.
 type ResourcePoolSpec struct {
 	ID                  string         `json:"id"`
 	Name                string         `json:"name"`
@@ -81,7 +82,9 @@ type ResourcePoolSpec struct {
 	PotableWater        bool           `json:"potable_water,omitempty"`
 	RegenPermillePerDay int            `json:"regen_permille_per_day"`
 	SeasonalRegenPct    map[string]int `json:"seasonal_regen_pct,omitempty"`
-	DepletionFloorPct   int            `json:"depletion_floor_pct,omitempty"`
+	Biological          bool           `json:"biological,omitempty"`
+	MaturityTicks       int64          `json:"maturity_ticks,omitempty"`
+	ReproductionSource  string         `json:"reproduction_source,omitempty"`
 }
 
 // EncounterSpec defines a declarative wild creature, spirit/anomaly, or hazard entity inhabiting specific district features.
@@ -98,6 +101,8 @@ type EncounterSpec struct {
 	LethalityPermille int      `json:"lethality_permille,omitempty"`
 	RareDropItem      string   `json:"rare_drop_item,omitempty"`
 	RareDropPermille  int      `json:"rare_drop_permille,omitempty"`
+	SourceResource    string   `json:"source_resource,omitempty"`
+	ResourcePerKill   int64    `json:"resource_per_kill,omitempty"`
 	SuppressorTags    []string `json:"suppressor_tags,omitempty"`
 	BountyCoins       int      `json:"bounty_coins,omitempty"`
 }
@@ -117,6 +122,8 @@ type DisasterSpec struct {
 	CasualtyPermille   int            `json:"casualty_permille,omitempty"`
 	MitigatedByInfra   string         `json:"mitigated_by_infra,omitempty"`
 	ReliefItem         string         `json:"relief_item,omitempty"`
+	FlowKind           string         `json:"flow_kind,omitempty"`
+	YieldPct           *int           `json:"yield_pct,omitempty"`
 }
 
 // AccidentSpec defines a declarative workplace or transit accident and its tool/infrastructure safety mitigations.
@@ -161,6 +168,7 @@ type RitualSpec struct {
 	TrustBoost              int            `json:"trust_boost,omitempty"`
 	DisasterReliefWeightPct int            `json:"disaster_relief_weight_pct,omitempty"`
 	ThreatAppeaseAmount     int            `json:"threat_appease_amount,omitempty"`
+	Supernatural            bool           `json:"supernatural,omitempty"`
 }
 
 // DiseaseSpec defines a contagious or environmental illness driven by sanitation, water quality, or cold exposure.
@@ -188,6 +196,10 @@ type LifecycleSpec struct {
 	ElderAnnualDeathPermille  int    `json:"elder_annual_death_permille"`
 	CompostItem               string `json:"compost_item,omitempty"`
 	AutoHydrateSuccessor      bool   `json:"auto_hydrate_successor,omitempty"`
+	HungerIntervalTicks       int64  `json:"hunger_interval_ticks,omitempty"`
+	StarvationThreshold       int    `json:"starvation_threshold,omitempty"`
+	StarvationDamage          int    `json:"starvation_damage,omitempty"`
+	MaxEcologicalYieldPct     int    `json:"max_ecological_yield_pct,omitempty"`
 }
 
 // EcologySpec configures initial ecological state for an external WorldPack.
@@ -207,25 +219,35 @@ type ActiveDisaster struct {
 
 // DistrictState holds live ecological, weather, sanitation, infrastructure, threat, and disaster state for one district.
 type DistrictState struct {
-	DistrictID       string           `json:"district_id"`
-	Weather          string           `json:"weather"`
-	Sanitation       int              `json:"sanitation"`
-	NightsoilPool    int64            `json:"nightsoil_pool,omitempty"`
-	MoraleBonus      int              `json:"morale_bonus,omitempty"`
-	BountyPool       int              `json:"bounty_pool,omitempty"`
-	Corruption       int              `json:"corruption,omitempty"`
-	RacketPressure   int              `json:"racket_pressure,omitempty"`
-	BribeShieldTicks int              `json:"bribe_shield_ticks,omitempty"`
-	LastRitualSeason string           `json:"last_ritual_season,omitempty"`
-	Resources        map[string]int64 `json:"resources,omitempty"`
-	MaxResources     map[string]int64 `json:"max_resources,omitempty"`
-	Infrastructure   map[string]int   `json:"infrastructure,omitempty"`
-	ThreatActivity   map[string]int   `json:"threat_activity,omitempty"`
-	ActiveDisasters  []ActiveDisaster `json:"active_disasters,omitempty"`
+	DistrictID       string                `json:"district_id"`
+	Weather          string                `json:"weather"`
+	Sanitation       int                   `json:"sanitation"`
+	NightsoilPool    int64                 `json:"nightsoil_pool,omitempty"`
+	MoraleBonus      int                   `json:"morale_bonus,omitempty"`
+	BountyPool       int                   `json:"bounty_pool,omitempty"`
+	Corruption       int                   `json:"corruption,omitempty"`
+	RacketPressure   int                   `json:"racket_pressure,omitempty"`
+	BribeShieldTicks int                   `json:"bribe_shield_ticks,omitempty"`
+	LastRitualSeason string                `json:"last_ritual_season,omitempty"`
+	Resources        map[string]int64      `json:"resources,omitempty"`
+	MaxResources     map[string]int64      `json:"max_resources,omitempty"`
+	Infrastructure   map[string]int        `json:"infrastructure,omitempty"`
+	ThreatActivity   map[string]int        `json:"threat_activity,omitempty"`
+	ActiveDisasters  []ActiveDisaster      `json:"active_disasters,omitempty"`
+	Recruitment         []ResourceRecruitment `json:"recruitment,omitempty"`
+	Patrols             []EcologyPatrol       `json:"patrols,omitempty"`
+	WaterOverflow       map[string]int64      `json:"water_overflow,omitempty"`
+	WaterRegenRemainder map[string]int64      `json:"water_regen_remainder,omitempty"`
+	WaterFlowRemainder  map[string]int64      `json:"water_flow_remainder,omitempty"`
 }
 
 func CloneDistrictState(ds DistrictState) DistrictState {
 	out := ds
+	out.Recruitment = append([]ResourceRecruitment(nil), ds.Recruitment...)
+	out.Patrols = append([]EcologyPatrol(nil), ds.Patrols...)
+	out.WaterOverflow = cloneInt64Map(ds.WaterOverflow)
+	out.WaterRegenRemainder = cloneInt64Map(ds.WaterRegenRemainder)
+	out.WaterFlowRemainder = cloneInt64Map(ds.WaterFlowRemainder)
 	if ds.Resources != nil {
 		out.Resources = make(map[string]int64, len(ds.Resources))
 		for k, v := range ds.Resources {
@@ -365,36 +387,41 @@ func DefaultWeatherSpecs() map[string]WeatherSpec {
 func DefaultResourceSpecs() map[string]ResourcePoolSpec {
 	return map[string]ResourcePoolSpec{
 		"soil_fertility": {
-			ID: "soil_fertility", Name: "水田地力", NodeFeatures: []string{"farmland"}, RegenPermillePerDay: 90,
-			SeasonalRegenPct: map[string]int{"spring": 130, "summer": 115, "autumn": 100, "winter": 70}, DepletionFloorPct: 35,
+			ID: "soil_fertility", Name: "田野地力", NodeFeatures: []string{"farmland", "forage_ground"}, RegenPermillePerDay: 90,
+			SeasonalRegenPct: map[string]int{"spring": 130, "summer": 115, "autumn": 100, "winter": 70},
 		},
 		"pasture_grass": {
 			ID: "pasture_grass", Name: "牧场水草", NodeFeatures: []string{"pasture"}, RegenPermillePerDay: 110,
-			SeasonalRegenPct: map[string]int{"spring": 140, "summer": 125, "autumn": 95, "winter": 50}, DepletionFloorPct: 30,
+			Biological: true, ReproductionSource: "pasture_grass", MaturityTicks: ((1000 + 110 - 1) / 110) * TicksPerDay,
+			SeasonalRegenPct: map[string]int{"spring": 140, "summer": 125, "autumn": 95, "winter": 50},
 		},
 		"fish_stock": {
 			ID: "fish_stock", Name: "江河鱼汛", NodeFeatures: []string{"fishery_waters"}, RegenPermillePerDay: 105,
-			SeasonalRegenPct: map[string]int{"spring": 120, "summer": 135, "autumn": 110, "winter": 65}, DepletionFloorPct: 30,
+			Biological: true, ReproductionSource: "fish_stock", MaturityTicks: ((1000 + 105 - 1) / 105) * TicksPerDay,
+			SeasonalRegenPct: map[string]int{"spring": 120, "summer": 135, "autumn": 110, "winter": 65},
 		},
 		"timber_stand": {
 			ID: "timber_stand", Name: "山林蓄木", NodeFeatures: []string{"woodland"}, RegenPermillePerDay: 75,
-			SeasonalRegenPct: map[string]int{"spring": 125, "summer": 120, "autumn": 90, "winter": 55}, DepletionFloorPct: 35,
+			Biological: true, ReproductionSource: "timber_stand", MaturityTicks: ((1000 + 75 - 1) / 75) * TicksPerDay,
+			SeasonalRegenPct: map[string]int{"spring": 125, "summer": 120, "autumn": 90, "winter": 55},
 		},
 		"ore_vein": {
 			ID: "ore_vein", Name: "矿脉储量", NodeFeatures: []string{"mine_shaft", "woodland"}, RegenPermillePerDay: 0,
-			SeasonalRegenPct: map[string]int{"spring": 100, "summer": 100, "autumn": 100, "winter": 100}, DepletionFloorPct: 40,
+			SeasonalRegenPct: map[string]int{"spring": 100, "summer": 100, "autumn": 100, "winter": 100},
 		},
 		"game_herd": {
-			ID: "game_herd", Name: "山野兽群", NodeFeatures: []string{"hunting_ground"}, RegenPermillePerDay: 95,
-			SeasonalRegenPct: map[string]int{"spring": 125, "summer": 115, "autumn": 120, "winter": 75}, DepletionFloorPct: 25,
+			ID: "game_herd", Name: "山野兽群", NodeFeatures: []string{"hunting_ground", "woodland"}, RegenPermillePerDay: 95,
+			Biological: true, ReproductionSource: "game_herd", MaturityTicks: ((1000 + 95 - 1) / 95) * TicksPerDay,
+			SeasonalRegenPct: map[string]int{"spring": 125, "summer": 115, "autumn": 120, "winter": 75},
 		},
 		"herb_bed": {
 			ID: "herb_bed", Name: "灵药山苗", NodeFeatures: []string{"herb_patch"}, RegenPermillePerDay: 95,
-			SeasonalRegenPct: map[string]int{"spring": 135, "summer": 120, "autumn": 100, "winter": 50}, DepletionFloorPct: 30,
+			Biological: true, ReproductionSource: "herb_bed", MaturityTicks: ((1000 + 95 - 1) / 95) * TicksPerDay,
+			SeasonalRegenPct: map[string]int{"spring": 135, "summer": 120, "autumn": 100, "winter": 50},
 		},
 		"water_table": {
 			ID: "water_table", Name: "河井水源", NodeFeatures: []string{"water_source", "canal_wharf"}, PotableWater: true, RegenPermillePerDay: 160,
-			SeasonalRegenPct: map[string]int{"spring": 120, "summer": 125, "autumn": 100, "winter": 85}, DepletionFloorPct: 40,
+			SeasonalRegenPct: map[string]int{"spring": 120, "summer": 125, "autumn": 100, "winter": 85},
 		},
 	}
 }
@@ -406,7 +433,7 @@ func DefaultEncounterSpecs() []EncounterSpec {
 			NodeFeatures: []string{"hunting_ground", "woodland"},
 			BaseActivity: 24, GrowthPerDay: 8, SurgeThreshold: 56,
 			HazardPermille: 18, Damage: 18, LethalityPermille: 55,
-			RareDropItem: "hide", RareDropPermille: 420,
+			RareDropItem: "hide", RareDropPermille: 420, SourceResource: "game_herd", ResourcePerKill: 1,
 			SuppressorTags: []string{"hunter", "martial", "law"}, BountyCoins: 8,
 		},
 		{
@@ -414,7 +441,7 @@ func DefaultEncounterSpecs() []EncounterSpec {
 			NodeFeatures: []string{"mine_shaft", "herb_patch"},
 			BaseActivity: 18, GrowthPerDay: 7, SurgeThreshold: 52,
 			HazardPermille: 14, Damage: 20, LethalityPermille: 50,
-			RareDropItem: "rare_herb", RareDropPermille: 480,
+			RareDropItem: "rare_herb", RareDropPermille: 480, SourceResource: "herb_bed", ResourcePerKill: 1,
 			SuppressorTags: []string{"hunter", "martial", "ritual"}, BountyCoins: 12,
 		},
 		{
@@ -422,7 +449,7 @@ func DefaultEncounterSpecs() []EncounterSpec {
 			NodeFeatures: []string{"fishery_waters", "canal_wharf"},
 			BaseActivity: 20, GrowthPerDay: 7, SurgeThreshold: 54,
 			HazardPermille: 15, Damage: 18, LethalityPermille: 50,
-			RareDropItem: "rare_herb", RareDropPermille: 350,
+			RareDropItem: "rare_herb", RareDropPermille: 350, SourceResource: "fish_stock", ResourcePerKill: 1,
 			SuppressorTags: []string{"hunter", "law", "martial"}, BountyCoins: 10,
 		},
 	}
@@ -431,7 +458,7 @@ func DefaultEncounterSpecs() []EncounterSpec {
 func DefaultDisasterSpecs() []DisasterSpec {
 	return []DisasterSpec{
 		{
-			ID: "river_flood", Name: "河决洪涝",
+			ID: "river_flood", Name: "河决洪涝", FlowKind: "river",
 			TriggerWeathers: []string{"storm", "rain"}, TriggerSeasons: []string{"summer", "spring"},
 			TargetFeatures:     []string{"farmland", "canal_wharf", "fishery_waters"},
 			ProbPermillePerDay: 95, DurationTicks: 144,
@@ -529,27 +556,27 @@ func DefaultRitualSpecs() []RitualSpec {
 		{
 			ID: "spring_plow_rite", Name: "春祈社稷劝农祭", NodeFeature: "shrine", RequiredTag: "ritual",
 			ScheduledSeason: "spring", Inputs: map[string]int{"sacrificial_offering": 1}, EnergyCost: 8, Ticks: 3,
-			MoraleBoost: 12, TrustBoost: 1, DisasterReliefWeightPct: 25, ThreatAppeaseAmount: 8,
+			MoraleBoost: 12, TrustBoost: 1,
 		},
 		{
 			ID: "summer_river_rite", Name: "夏仲安澜镇水祭", NodeFeature: "shrine", RequiredTag: "ritual",
 			ScheduledSeason: "summer", Inputs: map[string]int{"sacrificial_offering": 1}, EnergyCost: 8, Ticks: 3,
-			MoraleBoost: 12, TrustBoost: 1, DisasterReliefWeightPct: 30, ThreatAppeaseAmount: 14,
+			MoraleBoost: 12, TrustBoost: 1,
 		},
 		{
 			ID: "autumn_harvest_rite", Name: "秋报万宝丰年祭", NodeFeature: "shrine", RequiredTag: "ritual",
 			ScheduledSeason: "autumn", Inputs: map[string]int{"sacrificial_offering": 1}, EnergyCost: 8, Ticks: 3,
-			MoraleBoost: 15, TrustBoost: 2, DisasterReliefWeightPct: 25, ThreatAppeaseAmount: 10,
+			MoraleBoost: 15, TrustBoost: 2,
 		},
 		{
 			ID: "winter_hearth_rite", Name: "冬腊祀祖迎岁祭", NodeFeature: "shrine", RequiredTag: "ritual",
 			ScheduledSeason: "winter", Inputs: map[string]int{"sacrificial_offering": 1}, EnergyCost: 8, Ticks: 3,
-			MoraleBoost: 15, TrustBoost: 2, DisasterReliefWeightPct: 25, ThreatAppeaseAmount: 10,
+			MoraleBoost: 15, TrustBoost: 2,
 		},
 		{
 			ID: "crisis_appeasement_rite", Name: "禳灾祈安太牢大祭", NodeFeature: "shrine", RequiredTag: "ritual",
 			CrisisTrigger: true, Inputs: map[string]int{"sacrificial_offering": 1, "choice_grain": 1}, EnergyCost: 10, Ticks: 4,
-			MoraleBoost: 18, TrustBoost: 2, DisasterReliefWeightPct: 35, ThreatAppeaseAmount: 18,
+			MoraleBoost: 18, TrustBoost: 2,
 		},
 	}
 }
@@ -617,7 +644,7 @@ func (w *World) InitEcology(scalePop int) {
 		}
 		sort.Strings(resKeys)
 		for _, poolID := range resKeys {
-			if ds.MaxResources[poolID] > 0 {
+			if _, declared := d.ResourceCapacities[poolID]; declared {
 				continue
 			}
 			spec := w.Catalog.Resources[poolID]
@@ -628,11 +655,6 @@ func (w *World) InitEcology(scalePop int) {
 					ds.Resources[poolID] = capVal
 					break
 				}
-			}
-			if spec.PotableWater && ds.MaxResources[poolID] == 0 {
-				capVal := int64(800) * scaleFactor
-				ds.MaxResources[poolID] = capVal
-				ds.Resources[poolID] = capVal
 			}
 		}
 		// Seed district infrastructure declaratively from Catalog.Infrastructures
@@ -693,9 +715,9 @@ func (w *World) districtState(districtID string) (DistrictState, bool) {
 	return ds, ok
 }
 
-// EcologicalYieldMultiplierPct computes the combined season, weather, disaster, and resource-pool
-// carrying-capacity yield multiplier (100 = 1.0x) for recipe r in districtID.
-// When w.DistrictStates is nil (legacy small-village mode), it returns 100 so deterministic unit test yields are preserved.
+// EcologicalYieldMultiplierPct computes the combined season, weather, and disaster
+// yield multiplier (100 = 1.0x) for recipe r in districtID.
+// Paid resource-pool draws deliver their declared conversion whenever stock covers ResourceDraw.
 func (w *World) EcologicalYieldMultiplierPct(districtID string, r Recipe) int {
 	if w.DistrictStates == nil {
 		return 100
@@ -709,48 +731,44 @@ func (w *World) EcologicalYieldMultiplierPct(districtID string, r Recipe) int {
 	if cal.SeasonIndex >= 0 && cal.SeasonIndex < len(w.Catalog.Calendar.Seasons) {
 		season := w.Catalog.Calendar.Seasons[cal.SeasonIndex]
 		if r.NodeFeature != "" {
-			if mult := season.FeatureYieldPct[r.NodeFeature]; mult > 0 {
+			if mult, declared := season.FeatureYieldPct[r.NodeFeature]; declared {
 				pct = (pct * mult) / 100
 			}
 		}
 	}
 	if ws, ok := w.Catalog.Weathers[ds.Weather]; ok && r.NodeFeature != "" {
-		if mult := ws.FeatureYieldPct[r.NodeFeature]; mult > 0 {
+		if mult, declared := ws.FeatureYieldPct[r.NodeFeature]; declared {
 			pct = (pct * mult) / 100
 		}
 	}
-	if len(ds.ActiveDisasters) > 0 && r.NodeFeature != "" {
-		pct = (pct * 75) / 100
-	}
-	if r.ResourcePool != "" && ds.MaxResources != nil && ds.MaxResources[r.ResourcePool] > 0 {
-		cur := ds.Resources[r.ResourcePool]
-		maxCap := ds.MaxResources[r.ResourcePool]
-		// Ecological carrying capacity: full yield above 50% capacity; linear scarcity below 50% down to DepletionFloorPct.
-		if cur < maxCap/2 {
-			floor := w.Catalog.Resources[r.ResourcePool].DepletionFloorPct
-			if floor <= 0 {
-				floor = 25
+	for _, dis := range ds.ActiveDisasters {
+		if w.Tick < dis.ExpiresTick && r.NodeFeature != "" {
+			disPct := 75
+			for _, spec := range w.Catalog.Disasters {
+				if spec.ID == dis.ID && spec.YieldPct != nil {
+					disPct = *spec.YieldPct
+					break
+				}
 			}
-			ratioPct := int((cur * 200) / maxCap) // 0..100
-			if ratioPct < floor {
-				ratioPct = floor
-			}
-			pct = (pct * ratioPct) / 100
+			pct = (pct * disPct) / 100
+			break
 		}
 	}
-	if ds.MoraleBonus > 0 {
+	// Morale cannot restore production that season or weather explicitly stopped.
+	if pct > 0 && ds.MoraleBonus > 0 {
 		pct += ds.MoraleBonus / 3
 	}
-	if pct < 25 {
-		pct = 25
+	maxPct := w.Catalog.Lifecycle.MaxEcologicalYieldPct
+	if maxPct <= 0 {
+		maxPct = 180
 	}
-	if pct > 180 {
-		pct = 180
+	if pct > maxPct {
+		pct = maxPct
 	}
 	return pct
 }
 
-// availableDistrictResource excludes the existing 5% ecological reserve.
+// availableDistrictResource returns the physically remaining extractable resource.
 func (w *World) availableDistrictResource(districtID, poolID string) int64 {
 	return w.DistrictStates[districtID].AvailableResource(poolID)
 }
@@ -820,11 +838,26 @@ func (w *World) stepWorldEnvironment() []Event {
 	distIDs := make([]string, 0, len(w.Map.Districts))
 	for _, d := range w.Map.Districts {
 		distIDs = append(distIDs, d.ID)
-		if ds, ok := w.DistrictStates[d.ID]; ok && ds.BribeShieldTicks > 0 {
-			ds.BribeShieldTicks--
+		if ds, ok := w.DistrictStates[d.ID]; ok {
+			if ds.BribeShieldTicks > 0 {
+				ds.BribeShieldTicks--
+			}
+			kept := ds.ActiveDisasters[:0]
+			for _, ad := range ds.ActiveDisasters {
+				if w.Tick < ad.ExpiresTick {
+					kept = append(kept, ad)
+				}
+			}
+			if len(kept) == 0 {
+				kept = nil
+			}
+			ds.ActiveDisasters = kept
+			w.advanceResourceRecruitment(d.ID, &ds)
 			w.DistrictStates[d.ID] = ds
 		}
 	}
+
+	events = append(events, w.advanceEcologyPatrols()...)
 
 	// 1. Weather state machine transition every 12 hours (06:00 and 18:00)
 	if (clock.Hour == 6 || clock.Hour == 18) && clock.Minute == 0 && w.Tick > 0 {
@@ -860,56 +893,16 @@ func (w *World) stepWorldEnvironment() []Event {
 		}
 	}
 
-	// 2. Daily ecological regeneration, infrastructure maintenance, disasters, threats, and rituals (at 07:00)
+	// 1b. Linear per-tick hydrological flow and potable water regeneration (1/TicksPerDay per tick)
+	w.stepHydrologyTick(cal, distIDs)
+
+	// 2. Daily non-water ecological regeneration, infrastructure maintenance, disasters, threats, and rituals (at 07:00)
 	if clock.Hour == 7 && clock.Minute == 0 {
+		w.regenerateEcologicalResources(cal, distIDs)
 		for _, dID := range distIDs {
 			ds, ok := w.DistrictStates[dID]
 			if !ok {
 				continue
-			}
-
-			// 2a. Expire finished disasters
-			if len(ds.ActiveDisasters) > 0 {
-				kept := ds.ActiveDisasters[:0]
-				for _, ad := range ds.ActiveDisasters {
-					if w.Tick < ad.ExpiresTick {
-						kept = append(kept, ad)
-					}
-				}
-				if len(kept) == 0 {
-					ds.ActiveDisasters = nil
-				} else {
-					ds.ActiveDisasters = kept
-				}
-			}
-
-			// 2b. Regenerate ecological resource pools
-			for poolID, maxCap := range ds.MaxResources {
-				cur := ds.Resources[poolID]
-				if cur >= maxCap {
-					continue
-				}
-				spec := w.Catalog.Resources[poolID]
-				regenPermille := spec.RegenPermillePerDay
-				if regenPermille <= 0 {
-					continue
-				}
-				if mult, ok := spec.SeasonalRegenPct[cal.SeasonID]; ok {
-					regenPermille = (regenPermille * mult) / 100
-				}
-				if ws, hasW := w.Catalog.Weathers[ds.Weather]; hasW {
-					if mult, ok := ws.ResourceRegenPct[poolID]; ok {
-						regenPermille = (regenPermille * mult) / 100
-					}
-				}
-				delta := (maxCap * int64(regenPermille)) / 1000
-				if delta <= 0 {
-					continue
-				}
-				delta = min(delta, maxCap-cur)
-				cur += delta
-				w.recordEcologicalChange(dID, poolID, delta)
-				ds.Resources[poolID] = cur
 			}
 
 			// 2c. Infrastructure natural wear & cohort public-works engineering repair (修堤、凿井、支护矿道、修公厕、修义仓)
@@ -976,7 +969,7 @@ func (w *World) stepWorldEnvironment() []Event {
 						break
 					}
 				}
-				if !featMatch {
+				if !featMatch || (dis.FlowKind != "" && !w.hasHydrologicalOverflow(dID, dis.FlowKind)) {
 					continue
 				}
 				prob := dis.ProbPermillePerDay
@@ -1029,7 +1022,9 @@ func (w *World) stepWorldEnvironment() []Event {
 						}
 					}
 				}
-				wounded, dead, reliefUsed := w.applyDisasterImpactAndRelief(dID, dis, dmgScalePct)
+				wounded, dead, reliefUsed, impactEvents := w.applyDisasterImpactAndRelief(dID, dis, dmgScalePct)
+				actorWounded, actorDead := ecologyActorImpactCounts(impactEvents)
+				events = append(events, impactEvents...)
 				ev := Event{
 					ID:      w.NextID,
 					Tick:    w.Tick,
@@ -1045,6 +1040,8 @@ func (w *World) stepWorldEnvironment() []Event {
 						"relief_used":    reliefUsed,
 						"wounded":        wounded,
 						"deaths":         dead,
+						"actor_wounded":  actorWounded,
+						"actor_deaths":   actorDead,
 						"cause":          "disaster",
 					},
 				}
@@ -1059,6 +1056,7 @@ func (w *World) stepWorldEnvironment() []Event {
 					}
 				}
 			}
+			ds.WaterOverflow = nil
 
 			// 2f. Beast & Anomaly ecological growth, surge raids (兽潮/水怪袭扰), official bounties, and hunter/martial suppression
 			for _, enc := range w.Catalog.Encounters {
@@ -1076,7 +1074,9 @@ func (w *World) stepWorldEnvironment() []Event {
 				act += growth
 				if act >= enc.SurgeThreshold {
 					// Surge raid on district workers/boats + Yamen/Guild bounty posted!
-					surgeW, surgeD := w.applyThreatSurge(dID, enc)
+					surgeW, surgeD, impactEvents := w.applyThreatSurge(dID, enc)
+					actorWounded, actorDead := ecologyActorImpactCounts(impactEvents)
+					events = append(events, impactEvents...)
 					ds.BountyPool += enc.BountyCoins * 10
 					ev := Event{
 						ID:      w.NextID,
@@ -1085,15 +1085,17 @@ func (w *World) stepWorldEnvironment() []Event {
 						Kind:    "threat_surge",
 						Action:  Action{Kind: "attack", Location: dID},
 						Payload: map[string]any{
-							"text":        fmt.Sprintf("%s surged in %s (activity %d >= %d; %d injured, %d killed; official bounty raised to %d coins)", enc.Name, dID, act, enc.SurgeThreshold, surgeW, surgeD, ds.BountyPool),
-							"district":    dID,
-							"threat_id":   enc.ID,
-							"threat_name": enc.Name,
-							"category":    enc.Category,
-							"wounded":     surgeW,
-							"deaths":      surgeD,
-							"bounty_pool": ds.BountyPool,
-							"cause":       "beast",
+							"text":          fmt.Sprintf("%s surged in %s (activity %d >= %d; %d injured, %d killed; official bounty raised to %d coins)", enc.Name, dID, act, enc.SurgeThreshold, surgeW, surgeD, ds.BountyPool),
+							"district":      dID,
+							"threat_id":     enc.ID,
+							"threat_name":   enc.Name,
+							"category":      enc.Category,
+							"wounded":       surgeW,
+							"deaths":        surgeD,
+							"actor_wounded": actorWounded,
+							"actor_deaths":  actorDead,
+							"bounty_pool":   ds.BountyPool,
+							"cause":         "beast",
 						},
 					}
 					w.NextID++
@@ -1105,6 +1107,8 @@ func (w *World) stepWorldEnvironment() []Event {
 				ds.ThreatActivity[enc.ID] = act
 			}
 
+			// Casualties may have changed a local patrol's remaining workers.
+			ds.Patrols = w.DistrictStates[dID].Patrols
 			w.DistrictStates[dID] = ds
 		}
 
@@ -1144,11 +1148,7 @@ func (w *World) runCohortInfraRepair(districtID, infraID string, spec Infrastruc
 			continue
 		}
 		for item, qty := range spec.BuildInputs {
-			c.ItemPool[item] -= int64(qty) * 5
-			w.recordLedgerItemConsumed(item, int64(qty)*5)
-			if c.ItemPool[item] <= 0 {
-				delete(c.ItemPool, item)
-			}
+			w.adjustCohortItem(c, item, -int64(qty)*5, true)
 		}
 		next := currentCond + 22
 		if next > spec.MaxCondition {
@@ -1159,190 +1159,94 @@ func (w *World) runCohortInfraRepair(districtID, infraID string, spec Infrastruc
 	return currentCond
 }
 
-func (w *World) applyDisasterImpactAndRelief(districtID string, dis DisasterSpec, dmgScalePct int) (totalWounded, totalDead int, reliefUsed int64) {
+func (w *World) applyDisasterImpactAndRelief(districtID string, dis DisasterSpec, dmgScalePct int) (totalWounded, totalDead int, reliefUsed int64, events []Event) {
+	// The existing relief budget is one unit per eight residents. Coverage now
+	// scales continuously from no relief to the configured full 55% reduction.
 	for i := range w.Cohorts {
 		c := &w.Cohorts[i]
 		if c.District != districtID || c.Population <= 0 {
 			continue
 		}
-		// Granary / stockpiled relief item protects residents from disaster casualties!
-		reliefMitigation := 100
-		if dis.ReliefItem != "" && c.ItemPool[dis.ReliefItem] > 0 {
-			need := int64(maxInt(1, c.Population/8))
-			use := need
-			if use > c.ItemPool[dis.ReliefItem] {
-				use = c.ItemPool[dis.ReliefItem]
-			}
-			c.ItemPool[dis.ReliefItem] -= use
-			w.recordLedgerItemConsumed(dis.ReliefItem, use)
-			if c.ItemPool[dis.ReliefItem] <= 0 {
-				delete(c.ItemPool, dis.ReliefItem)
-			}
+		population := maxInt(0, w.anonymousCohort(*c).Population-w.ecologyReservedWorkers(c.ID))
+		need := (int64(population) + 7) / 8
+		use := int64(0)
+		if dis.ReliefItem != "" && need > 0 {
+			use = min(need, c.ItemPool[dis.ReliefItem])
+			w.adjustCohortItem(c, dis.ReliefItem, -use, true)
 			reliefUsed += use
-			reliefMitigation = 45
 		}
-		if dis.CasualtyPermille > 0 {
-			numer := int64(c.Population) * int64(dis.CasualtyPermille) * int64(dmgScalePct) * int64(reliefMitigation)
-			denom := int64(1000 * 100 * 100)
-			rawAffected := int(numer / denom)
-			if rem := numer % denom; rem > 0 && int64(worldHash(w.ID, w.Tick, "dis_cas:"+c.ID+":"+dis.ID)%uint64(denom)) < rem {
-				rawAffected++
-			}
-			wReq := maxInt(2, rawAffected*3)
-			dReq := (rawAffected + 1) / 2
-			if rawAffected > 0 && dReq == 0 {
-				dReq = 1
-			}
-			cw, cd, _ := w.applyCohortCasualtiesWithCause(c, wReq, dReq, 0, "disaster")
+		wn, dn, den := disasterExposureRates(dis, dmgScalePct, use, need)
+		cw, cd := w.applyEcologyCohortExposure(c, population, wn, dn, den, "disaster:"+dis.ID, "disaster")
+		totalWounded += cw
+		totalDead += cd
+		before := append([]Actor(nil), c.Members...)
+		for mi := range c.Members {
+			a := &c.Members[mi]
+			cw, cd, used, ev := w.applyDisasterActorExposure(a, dis, dmgScalePct)
 			totalWounded += cw
 			totalDead += cd
+			reliefUsed += used
+			events = append(events, ev...)
 		}
+		w.reconcileCohortMemberChanges(c, before)
 	}
-	return totalWounded, totalDead, reliefUsed
+	for i := range w.Actors {
+		a := &w.Actors[i]
+		if a.Dead || a.Location != districtID || a.InTransit() {
+			continue
+		}
+		cw, cd, used, ev := w.applyDisasterActorExposure(a, dis, dmgScalePct)
+		totalWounded += cw
+		totalDead += cd
+		reliefUsed += used
+		events = append(events, ev...)
+	}
+	patrolWounded, patrolDead := w.applyEcologyPatrolExposure(districtID, func(c *PopulationCohort, population int) (int, int) {
+		wn, dn, den := disasterExposureRates(dis, dmgScalePct, 0, 0)
+		return w.applyEcologyCohortExposure(c, population, wn, dn, den, "patrol_disaster:"+dis.ID, "disaster")
+	})
+	totalWounded += patrolWounded
+	totalDead += patrolDead
+	return
 }
 
-func (w *World) applyThreatSurge(districtID string, enc EncounterSpec) (wounded, dead int) {
+func (w *World) applyThreatSurge(districtID string, enc EncounterSpec) (wounded, dead int, events []Event) {
+	// Use the encounter's declared hazard and lethality for every exposed person.
+	wn, dn, den := encounterExposureRates(enc)
 	for i := range w.Cohorts {
 		c := &w.Cohorts[i]
 		if c.District != districtID || c.Population <= 0 {
 			continue
 		}
-		wReq := maxInt(2, c.Population/900)
-		dReq := maxInt(1, wReq/8)
-		cw, cd, _ := w.applyCohortCasualtiesWithCause(c, wReq, dReq, 0, "beast")
+		population := maxInt(0, w.anonymousCohort(*c).Population-w.ecologyReservedWorkers(c.ID))
+		cw, cd := w.applyEcologyCohortExposure(c, population, wn, dn, den, "surge:"+enc.ID, "beast")
 		wounded += cw
 		dead += cd
-	}
-	return wounded, dead
-}
-
-func (w *World) stepCohortThreatSuppression() []Event {
-	var events []Event
-	distIDs := make([]string, 0, len(w.DistrictStates))
-	for k := range w.DistrictStates {
-		distIDs = append(distIDs, k)
-	}
-	sort.Strings(distIDs)
-
-	for _, dID := range distIDs {
-		ds := w.DistrictStates[dID]
-		for _, enc := range w.Catalog.Encounters {
-			act := ds.ThreatActivity[enc.ID]
-			if act < enc.BaseActivity+10 {
-				continue
-			}
-			// Patrols sweep wilderness corridors periodically rather than every single morning everywhere,
-			// allowing seasonal/storm surges to occasionally break through when activity spikes!
-			patrolRoll := int(worldHash(w.ID, w.Tick, "sup_roll:"+dID+":"+enc.ID) % 1000)
-			if patrolRoll >= 320 && ds.BountyPool == 0 {
-				continue
-			}
-			// Find a suppressor cohort (hunter / master_hunter preferred, or martial/law)
-			var hunter *PopulationCohort
-			for i := range w.Cohorts {
-				c := &w.Cohorts[i]
-				if c.EffectivePopulation() < 4 || w.Tick < c.RestUntilTick {
-					continue
-				}
-				prof, ok := w.Catalog.ProfessionByID(c.Profession)
-				if !ok {
-					continue
-				}
-				matched := false
-				for _, g := range prof.Grants {
-					if ActorHasTag(enc.SuppressorTags, g) {
-						matched = true
-						break
-					}
-				}
-				if !matched {
-					continue
-				}
-				if c.District == dID {
-					hunter = c
-					break
-				}
-				if hunter == nil {
-					hunter = c
-				}
-			}
-			if hunter == nil {
-				continue
-			}
-			squad := hunter.EffectivePopulation() / 20
-			if squad < 3 {
-				squad = 3
-			}
-			if squad > 80 {
-				squad = 80
-			}
-			suppressed := 9 + squad/10
-			if suppressed > 15 {
-				suppressed = 15
-			}
-			if suppressed > act-8 {
-				suppressed = act - 8
-			}
-			if suppressed <= 0 {
-				continue
-			}
-			ds.ThreatActivity[enc.ID] = act - suppressed
-			baseBounty := int64(enc.BountyCoins * maxInt(1, squad/6))
-			bounty := w.debitTreasury(baseBounty, "bounty")
-			if ds.BountyPool > 0 {
-				claim := ds.BountyPool
-				if claim > int(baseBounty) {
-					claim = int(baseBounty)
-				}
-				paidClaim := w.debitTreasury(int64(claim), "bounty")
-				ds.BountyPool -= int(paidClaim)
-				bounty += paidClaim
-			}
-			hunter.MoneyPool += bounty
-			var dropQty int64
-			if enc.RareDropItem != "" {
-				dropQty = int64(maxInt(1, (squad*enc.RareDropPermille)/1000))
-				if hunter.ItemPool == nil {
-					hunter.ItemPool = map[string]int64{}
-				}
-				hunter.ItemPool[enc.RareDropItem] += dropQty
-				w.recordLedgerItemProduced(enc.RareDropItem, dropQty)
-			}
-			wHunt := maxInt(1, squad/12)
-			dNumer := int64(wHunt) * int64(maxInt(25, enc.LethalityPermille))
-			dHunt := int(dNumer / 1000)
-			if rem := dNumer % 1000; rem > 0 && int64(worldHash(w.ID, w.Tick, "hunt_d:"+hunter.ID+":"+enc.ID)%1000) < rem {
-				dHunt++
-			}
-			hw, hd, _ := w.applyCohortCasualtiesWithCause(hunter, wHunt, dHunt, 0, "beast")
-			ev := Event{
-				ID:      w.NextID,
-				Tick:    w.Tick,
-				ActorID: hunter.ID,
-				Kind:    "cohort_threat_hunted",
-				Action:  Action{Kind: "hunt_threat", Location: dID, Item: enc.RareDropItem, Quantity: int(dropQty), Price: int(bounty)},
-				Payload: map[string]any{
-					"text":         fmt.Sprintf("%s dispatched %d hunters/guards into %s to suppress %s (-%d threat, +%d %s, +%d bounty coins; %d wounded, %d killed)", hunter.Name, squad, dID, enc.Name, suppressed, dropQty, enc.RareDropItem, bounty, hw, hd),
-					"cohort_id":    hunter.ID,
-					"district":     dID,
-					"threat_id":    enc.ID,
-					"threat_name":  enc.Name,
-					"suppressed":   suppressed,
-					"drop_item":    enc.RareDropItem,
-					"drop_qty":     dropQty,
-					"bounty_coins": bounty,
-					"wounded":      hw,
-					"deaths":       hd,
-					"cause":        "beast",
-				},
-			}
-			w.NextID++
-			events = append(events, ev)
-			events = append(events, w.addCohortXP(hunter, 5, 2)...)
+		before := append([]Actor(nil), c.Members...)
+		for mi := range c.Members {
+			cw, cd, ev := w.applyEcologyActorExposure(&c.Members[mi], wn, dn, den, enc.Damage, "surge:"+enc.ID, "beast")
+			wounded += cw
+			dead += cd
+			events = append(events, ev...)
 		}
-		w.DistrictStates[dID] = ds
+		w.reconcileCohortMemberChanges(c, before)
 	}
-	return events
+	for i := range w.Actors {
+		a := &w.Actors[i]
+		if a.Dead || a.Location != districtID || a.InTransit() {
+			continue
+		}
+		cw, cd, ev := w.applyEcologyActorExposure(a, wn, dn, den, enc.Damage, "surge:"+enc.ID, "beast")
+		wounded += cw
+		dead += cd
+		events = append(events, ev...)
+	}
+	patrolWounded, patrolDead := w.applyEcologyPatrolExposure(districtID, func(c *PopulationCohort, population int) (int, int) {
+		return w.applyEcologyCohortExposure(c, population, wn, dn, den, "patrol_surge:"+enc.ID, "beast")
+	})
+	wounded += patrolWounded
+	dead += patrolDead
+	return
 }
 
 func (w *World) stepCohortRituals(cal CalendarState) []Event {
@@ -1394,11 +1298,7 @@ func (w *World) stepCohortRituals(cal CalendarState) []Event {
 				continue
 			}
 			for inItem, inQty := range rit.Inputs {
-				priests.ItemPool[inItem] -= int64(inQty) * scaleBatches
-				w.recordLedgerItemConsumed(inItem, int64(inQty)*scaleBatches)
-				if priests.ItemPool[inItem] <= 0 {
-					delete(priests.ItemPool, inItem)
-				}
+				w.adjustCohortItem(priests, inItem, -int64(inQty)*scaleBatches, true)
 			}
 			shrineState.LastRitualSeason = seasonTag
 			w.DistrictStates[shrineDist] = shrineState
@@ -1410,7 +1310,7 @@ func (w *World) stepCohortRituals(cal CalendarState) []Event {
 				if ds.MoraleBonus > 30 {
 					ds.MoraleBonus = 30
 				}
-				if rit.DisasterReliefWeightPct > 0 && rit.ThreatAppeaseAmount > 0 {
+				if rit.Supernatural && rit.DisasterReliefWeightPct > 0 && rit.ThreatAppeaseAmount > 0 {
 					appease := (rit.ThreatAppeaseAmount * rit.DisasterReliefWeightPct) / 100
 					for encID, act := range ds.ThreatActivity {
 						if act > appease {
@@ -1465,14 +1365,10 @@ func (w *World) stepCohortRituals(cal CalendarState) []Event {
 				continue
 			}
 			for inItem, inQty := range rit.Inputs {
-				priests.ItemPool[inItem] -= int64(inQty) * 4
-				w.recordLedgerItemConsumed(inItem, int64(inQty)*4)
-				if priests.ItemPool[inItem] <= 0 {
-					delete(priests.ItemPool, inItem)
-				}
+				w.adjustCohortItem(priests, inItem, -int64(inQty)*4, true)
 			}
 			ds.MoraleBonus += rit.MoraleBoost
-			if rit.DisasterReliefWeightPct > 0 {
+			if rit.Supernatural && rit.DisasterReliefWeightPct > 0 {
 				for ai := range ds.ActiveDisasters {
 					rem := ds.ActiveDisasters[ai].ExpiresTick - w.Tick
 					cut := (rem * int64(rit.DisasterReliefWeightPct)) / 100
@@ -1510,8 +1406,11 @@ func (w *World) stepCohortEncountersAndAccidents() []Event {
 	var events []Event
 	for i := range w.Cohorts {
 		c := &w.Cohorts[i]
-		eff := c.EffectivePopulation()
-		if eff < 15 {
+		if w.Tick < c.RestUntilTick {
+			continue
+		}
+		eff := w.ecologyWorkingPopulation(c, nil, nil)
+		if eff == 0 {
 			continue
 		}
 		ds, hasDS := w.DistrictStates[c.District]
@@ -1526,14 +1425,8 @@ func (w *World) stepCohortEncountersAndAccidents() []Event {
 
 		// 1. Check workplace accidents matching this cohort's district features or recipes
 		for _, acc := range w.Catalog.Accidents {
-			matched := false
-			for _, recID := range acc.Recipes {
-				if r, ok := w.Catalog.RecipeByID(recID); ok && r.Profession == c.Profession {
-					matched = true
-					break
-				}
-			}
-			if !matched {
+			exposed := w.ecologyWorkingPopulation(c, acc.Recipes, acc.NodeFeatures)
+			if exposed == 0 {
 				continue
 			}
 			prob := (acc.BasePermille * weatherMult) / 100
@@ -1551,12 +1444,9 @@ func (w *World) stepCohortEncountersAndAccidents() []Event {
 				cond := ds.Infrastructure[acc.SafetyInfra]
 				prob = (prob * (100 - cond/2)) / 100
 			}
-			if prob < 1 {
-				prob = 1
-			}
 			roll := int(worldHash(w.ID, w.Tick, "acc:"+c.ID+":"+acc.ID) % 1000)
 			if roll < prob {
-				wReq := maxInt(1, eff/450)
+				wReq := maxInt(1, exposed/450)
 				dNumer := int64(wReq) * int64(acc.LethalityPermille)
 				dReq := int(dNumer / 1000)
 				if rem := dNumer % 1000; rem > 0 && int64(worldHash(w.ID, w.Tick, "accd:"+c.ID+":"+acc.ID)%1000) < rem {
@@ -1593,44 +1483,21 @@ func (w *World) stepCohortEncountersAndAccidents() []Event {
 			if act <= 0 {
 				continue
 			}
-			worksAtSite := false
-			if prof, ok := w.Catalog.ProfessionByID(c.Profession); ok {
-				for _, g := range prof.Grants {
-					if ActorHasTag(enc.SuppressorTags, g) {
-						worksAtSite = true
-						break
-					}
-				}
-			}
-			if !worksAtSite {
-				for _, rec := range w.Catalog.Recipes {
-					if rec.Profession == c.Profession && rec.NodeFeature != "" && ActorHasTag(enc.NodeFeatures, rec.NodeFeature) {
-						worksAtSite = true
-						break
-					}
-				}
-			}
-			if !worksAtSite {
+			exposed := w.ecologyWorkingPopulation(c, nil, enc.NodeFeatures)
+			if exposed == 0 {
 				continue
 			}
 			prob := (enc.HazardPermille * act) / 30
 			roll := int(worldHash(w.ID, w.Tick, "enc:"+c.ID+":"+enc.ID) % 1000)
 			if roll < prob {
-				wReq := maxInt(1, eff/500)
+				wReq := maxInt(1, exposed/500)
 				dNumer := int64(wReq) * int64(enc.LethalityPermille)
 				dReq := int(dNumer / 1000)
 				if rem := dNumer % 1000; rem > 0 && int64(worldHash(w.ID, w.Tick, "encd:"+c.ID+":"+enc.ID)%1000) < rem {
 					dReq++
 				}
 				cw, cd, _ := w.applyCohortCasualtiesWithCause(c, wReq, dReq, 0, "beast")
-				var dropQty int64
-				if enc.RareDropItem != "" {
-					dropQty = int64(maxInt(1, wReq/2))
-					if c.ItemPool == nil {
-						c.ItemPool = map[string]int64{}
-					}
-					c.ItemPool[enc.RareDropItem] += dropQty
-				}
+				dropQty := w.harvestEncounterSource(c, c.District, enc, int64(wReq), "encounter:"+c.ID)
 				ev := Event{
 					ID:      w.NextID,
 					Tick:    w.Tick,
@@ -1659,7 +1526,7 @@ func (w *World) stepCohortEncountersAndAccidents() []Event {
 	return events
 }
 
-// AvailableResource is the extractable amount above the existing ecological reserve.
+// AvailableResource includes the last unit; ecological reserves require an explicit policy.
 func (ds DistrictState) AvailableResource(poolID string) int64 {
-	return maxInt64(0, ds.Resources[poolID]-ds.MaxResources[poolID]/20)
+	return maxInt64(0, ds.Resources[poolID])
 }

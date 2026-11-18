@@ -3,6 +3,7 @@ package sim
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // EntityRef is a universal cross-scale target reference so capabilities, actions, and active effects
@@ -78,29 +79,53 @@ type ActiveEffect struct {
 	GrantTags                 []string               `json:"grant_tags,omitempty"`
 }
 
-// ActionSpec declaratively defines any world-pack action (cultivation array deployment, mech EMP
-// strike, closed-door seclusion, cryosleep, battery recharge, breakthrough, or epoch law rewrite)
-// so all genres execute through the exact same Capability -> Options -> Selector -> Apply pipeline.
+// ActionSpec declaratively defines any world-pack action (farming, smithing, hunting, fishing,
+// alchemy, chip R&D, cultivation array deployment, mech EMP strike, closed-door seclusion, cryosleep,
+// battery recharge, breakthrough, or epoch law rewrite) so all genres execute through one
+// Capability -> Options -> Selector -> Apply pipeline.
 type ActionSpec struct {
-	ID                   string         `json:"id"`
-	Name                 string         `json:"name"`
-	GrantedByTags        []string       `json:"granted_by_tags,omitempty"`
-	TargetKind           string         `json:"target_kind"` // "self", "actor", "cohort", "venue", "district"
-	RangeKm              int            `json:"range_km,omitempty"`
-	RequiredVenueFeature string         `json:"required_venue_feature,omitempty"`
-	Ticks                int            `json:"ticks,omitempty"`
-	Dormant              bool           `json:"dormant,omitempty"`
-	EnergyCost           int            `json:"energy_cost,omitempty"`
-	MoneyCost            int            `json:"money_cost,omitempty"`
-	CurrencyCosts        map[string]int `json:"currency_costs,omitempty"`
-	ItemCosts            map[string]int `json:"item_costs,omitempty"`
-	SlotCosts            map[string]int `json:"slot_costs,omitempty"`
-	SlotGains            map[string]int `json:"slot_gains,omitempty"`
-	Attack               *AttackSpec    `json:"attack,omitempty"`
-	SpawnEffect          *EffectSpec    `json:"spawn_effect,omitempty"`
-	TransitionID         string         `json:"transition_id,omitempty"`
-	AllowRewriteWorldLaw bool           `json:"allow_rewrite_world_law,omitempty"`
-	WorldLawDelta        map[string]int `json:"world_law_delta,omitempty"`
+	ID                    string           `json:"id"`
+	Name                  string           `json:"name"`
+	GrantedByTags         []string         `json:"granted_by_tags,omitempty"`
+	TargetKind            string           `json:"target_kind"` // "self", "actor", "cohort", "venue", "district"
+	RangeKm               int              `json:"range_km,omitempty"`
+	RequiredVenueFeature  string           `json:"required_venue_feature,omitempty"`
+	RequireOutdoors       bool             `json:"require_outdoors,omitempty"`
+	RequireIndoors        bool             `json:"require_indoors,omitempty"`
+	Profession            string           `json:"profession,omitempty"`
+	MinProfessionLevel    int              `json:"min_profession_level,omitempty"`
+	RequiredTechs         []string         `json:"required_techs,omitempty"`
+	RequiredFormIDs       []string         `json:"required_form_ids,omitempty"`
+	MinAttributes         map[string]int   `json:"min_attributes,omitempty"`
+	MinHealth             int              `json:"min_health,omitempty"`
+	ToolItem              string           `json:"tool_item,omitempty"`
+	ResourcePool          string           `json:"resource_pool,omitempty"`
+	ResourceDraw          int64            `json:"resource_draw,omitempty"`
+	RequiredThreatID      string           `json:"required_threat_id,omitempty"`
+	MinThreatActivity     int              `json:"min_threat_activity,omitempty"`
+	Ticks                 int              `json:"ticks,omitempty"`
+	Dormant               bool             `json:"dormant,omitempty"`
+	EnergyCost            int              `json:"energy_cost,omitempty"`
+	MoneyCost             int              `json:"money_cost,omitempty"`
+	CurrencyCosts         map[string]int   `json:"currency_costs,omitempty"`
+	ItemCosts             map[string]int   `json:"item_costs,omitempty"`
+	SlotCosts             map[string]int   `json:"slot_costs,omitempty"`
+	ItemGains             map[string]int   `json:"item_gains,omitempty"`
+	HealthGain            int              `json:"health_gain,omitempty"`
+	EnergyGain            int              `json:"energy_gain,omitempty"`
+	SlotGains             map[string]int   `json:"slot_gains,omitempty"`
+	XPProfession          string           `json:"xp_profession,omitempty"`
+	ProfessionXP          int              `json:"profession_xp,omitempty"`
+	UnlockTechs           []string         `json:"unlock_techs,omitempty"`
+	ThreatID              string           `json:"threat_id,omitempty"`
+	ReduceThreat          int              `json:"reduce_threat,omitempty"`
+	MoraleDelta           int              `json:"morale_delta,omitempty"`
+	DistrictResourceGains map[string]int64 `json:"district_resource_gains,omitempty"`
+	Attack                *AttackSpec      `json:"attack,omitempty"`
+	SpawnEffect           *EffectSpec      `json:"spawn_effect,omitempty"`
+	TransitionID          string           `json:"transition_id,omitempty"`
+	AllowRewriteWorldLaw  bool             `json:"allow_rewrite_world_law,omitempty"`
+	WorldLawDelta         map[string]int   `json:"world_law_delta,omitempty"`
 }
 
 func cloneDefenseMap(in map[string]DefenseRule) map[string]DefenseRule {
@@ -129,10 +154,22 @@ func CloneActionSpec(s ActionSpec) ActionSpec {
 	if s.GrantedByTags != nil {
 		out.GrantedByTags = append([]string(nil), s.GrantedByTags...)
 	}
+	if s.RequiredTechs != nil {
+		out.RequiredTechs = append([]string(nil), s.RequiredTechs...)
+	}
+	if s.RequiredFormIDs != nil {
+		out.RequiredFormIDs = append([]string(nil), s.RequiredFormIDs...)
+	}
+	if s.UnlockTechs != nil {
+		out.UnlockTechs = append([]string(nil), s.UnlockTechs...)
+	}
+	out.MinAttributes = cloneIntMap(s.MinAttributes)
 	out.CurrencyCosts = cloneIntMap(s.CurrencyCosts)
 	out.ItemCosts = cloneIntMap(s.ItemCosts)
 	out.SlotCosts = cloneIntMap(s.SlotCosts)
+	out.ItemGains = cloneIntMap(s.ItemGains)
 	out.SlotGains = cloneIntMap(s.SlotGains)
+	out.DistrictResourceGains = cloneInt64Map(s.DistrictResourceGains)
 	out.WorldLawDelta = cloneIntMap(s.WorldLawDelta)
 	if s.Attack != nil {
 		ac := *s.Attack
@@ -395,24 +432,36 @@ func (w *World) resolveMultiDimCombatHit(attacker Actor, defender *Actor, overri
 
 	_, _, defRules, _ := w.Catalog.ActorCombatProfile(*defender)
 
-	// Merge defense rules from any ActiveEffect protecting the defender (without mutating defRules).
+	// Merge defense rules from equipped armor/items and ActiveEffects protecting the defender.
 	mergedDef := cloneDefenseMap(defRules)
+	mergeDefRule := func(dt string, rule DefenseRule) {
+		if mergedDef == nil {
+			mergedDef = map[string]DefenseRule{}
+		}
+		cur := mergedDef[dt]
+		if rule.ImmunityBelowTier > cur.ImmunityBelowTier {
+			cur.ImmunityBelowTier = rule.ImmunityBelowTier
+		}
+		if rule.ReductionPct > cur.ReductionPct {
+			cur.ReductionPct = rule.ReductionPct
+		}
+		mergedDef[dt] = cur
+	}
+	for _, eqItemID := range defender.Equipped {
+		if eqItemID != "" {
+			if eqSpec, ok := w.Catalog.Items[eqItemID]; ok {
+				for dt, rule := range eqSpec.EquipDefenseByType {
+					mergeDefRule(dt, rule)
+				}
+			}
+		}
+	}
 	for _, eff := range w.ActiveEffects {
 		if !w.effectAppliesToActor(eff, *defender) {
 			continue
 		}
 		for dt, rule := range eff.DefenseByType {
-			if mergedDef == nil {
-				mergedDef = map[string]DefenseRule{}
-			}
-			cur := mergedDef[dt]
-			if rule.ImmunityBelowTier > cur.ImmunityBelowTier {
-				cur.ImmunityBelowTier = rule.ImmunityBelowTier
-			}
-			if rule.ReductionPct > cur.ReductionPct {
-				cur.ReductionPct = rule.ReductionPct
-			}
-			mergedDef[dt] = cur
+			mergeDefRule(dt, rule)
 		}
 	}
 
@@ -585,13 +634,7 @@ func (w *World) stepActiveEffects() []Event {
 			}
 			if len(eff.SustainSlotPerTick) > 0 {
 				for slot, cost := range eff.SustainSlotPerTick {
-					sustainer.StateSlots[slot] -= cost
-					if sustainer.StateSlots[slot] <= 0 {
-						delete(sustainer.StateSlots, slot)
-					}
-				}
-				if len(sustainer.StateSlots) == 0 {
-					sustainer.StateSlots = nil
+					setActorSlotValue(sustainer, slot, sustainer.StateSlots[slot]-cost)
 				}
 			}
 		}
@@ -611,18 +654,13 @@ func ActorMeetsDeclarativeCosts(a Actor, spec ActionSpec) (bool, string) {
 	if a.Energy < spec.EnergyCost {
 		return false, "insufficient energy for " + spec.ID
 	}
-	if a.Money < spec.MoneyCost {
-		return false, "insufficient coins for " + spec.ID
-	}
-	for curID, amt := range spec.CurrencyCosts {
+	for curID, amt := range declarativeCurrencyCosts(spec) {
+		balance := a.Currencies[curID]
 		if curID == "coins" {
-			if a.Money < amt {
-				return false, fmt.Sprintf("insufficient coins (%d < %d) for %s", a.Money, amt, spec.ID)
-			}
-			continue
+			balance = int64(a.Money)
 		}
-		if a.Currencies[curID] < int64(amt) {
-			return false, fmt.Sprintf("insufficient %s (%d < %d) for %s", curID, a.Currencies[curID], amt, spec.ID)
+		if balance < amt {
+			return false, fmt.Sprintf("insufficient %s (%d < %d) for %s", curID, balance, amt, spec.ID)
 		}
 	}
 	for itemID, qty := range spec.ItemCosts {
@@ -668,36 +706,20 @@ func (w *World) interruptTaskOnDamage(b *Actor, cause string) []Event {
 
 func (w *World) deductDeclarativeCosts(a *Actor, spec ActionSpec) {
 	a.Energy -= spec.EnergyCost
-	if spec.MoneyCost > 0 {
-		a.Money -= spec.MoneyCost
-		if len(w.Cohorts) > 0 {
-			w.creditTreasury(int64(spec.MoneyCost), "fee")
-		} else {
-			w.recordLedgerCurrencyConsumed("coins", int64(spec.MoneyCost))
+	for curID, amt := range declarativeCurrencyCosts(spec) {
+		if amt == 0 {
+			continue
 		}
-	}
-	for curID, amt := range spec.CurrencyCosts {
-		if amt > 0 {
-			if curID == "coins" {
-				a.Money -= amt
-				if len(w.Cohorts) > 0 {
-					w.creditTreasury(int64(amt), "fee")
-				} else {
-					w.recordLedgerCurrencyConsumed("coins", int64(amt))
-				}
-			} else if a.Currencies != nil {
-				w.addActorCurrency(a, curID, -int64(amt))
-				w.recordLedgerCurrencyConsumed(curID, int64(amt))
-			}
+		if (curID == "" || curID == "coins") && len(w.Cohorts) > 0 {
+			w.adjustActorCurrency(a, curID, -amt, false)
+			w.creditTreasury(amt, "fee")
+		} else {
+			w.adjustActorCurrency(a, curID, -amt, true)
 		}
 	}
 	for itemID, qty := range spec.ItemCosts {
 		if qty > 0 && a.Items != nil {
-			a.Items[itemID] -= qty
-			if a.Items[itemID] <= 0 {
-				delete(a.Items, itemID)
-			}
-			w.recordLedgerItemConsumed(itemID, int64(qty))
+			w.adjustActorItem(a, itemID, -qty, true)
 		}
 	}
 	for slotID, amt := range spec.SlotCosts {
@@ -709,117 +731,263 @@ func (w *World) deductDeclarativeCosts(a *Actor, spec ActionSpec) {
 	}
 }
 
-func (w *World) applyDeclarativeAction(a *Actor, x Action, spec ActionSpec) []Event {
-	emitFail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+// locationsWithinActionRange accepts exact co-location, declared coordinates, or
+// an ordinary venue route with an explicit kilometer length. Unknown distance
+// never grants range, and teleport routes do not establish physical proximity.
+func (w *World) locationsWithinActionRange(fromDistrict, fromVenue, toDistrict, toVenue string, rangeKm int) bool {
+	if fromDistrict == toDistrict && fromVenue == toVenue {
+		return true
+	}
+	c1, ok1 := w.Map.GeoCoordOfLocation(fromDistrict, fromVenue)
+	c2, ok2 := w.Map.GeoCoordOfLocation(toDistrict, toVenue)
+	if ok1 && ok2 {
+		return GeoDistanceKm(c1, c2) <= rangeKm
+	}
+	if fromVenue == "" || toVenue == "" {
+		return false
+	}
+	dist := map[string]int{fromVenue: 0}
+	visited := map[string]bool{}
+	for {
+		u := ""
+		best := rangeKm
+		for _, v := range w.Map.Venues {
+			if d, known := dist[v.ID]; known && !visited[v.ID] && (d < best || u == "" && d == best) {
+				u, best = v.ID, d
+			}
+		}
+		if u == "" {
+			return false
+		}
+		if u == toVenue {
+			return true
+		}
+		visited[u] = true
+		for _, route := range w.Map.VenueRoutesFrom(u) {
+			if route.DistanceKm <= 0 || route.Medium == "teleport" || route.DistanceKm > rangeKm-best {
+				continue
+			}
+			next := best + route.DistanceKm
+			if old, known := dist[route.ToVenue]; !known || next < old {
+				dist[route.ToVenue] = next
+			}
+		}
+	}
+}
+
+func (w *World) declarativeTargetFailure(a Actor, x *Action, spec ActionSpec) string {
+	inRange := func(district, venue string) bool {
+		return w.locationsWithinActionRange(a.Location, a.VenueID, district, venue, spec.RangeKm)
+	}
+	switch spec.TargetKind {
+	case "actor":
+		b := w.actor(x.TargetID)
+		if b == nil || b.Dead || b.ID == a.ID || b.InTransit() || w.Tick < b.JailedUntil {
+			return "invalid or unavailable target actor"
+		}
+		if spec.RangeKm <= 0 {
+			if !SamePlace(a, *b) {
+				return "target actor is not in the same place"
+			}
+		} else if !SamePlace(a, *b) && !inRange(b.Location, b.VenueID) {
+			return "target actor is out of range or distance is unavailable"
+		}
+	case "cohort":
+		c := w.findCohort(x.TargetID)
+		if c == nil || c.Population <= 0 {
+			return "invalid or empty target cohort"
+		}
+		if spec.RangeKm <= 0 {
+			if c.District != a.Location {
+				return "target cohort is not in current district"
+			}
+		} else if !inRange(c.District, "") {
+			return "target cohort is out of range or distance is unavailable"
+		}
+	case "venue":
+		if x.Location == "" {
+			x.Location = a.VenueID
+		}
+		v, ok := w.Map.VenueByID(x.Location)
+		if !ok {
+			return "unknown target venue: " + x.Location
+		}
+		if spec.RangeKm <= 0 {
+			if a.VenueID != v.ID {
+				return "target venue is not local"
+			}
+		} else if !inRange(v.DistrictID, v.ID) {
+			return "target venue is out of range or distance is unavailable"
+		}
+	case "district":
+		if x.Location == "" {
+			x.Location = a.Location
+		}
+		if _, ok := w.Map.DistrictByID(x.Location); !ok {
+			return "unknown target district: " + x.Location
+		}
+		if spec.RangeKm <= 0 {
+			if x.Location != a.Location {
+				return "target district is not local"
+			}
+		} else if !inRange(x.Location, "") {
+			return "target district is out of range or distance is unavailable"
+		}
+	}
+	return ""
+}
+
+// ActionSpecContext carries the read-only local state needed to evaluate an ActionSpec
+// identically during candidate generation (Perception) and execution (World.Apply).
+type ActionSpecContext struct {
+	Actor         Actor
+	Catalog       Catalog
+	Map           WorldMap
+	DistrictState *DistrictState
+	KnownTechs    []string
+}
+
+// CheckActionSpecPrerequisites is the single canonical check for ActionSpec eligibility.
+// Both option enumeration and action settlement call this check.
+func CheckActionSpecPrerequisites(ctx ActionSpecContext, spec ActionSpec) string {
+	a := ctx.Actor
+	if len(spec.WorldLawDelta) > 0 && !spec.AllowRewriteWorldLaw {
+		return "action is not authorized to rewrite fundamental world laws"
+	}
+	if spec.RequireOutdoors && a.InsideHouse != "" {
+		return spec.ID + " requires being outdoors"
+	}
+	if spec.RequireIndoors && a.InsideHouse == "" {
+		return spec.ID + " requires being indoors"
+	}
+	if spec.RequiredVenueFeature != "" && !ctx.Map.VenueOrDistrictHasFeature(a.VenueID, a.Location, spec.RequiredVenueFeature) {
+		return fmt.Sprintf("%s requires location feature %s", spec.ID, spec.RequiredVenueFeature)
+	}
+	if spec.Profession != "" {
+		minLv := spec.MinProfessionLevel
+		if minLv <= 0 {
+			minLv = 1
+		}
+		if a.Professions[spec.Profession] < minLv {
+			return fmt.Sprintf("%s requires %s level %d", spec.ID, spec.Profession, minLv)
+		}
+	}
+	if len(spec.RequiredFormIDs) > 0 && !ActorHasTag(spec.RequiredFormIDs, a.FormID) {
+		return fmt.Sprintf("%s requires form %s", spec.ID, strings.Join(spec.RequiredFormIDs, " or "))
+	}
+	for _, techID := range spec.RequiredTechs {
+		if !ActorHasTag(ctx.KnownTechs, techID) {
+			return fmt.Sprintf("%s requires tech %s", spec.ID, techID)
+		}
+	}
+	if len(spec.MinAttributes) > 0 {
+		if ok, reason := a.Attributes.Meets(spec.MinAttributes); !ok {
+			return reason
+		}
+	}
+	if spec.MinHealth > 0 && a.Health < spec.MinHealth {
+		return fmt.Sprintf("%s requires health >= %d", spec.ID, spec.MinHealth)
+	}
+	if spec.ToolItem != "" && !actorHasItemOrEquipped(a, spec.ToolItem) {
+		return fmt.Sprintf("%s requires tool %s", spec.ID, spec.ToolItem)
+	}
+	if spec.ResourcePool != "" {
+		need := spec.ResourceDraw
+		if need < 1 {
+			need = 1
+		}
+		if ctx.DistrictState == nil || ctx.DistrictState.AvailableResource(spec.ResourcePool) < need {
+			return fmt.Sprintf("insufficient %s in %s", spec.ResourcePool, a.Location)
+		}
+	}
+	if spec.RequiredThreatID != "" {
+		minAct := spec.MinThreatActivity
+		if minAct < 1 {
+			minAct = 1
+		}
+		if ctx.DistrictState == nil || ctx.DistrictState.ThreatActivity[spec.RequiredThreatID] < minAct {
+			return fmt.Sprintf("%s requires active threat %s (>= %d)", spec.ID, spec.RequiredThreatID, minAct)
+		}
+	}
+	if ok, reason := ActorMeetsDeclarativeCosts(a, spec); !ok {
+		return reason
+	}
+	return ""
+}
+
+// ActionSpecBlockReason returns a non-empty reason if actor `a` cannot execute `spec` in `w`.
+func (w *World) ActionSpecBlockReason(a Actor, x Action, spec ActionSpec) string {
+	var dsPtr *DistrictState
+	if w.DistrictStates != nil {
+		if ds, ok := w.DistrictStates[a.Location]; ok {
+			dsPtr = &ds
+		}
+	}
+	if reason := CheckActionSpecPrerequisites(ActionSpecContext{
+		Actor:         a,
+		Catalog:       w.Catalog,
+		Map:           w.Map,
+		DistrictState: dsPtr,
+		KnownTechs:    w.ActorKnownTechs(a.ID),
+	}, spec); reason != "" {
+		return reason
 	}
 	if spec.RequiredVenueFeature != "" {
-		if !w.Map.VenueOrDistrictHasFeature(a.VenueID, a.Location, spec.RequiredVenueFeature) {
-			return emitFail(fmt.Sprintf("%s requires location feature %s", spec.ID, spec.RequiredVenueFeature))
-		}
 		venueID := a.VenueID
 		if spec.TargetKind == "venue" && x.Location != "" {
 			venueID = x.Location
 		}
 		if w.isVenuePowerBlocked(venueID) {
-			return emitFail("venue lacks power: " + venueID)
+			return "venue lacks power: " + venueID
 		}
 	}
 	if spec.TransitionID != "" {
 		trans, ok := w.Catalog.Transitions[spec.TransitionID]
 		if !ok {
-			return emitFail("unknown transition: " + spec.TransitionID)
+			return "unknown transition: " + spec.TransitionID
 		}
-		if trans.RequiredFormID != "" && a.FormID != trans.RequiredFormID {
-			return emitFail(fmt.Sprintf("transition %s requires form %s (has %s)", trans.ID, trans.RequiredFormID, a.FormID))
+		if reason := w.transitionRequirementReason(a, trans); reason != "" {
+			return reason
 		}
 	}
-	if ok, reason := ActorMeetsDeclarativeCosts(*a, spec); !ok {
+	return ""
+}
+
+// ActionSpecBlockReason returns a non-empty reason if the perceiving actor cannot execute `spec`.
+func (p Perception) ActionSpecBlockReason(spec ActionSpec) string {
+	return CheckActionSpecPrerequisites(ActionSpecContext{
+		Actor:         p.Self,
+		Catalog:       p.Catalog,
+		Map:           p.Map,
+		DistrictState: p.DistrictState,
+		KnownTechs:    p.KnownTechs,
+	}, spec)
+}
+
+func (w *World) applyDeclarativeAction(a *Actor, x Action, spec ActionSpec) []Event {
+	emitFail := func(reason string) []Event {
+		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+	}
+	if reason := w.ActionSpecBlockReason(*a, x, spec); reason != "" {
 		return emitFail(reason)
 	}
 
 	// Validate target before deducting costs.
-	switch spec.TargetKind {
-	case "actor":
-		b := w.actor(x.TargetID)
-		if b == nil || b.Dead || b.ID == a.ID || w.Tick < b.JailedUntil {
-			return emitFail("invalid or unavailable target actor")
-		}
-		if spec.RangeKm <= 0 {
-			if !SamePlace(*a, *b) {
-				return emitFail("target actor is not in the same place")
-			}
-		} else {
-			c1, ok1 := w.Map.GeoCoordOfLocation(a.Location, a.VenueID)
-			c2, ok2 := w.Map.GeoCoordOfLocation(b.Location, b.VenueID)
-			if ok1 && ok2 && GeoDistanceKm(c1, c2) > spec.RangeKm {
-				return emitFail("target actor is out of range")
-			}
-		}
-	case "cohort":
-		c := w.findCohort(x.TargetID)
-		if c == nil || c.Population <= 0 {
-			return emitFail("invalid or empty target cohort")
-		}
-		if spec.RangeKm <= 0 {
-			if c.District != a.Location {
-				return emitFail("target cohort is not in current district")
-			}
-		} else {
-			c1, ok1 := w.Map.GeoCoordOfLocation(a.Location, a.VenueID)
-			c2, ok2 := w.Map.GeoCoordOfLocation(c.District, "")
-			if ok1 && ok2 && GeoDistanceKm(c1, c2) > spec.RangeKm {
-				return emitFail("target cohort is out of range")
-			}
-		}
-	case "venue":
-		vID := x.Location
-		if vID == "" {
-			vID = a.VenueID
-			x.Location = vID
-		}
-		v, ok := w.Map.VenueByID(vID)
-		if !ok {
-			return emitFail("unknown target venue: " + vID)
-		}
-		if spec.RangeKm <= 0 {
-			if a.VenueID != "" && vID != a.VenueID && v.DistrictID != a.Location {
-				return emitFail("target venue is not local")
-			}
-		} else {
-			c1, ok1 := w.Map.GeoCoordOfLocation(a.Location, a.VenueID)
-			c2, ok2 := w.Map.GeoCoordOfLocation(v.DistrictID, v.ID)
-			if ok1 && ok2 && GeoDistanceKm(c1, c2) > spec.RangeKm {
-				return emitFail("target venue is out of range")
-			}
-		}
-	case "district":
-		dID := x.Location
-		if dID == "" {
-			dID = a.Location
-			x.Location = dID
-		}
-		if _, ok := w.Map.DistrictByID(dID); !ok {
-			return emitFail("unknown target district: " + dID)
-		}
-		if spec.RangeKm <= 0 {
-			if dID != a.Location {
-				return emitFail("target district is not local")
-			}
-		} else {
-			c1, ok1 := w.Map.GeoCoordOfLocation(a.Location, a.VenueID)
-			c2, ok2 := w.Map.GeoCoordOfLocation(dID, "")
-			if ok1 && ok2 && GeoDistanceKm(c1, c2) > spec.RangeKm {
-				return emitFail("target district is out of range")
-			}
-		}
-	}
-
-	if len(spec.WorldLawDelta) > 0 && !spec.AllowRewriteWorldLaw {
-		return emitFail("action is not authorized to rewrite fundamental world laws")
+	if reason := w.declarativeTargetFailure(*a, &x, spec); reason != "" {
+		return emitFail(reason)
 	}
 
 	w.deductDeclarativeCosts(a, spec)
+	if spec.ResourcePool != "" {
+		need := spec.ResourceDraw
+		if need < 1 {
+			need = 1
+		}
+		w.drawDistrictResource(a.Location, spec.ResourcePool, need)
+	}
+	if spec.ToolItem != "" {
+		w.wearToolItem("actor", a.ID, spec.ToolItem, 1)
+	}
 	ticks := spec.Ticks
 	if ticks < 1 {
 		ticks = 1
@@ -849,11 +1017,95 @@ func (w *World) applyDeclarativeAction(a *Actor, x Action, spec ActionSpec) []Ev
 
 func (w *World) finishDeclarativeAction(a *Actor, t Task, spec ActionSpec) []Event {
 	x := t.Action
+	if blocked, reason := w.IsActionBlockedByWorldLaw(*a, x); blocked {
+		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+	}
+	if reason := w.declarativeTargetFailure(*a, &x, spec); reason != "" {
+		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+	}
 	var events []Event
 
-	// 1. State slot gains (clamped to Catalog.StateSlots bounds if defined).
+	// 1. State slot, health, energy, and item gains.
 	for slotID, gain := range spec.SlotGains {
 		w.addActorStateSlot(a, slotID, gain)
+	}
+	if spec.HealthGain != 0 {
+		a.Health = maxInt(0, min(MaxHealth, a.Health+spec.HealthGain))
+	}
+	if spec.EnergyGain != 0 {
+		a.Energy = maxInt(0, min(MaxEnergy, a.Energy+spec.EnergyGain))
+	}
+	var primaryItem string
+	var primaryQty int
+	if len(spec.ItemGains) > 0 {
+		itemIDs := make([]string, 0, len(spec.ItemGains))
+		for itemID := range spec.ItemGains {
+			itemIDs = append(itemIDs, itemID)
+		}
+		sort.Strings(itemIDs)
+		for _, itemID := range itemIDs {
+			qty := spec.ItemGains[itemID]
+			if qty <= 0 {
+				continue
+			}
+			w.adjustActorItem(a, itemID, qty, true)
+			if primaryItem == "" {
+				primaryItem, primaryQty = itemID, qty
+			}
+		}
+	}
+
+	// 1b. District threat, morale, and resource updates.
+	if w.DistrictStates != nil {
+		ds, hasDS := w.DistrictStates[a.Location]
+		if hasDS {
+			threatTarget := spec.ThreatID
+			if threatTarget == "" {
+				threatTarget = spec.RequiredThreatID
+			}
+			if threatTarget != "" && spec.ReduceThreat > 0 && ds.ThreatActivity != nil {
+				cur := ds.ThreatActivity[threatTarget] - spec.ReduceThreat
+				if cur < 0 {
+					cur = 0
+				}
+				ds.ThreatActivity[threatTarget] = cur
+			}
+			if spec.MoraleDelta != 0 {
+				ds.MoraleBonus += spec.MoraleDelta
+			}
+			if len(spec.DistrictResourceGains) > 0 {
+				if ds.Resources == nil {
+					ds.Resources = map[string]int64{}
+				}
+				poolIDs := make([]string, 0, len(spec.DistrictResourceGains))
+				for poolID := range spec.DistrictResourceGains {
+					poolIDs = append(poolIDs, poolID)
+				}
+				sort.Strings(poolIDs)
+				for _, poolID := range poolIDs {
+					delta := spec.DistrictResourceGains[poolID]
+					if delta != 0 {
+						ds.Resources[poolID] = maxInt64(0, ds.Resources[poolID]+delta)
+						w.recordEcologicalChange(a.Location, poolID, delta)
+					}
+				}
+			}
+			w.DistrictStates[a.Location] = ds
+		}
+	}
+
+	// 1c. Tech unlocks & profession XP.
+	for _, techID := range spec.UnlockTechs {
+		if tech, ok := w.Catalog.Techs[techID]; ok {
+			events = append(events, w.unlockTechForActor(a, x, tech)...)
+		}
+	}
+	xpProf := spec.XPProfession
+	if xpProf == "" {
+		xpProf = spec.Profession
+	}
+	if xpProf != "" && spec.ProfessionXP > 0 {
+		events = append(events, w.grantProfessionXP(a, x, xpProf, spec.ProfessionXP, 1)...)
 	}
 
 	// 2. Spawn sustained ActiveEffect if declared.
@@ -1004,19 +1256,147 @@ func (w *World) finishDeclarativeAction(a *Actor, t Task, spec ActionSpec) []Eve
 
 	// Phase 3 & 4 hooks: spec.TransitionID (executeTransition) & spec.AllowRewriteWorldLaw (WorldLaws).
 	if spec.TransitionID != "" {
-		events = append(events, w.executeTransition(a, x, spec.TransitionID)...)
+		transitionAction := Action{Kind: "attempt_transition", TransitionID: spec.TransitionID, BasisEventID: x.BasisEventID}
+		events = append(events, w.applyAttemptTransition(a, transitionAction)...)
 	}
 	if len(spec.WorldLawDelta) > 0 {
 		lawEvs, _ := w.ApplyWorldLawChange(a, x, spec.AllowRewriteWorldLaw, spec.WorldLawDelta)
 		events = append(events, lawEvs...)
 	}
 
-	if len(events) == 0 {
-		events = append(events, w.record(a, x, "action_resolved", map[string]any{
+	if primaryItem != "" || len(events) == 0 {
+		payload := map[string]any{
 			"text":        fmt.Sprintf("%s completed %s", a.Name, spec.Name),
 			"action_spec": spec.ID,
 			"dormant":     t.Dormant,
-		}))
+		}
+		if primaryItem != "" {
+			payload["item"] = primaryItem
+			payload["quantity"] = primaryQty
+			payload["item_gains"] = cloneIntMap(spec.ItemGains)
+			payload["observation"] = Observation{Kind: "item_produced", Item: primaryItem, Location: a.Location, Quantity: primaryQty}
+		}
+		events = append([]Event{w.record(a, x, "action_resolved", payload)}, events...)
 	}
 	return events
+}
+
+func actorHasItemOrEquipped(a Actor, itemID string) bool {
+	if a.Items[itemID] > 0 {
+		return true
+	}
+	for _, eq := range a.Equipped {
+		if eq == itemID {
+			return true
+		}
+	}
+	return false
+}
+
+// CanEquipItem checks whether `a` meets the WorldPack prerequisites to equip `itemID` into its declared slot.
+func CanEquipItem(cat Catalog, a Actor, itemID string) (bool, string) {
+	if itemID == "" {
+		return false, "equip requires item"
+	}
+	spec, ok := cat.Items[itemID]
+	if !ok {
+		return false, "unknown item: " + itemID
+	}
+	if spec.EquipSlot == "" {
+		return false, itemID + " is not equippable"
+	}
+	if a.Items[itemID] < 1 {
+		return false, "no " + itemID + " in inventory"
+	}
+	if slotSpec, declared := cat.EquipSlots[spec.EquipSlot]; declared && len(slotSpec.GrantedByTags) > 0 {
+		tags := cat.ActorEffectiveTags(a)
+		allowed := false
+		for _, gt := range slotSpec.GrantedByTags {
+			if ActorHasTag(tags, gt) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return false, "equip slot " + spec.EquipSlot + " is not available to this actor"
+		}
+	}
+	if len(spec.EquipRequiredForms) > 0 && !ActorHasTag(spec.EquipRequiredForms, a.FormID) {
+		return false, itemID + " requires form " + strings.Join(spec.EquipRequiredForms, " or ")
+	}
+	if len(spec.EquipRequiredTags) > 0 {
+		tags := cat.ActorEffectiveTags(a)
+		for _, reqTag := range spec.EquipRequiredTags {
+			if !ActorHasTag(tags, reqTag) {
+				return false, itemID + " requires tag " + reqTag
+			}
+		}
+	}
+	if len(spec.EquipMinAttributes) > 0 {
+		if ok, reason := a.Attributes.Meets(spec.EquipMinAttributes); !ok {
+			return false, reason
+		}
+	}
+	return true, ""
+}
+
+func (w *World) applyEquip(a *Actor, x Action) []Event {
+	fail := func(reason string) []Event {
+		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+	}
+	if ok, reason := CanEquipItem(w.Catalog, *a, x.Item); !ok {
+		return fail(reason)
+	}
+	spec := w.Catalog.Items[x.Item]
+	if a.Equipped == nil {
+		a.Equipped = map[string]string{}
+	}
+	prev := a.Equipped[spec.EquipSlot]
+	if prev == x.Item {
+		return fail(x.Item + " is already equipped in " + spec.EquipSlot)
+	}
+	if a.Items == nil {
+		a.Items = map[string]int{}
+	}
+	a.Items[x.Item]--
+	if a.Items[x.Item] == 0 {
+		delete(a.Items, x.Item)
+	}
+	if prev != "" {
+		a.Items[prev]++
+	}
+	a.Equipped[spec.EquipSlot] = x.Item
+	return []Event{w.record(a, x, "item_equipped", map[string]any{
+		"text":          fmt.Sprintf("%s equipped %s into %s", a.Name, x.Item, spec.EquipSlot),
+		"item":          x.Item,
+		"equip_slot":    spec.EquipSlot,
+		"replaced_item": prev,
+	})}
+}
+
+func (w *World) applyUnequip(a *Actor, x Action) []Event {
+	fail := func(reason string) []Event {
+		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+	}
+	slot := x.TargetID
+	if slot == "" && x.Item != "" {
+		slot = w.Catalog.Items[x.Item].EquipSlot
+	}
+	if slot == "" || a.Equipped[slot] == "" {
+		return fail("no item equipped in slot")
+	}
+	itemID := a.Equipped[slot]
+	delete(a.Equipped, slot)
+	if len(a.Equipped) == 0 {
+		a.Equipped = nil
+	}
+	if a.Items == nil {
+		a.Items = map[string]int{}
+	}
+	a.Items[itemID]++
+	return []Event{w.record(a, x, "item_unequipped", map[string]any{
+		"text":       fmt.Sprintf("%s unequipped %s from %s", a.Name, itemID, slot),
+		"item":       itemID,
+		"equip_slot": slot,
+	})}
 }

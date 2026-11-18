@@ -13,6 +13,30 @@ const (
 	MaxCondition = 100
 )
 
+type HouseWearRule struct {
+	IntervalTicks int64  `json:"interval_ticks"`
+	ConditionLoss int    `json:"condition_loss"`
+	Source        string `json:"source"`
+}
+
+func DefaultHouseWearRule() HouseWearRule {
+	return HouseWearRule{IntervalTicks: 365 * TicksPerDay, ConditionLoss: 4,
+		Source: "scenario roof-condition budget: 4/100 each 365-day year (25-year renewal scale); NPS Preservation Brief 19 reports typical wooden-shingle service lives of 15-30 years: https://www.nps.gov/orgs/1739/upload/preservation-brief-19-wood-shingle-roofs.pdf; condition-point interpolation is a scenario assumption"}
+}
+
+func (w *World) weatherHouses() {
+	rule := DefaultHouseWearRule()
+	if w.Catalog.HouseWear != nil {
+		rule = *w.Catalog.HouseWear
+	}
+	if rule.ConditionLoss == 0 || w.Tick%rule.IntervalTicks != 0 {
+		return
+	}
+	for i := range w.Houses {
+		w.Houses[i].Condition = max(0, w.Houses[i].Condition-rule.ConditionLoss)
+	}
+}
+
 const (
 	SleepDeep      = "deep_sleeper"
 	SleepLight     = "light_sleeper"

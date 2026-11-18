@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,31 +10,34 @@ import (
 
 // rulesPolicy ranks offline choices using only generic catalog recipes, professions, guilds,
 // house assets, and road-graph shortest paths—never hardcoded profession branches.
-type rulesPolicy struct{}
+type rulesPolicy struct{ options []Option }
 
-func (rulesPolicy) Decide(_ context.Context, p sim.Perception) (sim.Action, error) {
+// consider returns true when a preference matches an available system action.
+func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action) bool) {
+	p.Self.Plan = sim.ClonePersonalPlan(p.Self.Plan)
+	sim.SyncActorPlan(&p.Self, p.Tick, p.Catalog)
 	a := p.Self
 	itemKeys := sortedItemIDs(p.Catalog.Items)
 
 	// 1a. Physiological thirst: drink fresh water at indoor/well/canal facilities or carried potable item.
 	if a.Thirst >= 2 {
-		if canDrawFreeWater(p) {
-			return sim.Action{Kind: "drink"}, nil
+		if canDrawFreeWater(p) && consider(sim.Action{Kind: "drink"}) {
+			return
 		}
 		for _, id := range itemKeys {
-			if p.Catalog.Items[id].Potable && a.Items[id] >= 1 {
-				return sim.Action{Kind: "drink", Item: id}, nil
+			if p.Catalog.Items[id].Potable && a.Items[id] >= 1 && consider(sim.Action{Kind: "drink", Item: id}) {
+				return
 			}
 		}
 		if a.Thirst >= 3 {
 			if dest, _, ok := p.Map.NearestDistrictWithFeature(a.Location, "water_source"); ok && dest != a.Location {
-				if step, ok := stepTowardDistrict(p, dest, 0); ok {
-					return step, nil
+				if step, ok := stepTowardDistrict(p, dest, 0); ok && consider(step) {
+					return
 				}
 			}
 			if home := primaryHome(p); home != nil {
-				if step, ok := stepToHouse(p, *home); ok {
-					return step, nil
+				if step, ok := stepToHouse(p, *home); ok && consider(step) {
+					return
 				}
 			}
 		}
@@ -45,13 +47,70 @@ func (rulesPolicy) Decide(_ context.Context, p sim.Perception) (sim.Action, erro
 	if a.Hunger > 0 {
 		for _, id := range itemKeys {
 			spec := p.Catalog.Items[id]
-			if spec.Edible && a.Items[id] >= 1 {
-				return sim.Action{Kind: "eat", Item: id}, nil
+			if spec.Edible && a.Items[id] >= 1 && consider(sim.Action{Kind: "eat", Item: id}) {
+				return
 			}
 		}
 	}
 
+	// A standing crop cannot feed somebody today. Seek reachable food before
+	// returning to care work or resting because starvation has lowered health.
+	if a.Hunger > 0 && totalEdibleItems(p.Catalog, a) == 0 {
+		for _, o := range p.Offers {
+			if o.Buyer == a.ID && p.OfferBlockReasons[o.ID] == "" && p.Catalog.Items[o.Item].Edible && availableMoneyAfterAgreements(p) >= o.Price && a.Trust[o.Seller] >= 0 {
+				for _, n := range p.Nearby {
+					if n.ID == o.Seller && !n.Jailed && consider(sim.Action{Kind: "accept", OfferID: o.ID, TargetID: o.Seller}) {
+						return
+					}
+				}
+			}
+		}
+		if !a.Resting || a.Energy >= sim.MaxEnergy || a.Hunger >= 5 {
+			if action, ok := immediateFoodAction(p, policy.options); ok {
+				if !a.Resting || a.Energy >= sim.MaxEnergy {
+					if consider(action) {
+						return
+					}
+				}
+				// End a rest intention for an actual food step, including travel
+				// to a source, only when that step is available at this tick.
+				if a.Resting && ruleOptionID(action, policy.options) != "" {
+					switch action.Kind {
+					case "craft", "move", "move_venue", "leave_house", "enter_house", "join_faction", "join_profession":
+						if consider(sim.Action{Kind: "end_rest"}) || consider(action) {
+							return
+						}
+					}
+				}
+			}
+		}
+	}
+	if a.Resting && a.Energy < sim.MaxEnergy && consider(planSleep(p)) {
+		return
+	}
+
 	for _, g := range p.Growth {
+		owner := !g.Cohort && g.OwnerID == a.ID
+		caretaker, canCollect := owner, owner
+		for _, agreement := range p.CareAgreements {
+			if agreement.GrowthID == g.ID {
+				caretaker = agreement.CaretakerKind == "actor" && agreement.CaretakerID == a.ID
+				canCollect = owner || caretaker && agreement.Harvest
+				break
+			}
+		}
+		if g.Ready {
+			if !canCollect {
+				continue
+			}
+			for _, action := range p.GrowthCareActions {
+				if action.Kind == "harvest" && action.TargetID == fmt.Sprint(g.ID) && p.Capabilities()["harvest"] && consider(action) {
+					return
+				}
+			}
+		} else if !caretaker {
+			continue
+		}
 		needsCare := !g.Ready && g.ProgressTicks >= g.CareUntil
 		if !g.Ready && !needsCare {
 			continue
@@ -65,8 +124,8 @@ func (rulesPolicy) Decide(_ context.Context, p sim.Perception) (sim.Action, erro
 				supplied = false
 				for _, r := range p.Catalog.Recipes {
 					if r.OutputItem == item && canPractice(p.Catalog, a, r) {
-						if act, ok := resolveRecipe(p, r, 0); ok {
-							return act, nil
+						if act, ok := resolveRecipe(p, r, 0); ok && consider(act) {
+							return
 						}
 					}
 				}
@@ -75,31 +134,42 @@ func (rulesPolicy) Decide(_ context.Context, p sim.Perception) (sim.Action, erro
 				continue
 			}
 		}
-		if g.District != a.Location {
-			if step, ok := stepTowardDistrict(p, g.District, 0); ok {
-				return step, nil
-			}
-			continue
-		}
 		if g.VenueID != "" && g.VenueID != a.VenueID {
-			if route, _, mode, ok := p.Map.NextVenueHopForActor(p.Catalog, nil, a, a.VenueID, g.VenueID); ok {
-				return sim.Action{Kind: "move_venue", Location: route.ToVenue, Channel: mode}, nil
+			if step, ok := stepTowardVenue(p, g.VenueID, 0); ok && consider(step) {
+				return
 			}
 			continue
 		}
-		if g.Ready {
-			return sim.Action{Kind: "harvest", TargetID: fmt.Sprint(g.ID)}, nil
+		if g.District != a.Location {
+			if step, ok := stepTowardDistrict(p, g.District, 0); ok && consider(step) {
+				return
+			}
+			continue
+		}
+		if g.HouseID == "" && a.InsideHouse != "" && consider(sim.Action{Kind: "leave_house"}) {
+			return
+		}
+		if g.HouseID != "" && a.InsideHouse != g.HouseID {
+			for _, h := range p.AccessibleHouses {
+				if h.ID == g.HouseID {
+					if step, ok := stepToHouse(p, h); ok && consider(step) {
+						return
+					}
+					break
+				}
+			}
+			continue
 		}
 	}
 
 	for _, n := range p.EnergyNodes {
-		if n.StoredEnergy == 0 && n.FuelStock == 0 && n.Source != nil && n.Source.FuelItem != "" && a.Items[n.Source.FuelItem] > 0 {
-			return sim.Action{Kind: "refuel", TargetID: n.ID, Quantity: int(min(int64(a.Items[n.Source.FuelItem]), n.Source.UnitsPerCycle))}, nil
+		if n.StoredEnergy == 0 && n.FuelStock == 0 && n.Source != nil && n.Source.FuelItem != "" && a.Items[n.Source.FuelItem] > 0 && consider(sim.Action{Kind: "refuel", TargetID: n.ID, Quantity: int(min(int64(a.Items[n.Source.FuelItem]), n.Source.UnitsPerCycle))}) {
+			return
 		}
 	}
 	// 1c. Sanitation & nightsoil collection: relieve waste before discomfort or disease risk builds.
-	if a.Waste >= 3 {
-		return sim.Action{Kind: "relieve"}, nil
+	if a.Waste >= 3 && consider(sim.Action{Kind: "relieve"}) {
+		return
 	}
 
 	// 2. Settle incoming trade offers based on generic item demand, funds, and directed trust.
@@ -116,10 +186,12 @@ func (rulesPolicy) Decide(_ context.Context, p sim.Perception) (sim.Action, erro
 			}
 		}
 		want := desiredBuyerStock(p, o.Item)
-		if sellerHere && a.Items[o.Item] < want && freeMoney >= o.Price && a.Trust[o.Seller] >= 0 {
-			return sim.Action{Kind: "accept", OfferID: o.ID, TargetID: o.Seller}, nil
+		if sellerHere && p.OfferBlockReasons[o.ID] == "" && a.Items[o.Item] < want && freeMoney >= o.Price && a.Trust[o.Seller] >= 0 && consider(sim.Action{Kind: "accept", OfferID: o.ID, TargetID: o.Seller}) {
+			return
 		}
-		return sim.Action{Kind: "reject", OfferID: o.ID, TargetID: o.Seller}, nil
+		if consider(sim.Action{Kind: "reject", OfferID: o.ID, TargetID: o.Seller}) {
+			return
+		}
 	}
 
 	// 2b. Self-medication and wound/disease recuperation: treat wounds or contagious/cold illness.
@@ -140,93 +212,126 @@ func (rulesPolicy) Decide(_ context.Context, p sim.Perception) (sim.Action, erro
 				bestMed = id
 			}
 		}
-		if bestMed != "" {
-			return sim.Action{Kind: "medicate", Item: bestMed}, nil
+		if bestMed != "" && consider(sim.Action{Kind: "medicate", Item: bestMed}) {
+			return
 		}
 	}
 	if a.Health < 60 || (p.Tick < a.RestUntil && a.Health < 85) {
-		return planSleep(p), nil
+		if consider(planSleep(p)) {
+			return
+		}
 	}
 
 	// 3. Sleep and circadian recovery: head home to sleep at bedtime or when exhausted.
 	needNightSleep := (p.Clock.IsNight || sim.SleepWindowAligned(a.SleepTrait, p.Clock.Hour)) && a.Energy < 85
 	needExhaustionRest := a.Energy < 22
 	if needNightSleep || needExhaustionRest {
-		return planSleep(p), nil
+		if p.Capabilities()["begin_rest"] && consider(sim.Action{Kind: "begin_rest"}) {
+			return
+		}
+		if consider(planSleep(p)) {
+			return
+		}
+	}
+	if home := primaryHome(p); home != nil && home.Condition < 70 && a.Energy >= 12 {
+		if availableItemAfterAgreements(p, "plank") >= 1 {
+			if action, ok := stepToRepairHouse(p, *home); ok && consider(action) {
+				return
+			}
+		} else {
+			for _, recipe := range p.Catalog.Recipes {
+				if recipe.OutputItem == "plank" && canPractice(p.Catalog, a, recipe) {
+					if action, ok := resolveRecipe(p, recipe, 0); ok && consider(action) {
+						return
+					}
+				}
+			}
+		}
+	}
+	// A sales goal must not leave a harvested field idle for the next season.
+	// Existing standing crops are handled above; only free land can start work.
+	for _, r := range p.Catalog.Recipes {
+		if r.Growth != nil && p.Catalog.Items[r.OutputItem].Edible && canPractice(p.Catalog, a, r) && a.Items[r.OutputItem] < 2*r.OutputQty {
+			if action, ok := resolveRecipe(p, r, 0); ok && consider(action) {
+				return
+			}
+		}
 	}
 
 	// Continuing intentions yield to physiological needs, not to unrelated daily work.
-	if action, ok := chooseContinuity(p); ok {
-		return action, nil
+	if action, ok := chooseContinuity(p); ok && consider(action) {
+		return
 	}
 
 	// 4. Community healing if capable and carrying medicinal items.
 	if p.Capabilities()["heal"] {
 		if medItem := cheapestMedicinalItem(p.Catalog, a, itemKeys); medItem != "" {
 			for _, b := range p.Nearby {
-				if b.Health < sim.MaxHealth {
-					return sim.Action{Kind: "heal", TargetID: b.ID, Item: medItem}, nil
+				if b.Health < sim.MaxHealth && consider(sim.Action{Kind: "heal", TargetID: b.ID, Item: medItem}) {
+					return
 				}
 			}
 		}
 	}
 
-	// 5. Standalone house asset maintenance when planks are on hand and roof condition drops.
-	if home := primaryHome(p); home != nil && home.Condition < 70 && availableItemAfterAgreements(p, "plank") >= 1 && a.Energy >= 12 {
-		if act, ok := stepToRepairHouse(p, *home); ok {
-			return act, nil
-		}
-	}
-
 	// 6. Asset level upgrade for an owned house when a capable carpenter has materials.
-	if act, ok := planHouseUpgrade(p); ok {
-		return act, nil
+	if act, ok := planHouseUpgrade(p); ok && consider(act) {
+		return
 	}
 
 	// 7. Information-driven travel or rumor retelling.
 	if action, ok := informationAction(p); ok && (action.Kind == "move" || action.Kind == "leave_house" || p.Tick%3 == 0) {
-		return action, nil
+		if consider(action) {
+			return
+		}
 	}
 
 	// 8. Guild affiliation and a second profession when subsistence is secure.
-	if act, ok := planGuildProgress(p); ok {
-		return act, nil
+	if act, ok := planGuildProgress(p); ok && consider(act) {
+		return
 	}
 
 	// 8a. Credit obligations, collateral foreclosure, and peaceful feud mediation.
-	if act, ok := planCreditAndRelations(p); ok {
-		return act, nil
+	if act, ok := planCreditAndRelations(p); ok && consider(act) {
+		return
 	}
 
 	// 8b. Martial sparring, yamen law-enforcement arrests, bandit/gang raids, and street pickpocketing.
-	if act, ok := planConflictAndLaw(p); ok {
-		return act, nil
+	if act, ok := planConflictAndLaw(p); ok && consider(act) {
+		return
 	}
 
 	// 8c. Ecological & civic duties: seasonal/crisis shrine rituals, threat hunting, and public-works repair.
-	if act, ok := planEcologyRitualAndInfra(p); ok {
-		return act, nil
+	if act, ok := planEcologyRitualAndInfra(p); ok && consider(act) {
+		return
 	}
 
 	// 9. Generic profession recipe planning (inputs -> bonus inputs -> facility/district -> craft).
 	if action, ok := planCatalogWork(p); ok {
 		if action.Kind == "craft" && (a.Plan == nil || a.Plan.Status != "active") {
+			recipe, _ := p.Catalog.RecipeByID(action.RecipeID)
 			for _, candidate := range sim.ContinuityActions(p) {
-				if candidate.Kind == "start_plan" && candidate.RecipeID == action.RecipeID {
-					return candidate, nil
+				// A required intermediate is work for the final product, not a new
+				// intention to sell away its own inputs.
+				if candidate.Kind == "start_plan" && candidate.RecipeID == action.RecipeID && p.Catalog.TagsProduce(a.IdentityTags(), recipe.OutputItem) && consider(candidate) {
+					return
 				}
 			}
 		}
-		return action, nil
+		if consider(action) {
+			return
+		}
 	}
 
 	// 10. Converge on the market hub to trade surplus items and exchange news.
 	if marketID, _, ok := p.Map.NearestDistrictWithFeature(a.Location, "market"); ok && a.Location != marketID {
-		if step, ok := stepTowardDistrict(p, marketID, 0); ok {
-			return step, nil
+		if step, ok := stepTowardDistrict(p, marketID, 0); ok && consider(step) {
+			return
 		}
 	} else if a.InsideHouse != "" {
-		return sim.Action{Kind: "leave_house"}, nil
+		if consider(sim.Action{Kind: "leave_house"}) {
+			return
+		}
 	}
 
 	if len(p.Nearby) > 0 {
@@ -270,10 +375,12 @@ func (rulesPolicy) Decide(_ context.Context, p sim.Perception) (sim.Action, erro
 					if recentlyRejectedBy(a, b.ID, p.Tick) {
 						continue
 					}
-					return sim.Action{
+					if consider(sim.Action{
 						Kind: "offer", TargetID: b.ID,
 						Item: itemID, Quantity: spec.BatchQty, Price: p.Catalog.SalePrice(a, itemID),
-					}, nil
+					}) {
+						return
+					}
 				}
 			}
 		}
@@ -282,17 +389,19 @@ func (rulesPolicy) Decide(_ context.Context, p sim.Perception) (sim.Action, erro
 			for idx := 0; idx < len(p.Nearby); idx++ {
 				b := p.Nearby[(int(p.Tick)+idx)%len(p.Nearby)]
 				if !b.Sleeping && !b.Jailed {
-					return sim.Action{
+					if consider(sim.Action{
 						Kind:     "speak",
 						TargetID: b.ID,
 						Text:     fmt.Sprintf("I have %d food, %d energy, and am trying to %s.", a.Items["food"], a.Energy, a.Goal),
-					}, nil
+					}) {
+						return
+					}
 				}
 			}
 		}
 	}
 
-	return sim.Action{Kind: "wait"}, nil
+	consider(sim.Action{Kind: "wait"})
 }
 
 func recentlyChatted(self sim.Actor, tick int64) bool {
@@ -359,6 +468,11 @@ func desiredBuyerStock(p sim.Perception, item string) int {
 	if p.Catalog.TagsConsume(a.IdentityTags(), item) && want < 2 {
 		want = 2
 	}
+	if a.Plan != nil && a.Plan.Status == "active" && a.Plan.Stage == "produce" {
+		if r, ok := p.Catalog.RecipeByID(a.Plan.RecipeID); ok {
+			want = max(want, r.StartRequirements()[item])
+		}
+	}
 	return want
 }
 
@@ -390,29 +504,75 @@ func planSleep(p sim.Perception) sim.Action {
 		if a.InsideHouse == home.ID {
 			return sim.Action{Kind: "sleep", Quantity: ticks}
 		}
-		if a.InsideHouse != "" {
-			return sim.Action{Kind: "leave_house"}
-		}
-		if a.Location == home.District {
-			return sim.Action{Kind: "enter_house", HouseID: home.ID}
-		}
-		if hop, _, ok := p.Map.NextHop(a.Location, home.District); ok {
-			effEnergy := hop.EnergyCost
-			for _, rv := range p.Roads {
-				if rv.To == hop.To {
-					effEnergy = rv.EnergyCost
-					break
-				}
-			}
-			if a.Energy >= effEnergy {
-				return sim.Action{Kind: "move", Location: hop.To}
-			}
+		if step, ok := stepToHouseNoSleep(p, *home); ok {
+			return step
 		}
 	}
 	if a.Energy < 35 || a.Health < 55 || p.Clock.IsNight {
 		return sim.Action{Kind: "sleep", Quantity: ticks}
 	}
 	return sim.Action{Kind: "wait"}
+}
+
+func stepToHouseNoSleep(p sim.Perception, h sim.House) (sim.Action, bool) {
+	a := p.Self
+	if a.InsideHouse == h.ID {
+		return sim.Action{}, false
+	}
+	if a.InsideHouse != "" {
+		return sim.Action{Kind: "leave_house"}, true
+	}
+	if h.VenueID != "" && a.VenueID != "" && a.VenueID != h.VenueID {
+		for _, vr := range p.VenueRoutes {
+			if (vr.ToVenue == h.VenueID || sim.ActorHasTag(vr.LeadsToward, h.VenueID)) && a.Energy >= vr.EnergyCost {
+				return sim.Action{Kind: "move_venue", Location: vr.ToVenue, Channel: vr.ModeID}, true
+			}
+		}
+		return sim.Action{}, false
+	}
+	if a.Location == h.District {
+		return sim.Action{Kind: "enter_house", HouseID: h.ID}, true
+	}
+	if hop, _, ok := p.Map.NextHop(a.Location, h.District); ok {
+		for _, rv := range p.Roads {
+			if rv.To == hop.To && a.Energy >= rv.EnergyCost {
+				return sim.Action{Kind: "move", Location: hop.To}, true
+			}
+		}
+	}
+	return sim.Action{}, false
+}
+
+func stepTowardVenue(p sim.Perception, targetVenue string, basisEventID int64) (sim.Action, bool) {
+	a := p.Self
+	if targetVenue == "" {
+		return sim.Action{}, false
+	}
+	if a.VenueID == targetVenue {
+		if a.InsideHouse != "" {
+			return sim.Action{Kind: "leave_house", BasisEventID: basisEventID}, true
+		}
+		return sim.Action{}, false
+	}
+	if a.InsideHouse != "" {
+		return sim.Action{Kind: "leave_house", BasisEventID: basisEventID}, true
+	}
+	var best *sim.VenueRouteView
+	for i := range p.VenueRoutes {
+		vr := &p.VenueRoutes[i]
+		if vr.ToVenue == targetVenue || sim.ActorHasTag(vr.LeadsToward, targetVenue) {
+			if best == nil || vr.Ticks < best.Ticks || (vr.Ticks == best.Ticks && vr.ToVenue == targetVenue) {
+				best = vr
+			}
+		}
+	}
+	if best == nil {
+		return sim.Action{}, false
+	}
+	if a.Energy < best.EnergyCost {
+		return planSleep(p), true
+	}
+	return sim.Action{Kind: "move_venue", Location: best.ToVenue, Channel: best.ModeID, BasisEventID: basisEventID}, true
 }
 
 func stepTowardDistrict(p sim.Perception, targetDistrict string, basisEventID int64) (sim.Action, bool) {
@@ -426,21 +586,35 @@ func stepTowardDistrict(p sim.Perception, targetDistrict string, basisEventID in
 	if a.InsideHouse != "" {
 		return sim.Action{Kind: "leave_house", BasisEventID: basisEventID}, true
 	}
-	hop, _, ok := p.Map.NextHop(a.Location, targetDistrict)
-	if !ok {
+	if len(p.Map.Venues) > 0 {
+		for _, hop := range p.VenueRoutes {
+			if sim.ActorHasTag(hop.LeadsTowardDistricts, targetDistrict) {
+				if a.Energy < hop.EnergyCost {
+					return planSleep(p), true
+				}
+				return sim.Action{Kind: "move_venue", Location: hop.ToVenue, Channel: hop.ModeID, BasisEventID: basisEventID}, true
+			}
+		}
 		return sim.Action{}, false
 	}
-	effEnergy := hop.EnergyCost
-	for _, rv := range p.Roads {
-		if rv.To == hop.To {
-			effEnergy = rv.EnergyCost
+	var next *sim.RoadView
+	for i := range p.Roads {
+		road := &p.Roads[i]
+		if sim.ActorHasTag(road.LeadsToward, targetDistrict) {
+			next = road
 			break
 		}
+		if road.To == targetDistrict {
+			next = road
+		}
 	}
-	if a.Energy < effEnergy {
+	if next == nil {
+		return sim.Action{}, false
+	}
+	if a.Energy < next.EnergyCost {
 		return planSleep(p), true
 	}
-	return sim.Action{Kind: "move", Location: hop.To, BasisEventID: basisEventID}, true
+	return sim.Action{Kind: "move", Location: next.To, BasisEventID: basisEventID}, true
 }
 
 func stepToHouse(p sim.Perception, h sim.House) (sim.Action, bool) {
@@ -450,6 +624,9 @@ func stepToHouse(p sim.Perception, h sim.House) (sim.Action, bool) {
 	}
 	if a.InsideHouse != "" {
 		return sim.Action{Kind: "leave_house"}, true
+	}
+	if h.VenueID != "" && a.VenueID != "" && a.VenueID != h.VenueID {
+		return stepTowardVenue(p, h.VenueID, 0)
 	}
 	if a.Location == h.District {
 		return sim.Action{Kind: "enter_house", HouseID: h.ID}, true
@@ -609,10 +786,10 @@ func planCreditAndRelations(p sim.Perception) (sim.Action, bool) {
 	if allowed["repay_loan"] && p.HasActiveLoan && (freeMoney == a.Money && a.Money >= 6 || freeMoney >= 18) && a.Hunger <= 3 {
 		return sim.Action{Kind: "repay_loan"}, true
 	}
-	if allowed["mediate_feud"] && p.MediateTargetID != "" && a.Energy >= 12 && a.Health >= 50 && freeMoney >= 4 && !recentlyConflictActed(a, p.Tick, 24) {
-		for _, b := range p.Nearby {
-			if !b.Jailed && b.ID == p.MediateTargetID {
-				return sim.Action{Kind: "mediate_feud", TargetID: b.ID}, true
+	if allowed["mediate_feud"] && a.Energy >= 12 && a.Health >= 50 && !recentlyConflictActed(a, p.Tick, 24) {
+		for _, action := range p.MediationActions {
+			if action.TargetID != a.ID || freeMoney >= action.Price {
+				return action, true
 			}
 		}
 	}
@@ -854,6 +1031,10 @@ func planCatalogWork(p sim.Perception) (sim.Action, bool) {
 			continue
 		}
 		target := p.Catalog.DesiredStock(a.IdentityTags(), r.OutputItem)
+		// Keep the next crop growing while the previous harvest is being eaten.
+		if r.Growth != nil && p.Catalog.Items[r.OutputItem].Edible {
+			target = max(target, 2*r.OutputQty)
+		}
 		if target <= 0 || a.Items[r.OutputItem] >= target {
 			continue
 		}
@@ -871,18 +1052,28 @@ func resolveRecipe(p sim.Perception, r sim.Recipe, depth int) (sim.Action, bool)
 	if blocked, _ := sim.IsRecipeBlockedByWorldLaw(p.WorldLaws, r); blocked {
 		return sim.Action{}, false
 	}
-	if r.Growth != nil {
-		target := max(r.OutputQty, desiredBuyerStock(p, r.OutputItem))
-		if p.Self.Plan != nil && p.Self.Plan.Status == "active" && p.Self.Plan.RecipeID == r.ID {
-			target = max(r.OutputQty, p.Self.Plan.Quantity-p.Self.Plan.Produced)
-		}
-		var pending int64
-		for _, g := range p.Growth {
-			if g.RecipeID == r.ID {
-				pending += g.Quantity
+	// Existing batches cover planned demand, while quick meals can still meet
+	// immediate hunger during a long growing season.
+	if r.Growth != nil || !p.Catalog.Items[r.OutputItem].Edible {
+		if d := p.ActivePlan; d != nil && d.Item == r.OutputItem && d.Stage == "produce" {
+			if d.DeficitToProduce == 0 {
+				return sim.Action{}, false
+			}
+		} else {
+			target := max(r.OutputQty, desiredBuyerStock(p, r.OutputItem))
+			if expected := p.ExpectedGrowthStock(r.OutputItem); expected > 0 && expected >= int64(target-p.Self.Items[r.OutputItem]) {
+				return sim.Action{}, false
 			}
 		}
-		if pending >= int64(target) {
+	}
+
+	// Before producing planting inputs, make sure there is land to use them on.
+	if r.Growth != nil && r.NodeFeature == "farmland" {
+		if len(p.Map.Venues) > 0 && p.Self.VenueID != "" {
+			if _, ok := p.RecipeResourceVenue(r); !ok {
+				return sim.Action{}, false
+			}
+		} else if _, ok := p.RecipeResourceDistrict(r); !ok {
 			return sim.Action{}, false
 		}
 	}
@@ -890,14 +1081,15 @@ func resolveRecipe(p sim.Perception, r sim.Recipe, depth int) (sim.Action, bool)
 	a := p.Self
 
 	// Check required inputs in deterministic key order; recursively produce missing inputs if capable.
-	if len(r.Inputs) > 0 {
-		inKeys := make([]string, 0, len(r.Inputs))
-		for k := range r.Inputs {
+	requirements := r.StartRequirements()
+	if len(requirements) > 0 {
+		inKeys := make([]string, 0, len(requirements))
+		for k := range requirements {
 			inKeys = append(inKeys, k)
 		}
 		sort.Strings(inKeys)
 		for _, inItem := range inKeys {
-			if a.Items[inItem] >= r.Inputs[inItem] {
+			if a.Items[inItem] >= requirements[inItem] {
 				continue
 			}
 			for _, sub := range p.Catalog.Recipes {
@@ -911,24 +1103,13 @@ func resolveRecipe(p sim.Perception, r sim.Recipe, depth int) (sim.Action, bool)
 		}
 	}
 
-	// Prepare consumable bonus input (e.g., compost) when already at an equipped home or reasonably stocked.
-	if r.BonusInput != "" && !r.DurableBonus && a.Items[r.BonusInput] < 1 {
-		for _, sub := range p.Catalog.Recipes {
-			if sub.OutputItem == r.BonusInput && canPractice(p.Catalog, a, sub) {
-				atBonusHouse := sub.HouseFacility != "" && p.CurrentHouse != nil && p.CurrentHouse.HasFacility(sub.HouseFacility)
-				if atBonusHouse || a.Items[r.OutputItem] >= 6 {
-					if act, ok := resolveRecipe(p, sub, depth+1); ok {
-						return act, true
-					}
-				}
-			}
-		}
-	}
-
 	if availableMoneyAfterAgreements(p) < r.MoneyCost {
 		return sim.Action{}, false
 	}
 	if a.Energy < r.EnergyCost {
+		if p.Capabilities()["begin_rest"] {
+			return sim.Action{Kind: "begin_rest"}, true
+		}
 		return planSleep(p), true
 	}
 
@@ -944,23 +1125,33 @@ func resolveRecipe(p sim.Perception, r sim.Recipe, depth int) (sim.Action, bool)
 			return sim.Action{}, false
 		}
 		if a.InsideHouse == facilityHouse.ID {
-			return sim.Action{Kind: "craft", RecipeID: r.ID}, true
+			return sim.Action{Kind: "craft", RecipeID: r.ID}, p.RecipeBlockReason(r) == ""
 		}
 		return stepToHouse(p, *facilityHouse)
 	}
 
 	if r.NodeFeature != "" {
-		if a.InsideHouse == "" && p.Map.DistrictHasFeature(a.Location, r.NodeFeature) {
-			return sim.Action{Kind: "craft", RecipeID: r.ID}, true
+		if len(p.Map.Venues) > 0 && a.VenueID != "" {
+			destVenue, ok := p.RecipeResourceVenue(r)
+			if !ok {
+				return sim.Action{}, false
+			}
+			if a.InsideHouse == "" && a.VenueID == destVenue {
+				return sim.Action{Kind: "craft", RecipeID: r.ID}, p.RecipeBlockReason(r) == ""
+			}
+			return stepTowardVenue(p, destVenue, 0)
 		}
-		dest, _, ok := p.Map.NearestDistrictWithFeature(a.Location, r.NodeFeature)
+		dest, ok := p.RecipeResourceDistrict(r)
 		if !ok {
 			return sim.Action{}, false
+		}
+		if a.InsideHouse == "" && a.Location == dest {
+			return sim.Action{Kind: "craft", RecipeID: r.ID}, p.RecipeBlockReason(r) == ""
 		}
 		return stepTowardDistrict(p, dest, 0)
 	}
 
-	return sim.Action{Kind: "craft", RecipeID: r.ID}, true
+	return sim.Action{Kind: "craft", RecipeID: r.ID}, p.RecipeBlockReason(r) == ""
 }
 
 // informationAction acts on or relays recent structured supply observations and heard statements.
@@ -971,69 +1162,11 @@ func informationAction(p sim.Perception) (sim.Action, bool) {
 		if p.Tick-m.Tick > sim.TicksPerDay {
 			continue
 		}
-		var claim sim.Statement
-		text := ""
-		if m.Observation != nil {
-			switch m.Observation.Kind {
-			case "item_produced":
-				claim = sim.Statement{
-					Topic:    "item_produced",
-					Item:     m.Observation.Item,
-					Location: m.Observation.Location,
-					Quantity: m.Observation.Quantity,
-				}
-				text = fmt.Sprintf("I produced %d %s at %s.", claim.Quantity, claim.Item, claim.Location)
-			case "macro_anomaly":
-				mod := m.Observation.Modality
-				if mod == "" {
-					mod = "eyewitness"
-				}
-				claim = sim.Statement{
-					Topic:     "macro_anomaly",
-					SubjectID: m.Observation.SubjectID,
-					Item:      m.Observation.Item,
-					Location:  m.Observation.Location,
-					Quantity:  m.Observation.Quantity,
-				}
-				text = fmt.Sprintf("I observed %s (%s) at %s (intensity %d).", claim.SubjectID, mod, claim.Location, claim.Quantity)
-			case "corruption":
-				if m.Observation.SubjectID == "" || m.Observation.SubjectID == a.ID || a.IllicitGain > 0 {
-					continue
-				}
-				claim = sim.Statement{
-					Topic:     "corruption",
-					SubjectID: m.Observation.SubjectID,
-					ObjectID:  m.Observation.ObjectID,
-					Item:      "coins",
-					Location:  m.Observation.Location,
-					Quantity:  m.Observation.Quantity,
-				}
-				text = fmt.Sprintf("I witnessed %s taking %d illicit bribe coins at %s.", claim.SubjectID, claim.Quantity, claim.Location)
-			case "wrongful_conviction":
-				if m.Observation.ObjectID == "" || m.Observation.SubjectID == a.ID {
-					continue
-				}
-				claim = sim.Statement{
-					Topic:     "wrongful_conviction",
-					SubjectID: m.Observation.SubjectID,
-					ObjectID:  m.Observation.ObjectID,
-					CaseID:    m.Observation.CaseID,
-					Location:  m.Observation.Location,
-					Quantity:  1,
-				}
-				text = fmt.Sprintf("I witnessed %s wrongfully framing %s in %s (case #%d).", claim.SubjectID, claim.ObjectID, claim.Location, claim.CaseID)
-			default:
-				continue
-			}
-		} else if (m.Kind == "speech" || m.Kind == "channel_message") && m.Source != a.ID && m.Statement != nil {
-			claim = *m.Statement
-			if claim.Item == "" && (claim.Topic == "item_produced" || claim.Topic == "supply") {
-				claim.Item = "food"
-			}
-			text = fmt.Sprintf("%s told me: %s", m.Source, m.Text)
-		} else {
+		report, ok := reportFromMemory(m, a, "")
+		if !ok {
 			continue
 		}
+		claim := report.Statement
 
 		if claim.Topic == "wrongful_conviction" && claim.Location != "" && a.Location != claim.Location && a.IllicitGain == 0 && a.Energy >= 16 && p.Capabilities()["file_appeal"] {
 			visitedAfter := false
@@ -1051,7 +1184,7 @@ func informationAction(p sim.Perception) (sim.Action, bool) {
 		}
 
 		isSupplyTopic := claim.Topic == "item_produced" || claim.Topic == "supply" || claim.Topic == "surplus"
-		if isSupplyTopic && m.Kind == "speech" && p.Tick-m.Tick <= 8 && a.Trust[m.Source] >= 0 && claim.Location != "" && a.Location != claim.Location {
+		if isSupplyTopic && claim.Item != "" && m.Kind == "speech" && p.Tick-m.Tick <= 8 && a.Trust[m.Source] >= 0 && claim.Location != "" && a.Location != claim.Location {
 			spec := p.Catalog.Items[claim.Item]
 			threshold := spec.ShortageThreshold + 2
 			if threshold <= 2 {
@@ -1088,7 +1221,7 @@ func informationAction(p sim.Perception) (sim.Action, bool) {
 			if told {
 				continue
 			}
-			return sim.Action{Kind: "speak", TargetID: b.ID, Text: text, Statement: &claim, BasisEventID: m.EventID}, true
+			return sim.Action{Kind: "speak", TargetID: b.ID, Text: report.Text, Statement: claim, BasisEventID: report.BasisEventID}, true
 		}
 	}
 	return sim.Action{}, false
@@ -1187,22 +1320,312 @@ func chooseContinuity(p sim.Perception) (sim.Action, bool) {
 		}
 	}
 	if a.Plan != nil && a.Plan.Status == "active" {
-		if a.Plan.Stage == "produce" {
-			if r, ok := p.Catalog.RecipeByID(a.Plan.RecipeID); ok && canPractice(p.Catalog, a, r) {
-				return resolveRecipe(p, r, 0)
+		return executeActivePlan(p, actions, allowed, freeMoney)
+	}
+	return sim.Action{}, false
+}
+
+func executeActivePlan(p sim.Perception, continuityActions []sim.Action, allowed map[string]bool, freeMoney int) (sim.Action, bool) {
+	a := p.Self
+	plan := a.Plan
+	if plan == nil || plan.Status != "active" {
+		return sim.Action{}, false
+	}
+	rem := plan.RemainingToSell()
+	if rem <= 0 {
+		return sim.Action{}, false
+	}
+	dir := p.ActivePlan
+	if dir == nil {
+		dir = sim.BuildPlanDirective(p)
+	}
+	if dir.Stage == "produce" {
+		switch {
+		case dir.NextStep == "await_harvest", dir.NextStep == "care_stalled_growth":
+			return sim.Action{}, false
+		case len(dir.ReadyHarvestIDs) > 0:
+			return sim.Action{Kind: "harvest", TargetID: fmt.Sprint(dir.ReadyHarvestIDs[0])}, true
+		case strings.HasPrefix(dir.NextStep, "abandon_"):
+			return sim.Action{Kind: "abandon_plan"}, allowed["abandon_plan"]
+		case dir.NextStep == "acquire_inputs":
+			if freeMoney > 0 {
+				return stepToMarket(p)
 			}
+			return sim.Action{}, false
+		case dir.NextStep == "production_blocked":
+			if r, ok := p.Catalog.RecipeByID(dir.ActiveRecipeID); ok && a.Energy < r.EnergyCost {
+				if allowed["begin_rest"] {
+					return sim.Action{Kind: "begin_rest"}, true
+				}
+				return planSleep(p), true
+			}
+			return sim.Action{}, false
+		case strings.HasPrefix(dir.NextStep, "craft:"):
+			r, _ := p.Catalog.RecipeByID(dir.ActiveRecipeID)
+			return sim.Action{Kind: "craft", RecipeID: r.ID}, freeMoney >= r.MoneyCost
+		case strings.HasPrefix(dir.NextStep, "leave_house"):
+			return sim.Action{Kind: "leave_house"}, true
+		case strings.HasPrefix(dir.NextStep, "enter_workshop:"):
+			return sim.Action{Kind: "enter_house", HouseID: dir.TargetHouseID}, true
+		case dir.TargetVenueID != "" && a.VenueID != "":
+			return stepTowardVenue(p, dir.TargetVenueID, 0)
+		case dir.TargetDistrict != "":
+			return stepTowardDistrict(p, dir.TargetDistrict, 0)
 		}
-		// Propose a continuing sale when there is a compatible buyer, rather than
-		// dropping the objective after production or manufacturing a buyer response.
-		for _, x := range actions {
-			if x.Kind != "propose_agreement" || x.Item != a.Plan.Item || !allowed[x.Kind] || a.Trust[x.TargetID] < 0 {
-				continue
-			}
-			for _, n := range p.Nearby {
-				if n.ID == x.TargetID && p.Catalog.TagsConsume(n.Tags, x.Item) && !p.Catalog.TagsProduce(n.Tags, x.Item) && !recentlyRejectedBy(a, n.ID, p.Tick) {
-					return x, true
+		return sim.Action{}, false
+	}
+
+	// Stage == "sell": actual held stock covers the remaining quantity to sell.
+	spec, hasSpec := p.Catalog.Items[plan.Item]
+	embargoed := p.Polity != nil && sim.ActorHasTag(p.Polity.EmbargoItems, plan.Item)
+	if embargoed {
+		if allowed["abandon_plan"] {
+			return sim.Action{Kind: "abandon_plan"}, true
+		}
+		return sim.Action{}, false
+	}
+
+	hasPendingPlanOfferHere := false
+	for _, o := range p.Offers {
+		if o.Seller == a.ID && o.Item == plan.Item {
+			for _, nb := range p.Nearby {
+				if nb.ID == o.Buyer && !nb.Jailed && !nb.Sleeping {
+					hasPendingPlanOfferHere = true
+					break
 				}
 			}
+		}
+	}
+
+	if hasSpec && spec.Tradeable && spec.BatchQty > 0 && allowed["offer"] && !hasPendingPlanOfferHere {
+		qty := min(spec.BatchQty, rem)
+		if qty > 0 && a.Items[plan.Item] >= qty {
+			cur := "coins"
+			if len(spec.AcceptedCurrencies) > 0 && !sim.ItemAcceptsCurrency(spec, "coins") {
+				cur = spec.AcceptedCurrencies[0]
+			}
+			actCur := ""
+			if cur != "coins" {
+				actCur = cur
+			}
+			price := planBatchPrice(p.Catalog.SalePrice(a, plan.Item), qty, spec.BatchQty)
+			canOfferTo := func(nb sim.Neighbor, requireConsume bool) bool {
+				if nb.Sleeping || nb.Jailed || recentlyRejectedBy(a, nb.ID, p.Tick) {
+					return false
+				}
+				if spec.BuyerRequiredTag != "" && !sim.ActorHasTag(nb.Tags, spec.BuyerRequiredTag) {
+					return false
+				}
+				if p.Catalog.TagsProduce(nb.Tags, plan.Item) {
+					return false
+				}
+				if !p.Catalog.Capabilities(sim.Actor{Tags: nb.Tags})["accept"] {
+					return false
+				}
+				if requireConsume && !p.Catalog.TagsConsume(nb.Tags, plan.Item) {
+					return false
+				}
+				for _, o := range p.Offers {
+					if o.Seller == a.ID && o.Buyer == nb.ID && o.Item == plan.Item {
+						return false
+					}
+				}
+				return true
+			}
+			for _, requireConsume := range []bool{true, false} {
+				for _, nb := range p.Nearby {
+					if canOfferTo(nb, requireConsume) {
+						return sim.Action{
+							Kind: "offer", TargetID: nb.ID,
+							Item: plan.Item, Quantity: qty, Price: price, Currency: actCur,
+						}, true
+					}
+				}
+			}
+		}
+	}
+
+	for _, x := range continuityActions {
+		if x.Kind != "propose_agreement" || x.Item != plan.Item || !allowed[x.Kind] || a.Trust[x.TargetID] < 0 {
+			continue
+		}
+		for _, n := range p.Nearby {
+			if n.ID == x.TargetID && !p.Catalog.TagsProduce(n.Tags, x.Item) && (p.Catalog.TagsConsume(n.Tags, x.Item) || p.Catalog.Capabilities(sim.Actor{Tags: n.Tags})["accept_agreement"]) && !recentlyRejectedBy(a, n.ID, p.Tick) {
+				return x, true
+			}
+		}
+	}
+
+	if hasPendingPlanOfferHere {
+		return sim.Action{Kind: "wait"}, true
+	}
+	if a.InsideHouse != "" {
+		return sim.Action{Kind: "leave_house"}, true
+	}
+	if step, ok := stepToMarket(p); ok {
+		return step, true
+	}
+	if recentlyMarketSaturated(a, p.Tick) {
+		if len(p.VenueRoutes) > 0 {
+			vr := p.VenueRoutes[int(p.Tick)%len(p.VenueRoutes)]
+			if a.Energy >= vr.EnergyCost {
+				return sim.Action{Kind: "move_venue", Location: vr.ToVenue, Channel: vr.ModeID}, true
+			}
+		} else if len(p.Roads) > 0 {
+			rd := p.Roads[int(p.Tick)%len(p.Roads)]
+			if a.Energy >= rd.EnergyCost {
+				return sim.Action{Kind: "move", Location: rd.To}, true
+			}
+		}
+	}
+	return sim.Action{}, false
+}
+
+func stepToMarket(p sim.Perception) (sim.Action, bool) {
+	a := p.Self
+	if len(p.Map.Venues) > 0 && a.VenueID != "" {
+		if a.InsideHouse == "" && p.Map.VenueOrDistrictHasFeature(a.VenueID, a.Location, "market") {
+			return sim.Action{}, false
+		}
+		bestVenue := ""
+		bestCost := int(^uint(0) >> 1)
+		for _, v := range p.Map.Venues {
+			if !p.Map.VenueOrDistrictHasFeature(v.ID, v.DistrictID, "market") {
+				continue
+			}
+			if v.ID == a.VenueID {
+				if a.InsideHouse != "" {
+					return sim.Action{Kind: "leave_house"}, true
+				}
+				return sim.Action{}, false
+			}
+			if _, cost, _, ok := p.Map.NextVenueHopForActor(p.Catalog, nil, a, a.VenueID, v.ID); ok && cost < bestCost {
+				bestVenue, bestCost = v.ID, cost
+			}
+		}
+		if bestVenue != "" {
+			return stepTowardVenue(p, bestVenue, 0)
+		}
+	}
+	if marketID, _, ok := p.Map.NearestDistrictWithFeature(a.Location, "market"); ok && a.Location != marketID {
+		return stepTowardDistrict(p, marketID, 0)
+	}
+	if a.InsideHouse != "" {
+		return sim.Action{Kind: "leave_house"}, true
+	}
+	return sim.Action{}, false
+}
+
+// Use existing extraction recipes, profession entry rules and real travel.
+// This neither grants a skill nor supplies inventory as a side effect.
+func immediateFoodAction(p sim.Perception, options []Option) (sim.Action, bool) {
+	// Work offered here already satisfies energy, material and site rules.
+	// Prefer obtaining a meal here before looking for a distant source.
+	for _, option := range options {
+		if option.Action.Kind == "craft" {
+			r, _ := p.Catalog.RecipeByID(option.Action.RecipeID)
+			if p.Catalog.Items[r.OutputItem].Edible && r.Growth == nil && r.ResourcePool != "" && len(r.Inputs) == 0 {
+				return option.Action, true
+			}
+		}
+	}
+	for _, r := range p.Catalog.Recipes {
+		if !p.Catalog.Items[r.OutputItem].Edible || r.Growth != nil || len(r.Inputs) > 0 || r.ResourcePool == "" {
+			continue
+		}
+		if r.NodeFeature != "" {
+			if _, _, ok := p.Map.NearestDistrictWithFeature(p.Self.Location, r.NodeFeature); !ok {
+				continue
+			}
+		}
+		if canPractice(p.Catalog, p.Self, r) {
+			if x, ok := resolveRecipe(p, r, 0); ok {
+				return x, true
+			}
+			continue
+		}
+		prof, ok := p.Catalog.ProfessionByID(r.Profession)
+		if !ok || prof.ParentProfession != "" {
+			continue
+		}
+		if ok, _ := p.Catalog.CanLearnProfession(p.Self, prof); !ok {
+			continue
+		}
+		for _, f := range p.Factions {
+			if f.ID != prof.Guild {
+				continue
+			}
+			if !f.Joined {
+				if ok, _ := p.Self.Attributes.Meets(f.Requirements); !ok {
+					continue
+				}
+			}
+			if p.Self.Location != f.District || p.Self.InsideHouse != "" {
+				if step, ok := stepTowardDistrict(p, f.District, 0); ok {
+					return step, true
+				}
+				if step, ok := learnTravelProfession(p, f.District); ok {
+					return step, true
+				}
+				continue
+			}
+			if !f.Joined {
+				return sim.Action{Kind: "join_faction", FactionID: f.ID}, true
+			}
+			return sim.Action{Kind: "join_profession", ProfessionID: prof.ID}, true
+		}
+	}
+	return sim.Action{}, false
+}
+
+// Learn through the existing guild actions when a profession's declared grants
+// make the required journey possible. The temporary actor is used only to plan;
+// the real actor gets no ability until joining and learning actually settle.
+func learnTravelProfession(p sim.Perception, targetDistrict string) (sim.Action, bool) {
+	if p.Self.VenueID == "" {
+		return sim.Action{}, false
+	}
+	for _, prof := range p.Catalog.Professions {
+		if len(prof.Grants) == 0 {
+			continue
+		}
+		if ok, _ := p.Catalog.CanLearnProfession(p.Self, prof); !ok {
+			continue
+		}
+		future := p.Self
+		future.Tags = append(append([]string(nil), future.Tags...), prof.Grants...)
+		enables := false
+		for _, v := range p.Map.Venues {
+			if v.DistrictID != targetDistrict {
+				continue
+			}
+			if _, _, _, ok := p.Map.NextVenueHopForActor(p.Catalog, nil, future, future.VenueID, v.ID); ok {
+				enables = true
+				break
+			}
+		}
+		if !enables {
+			continue
+		}
+		for _, guild := range p.Factions {
+			if guild.ID != prof.Guild {
+				continue
+			}
+			if !guild.Joined {
+				if ok, _ := p.Self.Attributes.Meets(guild.Requirements); !ok {
+					continue
+				}
+			}
+			if guild.District != p.Self.Location || p.Self.InsideHouse != "" {
+				if step, ok := stepTowardDistrict(p, guild.District, 0); ok {
+					return step, true
+				}
+				continue
+			}
+			if !guild.Joined {
+				return sim.Action{Kind: "join_faction", FactionID: guild.ID}, true
+			}
+			return sim.Action{Kind: "join_profession", ProfessionID: prof.ID}, true
 		}
 	}
 	return sim.Action{}, false

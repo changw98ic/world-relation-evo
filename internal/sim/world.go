@@ -34,6 +34,7 @@ type Statement struct {
 }
 
 type Memory struct {
+	search       *memorySearchCache
 	BasisEventID int64        `json:"basis_event_id,omitempty"`
 	RootEventID  int64        `json:"root_event_id"`
 	Observation  *Observation `json:"observation,omitempty"`
@@ -62,17 +63,21 @@ type Offer struct {
 
 // Task tracks a multi-tick action currently in progress so busy actors advance deterministically across quarter-hours.
 type Task struct {
-	Action      Action `json:"action"`
-	TotalTicks  int    `json:"total_ticks"`
-	Remaining   int    `json:"remaining_ticks"`
-	StartedTick int64  `json:"started_tick"`
-	Yield       int    `json:"yield,omitempty"`
-	SleepTenths int    `json:"sleep_tenths,omitempty"`
-	StartEnergy int    `json:"start_energy,omitempty"`
-	Dormant     bool   `json:"dormant,omitempty"`
+	Action           Action `json:"action"`
+	TotalTicks       int    `json:"total_ticks"`
+	Remaining        int    `json:"remaining_ticks"`
+	WorkCredit       int    `json:"work_credit,omitempty"` // hundredths of a crafting work tick
+	StartedTick      int64  `json:"started_tick"`
+	Yield            int    `json:"yield,omitempty"`
+	FundedHundredths int64  `json:"funded_hundredths,omitempty"`
+	FieldID          string `json:"field_id,omitempty"`
+	SleepTenths      int    `json:"sleep_tenths,omitempty"`
+	StartEnergy      int    `json:"start_energy,omitempty"`
+	Dormant          bool   `json:"dormant,omitempty"`
 }
 
 type Actor struct {
+	Resting         bool              `json:"resting,omitempty"`
 	DigestedFood    int64             `json:"digested_food,omitempty"`
 	Plan            *PersonalPlan     `json:"plan,omitempty"`
 	ID              string            `json:"id"`
@@ -107,6 +112,7 @@ type Actor struct {
 	Currencies      map[string]int64  `json:"currencies,omitempty"`
 	IllicitGain     int               `json:"illicit_gain,omitempty"`
 	Items           map[string]int    `json:"items"`
+	Equipped        map[string]string `json:"equipped,omitempty"`
 	PinFocal        bool              `json:"pin_focal,omitempty"`
 	FormID          string            `json:"form_id,omitempty"`
 	StateSlots      map[string]int    `json:"state_slots,omitempty"`
@@ -146,8 +152,10 @@ func SamePlace(a, b Actor) bool {
 }
 
 type World struct {
+	Production       ProductionState          `json:"production"`
 	Growth           []GrowthBatch            `json:"growth,omitempty"`
 	Shipments        []Shipment               `json:"shipments,omitempty"`
+	FreightUsage     *FreightCapacityUsage    `json:"freight_usage,omitempty"`
 	Continuity       *ContinuityState         `json:"continuity,omitempty"`
 	Polities         *PolityNetwork           `json:"polities,omitempty"`
 	ID               string                   `json:"id"`
@@ -177,25 +185,27 @@ type World struct {
 }
 
 type Action struct {
-	AgreementID  int64      `json:"agreement_id,omitempty"`
-	BasisEventID int64      `json:"basis_event_id,omitempty"`
-	Statement    *Statement `json:"statement,omitempty"`
-	Kind         string     `json:"kind"`
-	Channel      string     `json:"channel,omitempty"`
-	TargetID     string     `json:"target_id,omitempty"`
-	Location     string     `json:"location,omitempty"`
-	HouseID      string     `json:"house_id,omitempty"`
-	FactionID    string     `json:"faction_id,omitempty"`
-	ProfessionID string     `json:"profession_id,omitempty"`
-	RecipeID     string     `json:"recipe_id,omitempty"`
-	TechID       string     `json:"tech_id,omitempty"`
-	Item         string     `json:"item,omitempty"`
-	Quantity     int        `json:"quantity,omitempty"`
-	Price        int        `json:"price,omitempty"`
-	Currency     string     `json:"currency,omitempty"`
-	TransitionID string     `json:"transition_id,omitempty"`
-	OfferID      int64      `json:"offer_id,omitempty"`
-	Text         string     `json:"text,omitempty"`
+	DueTick      *int64               `json:"due_tick,omitempty"` // Optional delivery deadline; tick zero is a valid deadline.
+	AgreementID  int64                `json:"agreement_id,omitempty"`
+	BasisEventID int64                `json:"basis_event_id,omitempty"`
+	Statement    *Statement           `json:"statement,omitempty"`
+	Care         *GrowthCareAgreement `json:"care,omitempty"`
+	Kind         string               `json:"kind"`
+	Channel      string               `json:"channel,omitempty"`
+	TargetID     string               `json:"target_id,omitempty"`
+	Location     string               `json:"location,omitempty"`
+	HouseID      string               `json:"house_id,omitempty"`
+	FactionID    string               `json:"faction_id,omitempty"`
+	ProfessionID string               `json:"profession_id,omitempty"`
+	RecipeID     string               `json:"recipe_id,omitempty"`
+	TechID       string               `json:"tech_id,omitempty"`
+	Item         string               `json:"item,omitempty"`
+	Quantity     int                  `json:"quantity,omitempty"`
+	Price        int                  `json:"price,omitempty"`
+	Currency     string               `json:"currency,omitempty"`
+	TransitionID string               `json:"transition_id,omitempty"`
+	OfferID      int64                `json:"offer_id,omitempty"`
+	Text         string               `json:"text,omitempty"`
 }
 
 type Event struct {
@@ -247,45 +257,52 @@ type CohortView struct {
 }
 
 type Perception struct {
-	EnergyNodes         []FlowNode            `json:"energy_nodes,omitempty"`
-	Growth              []GrowthBatch         `json:"growth,omitempty"`
-	Continuity          ContinuityView        `json:"continuity"`
-	LoanRequests        []LoanRequest         `json:"loan_requests,omitempty"`
-	LoanQuotes          []LoanRequest         `json:"loan_quotes,omitempty"`
-	Tick                int64                 `json:"tick"`
-	Clock               Clock                 `json:"clock"`
-	Calendar            CalendarState         `json:"calendar"`
-	Self                Actor                 `json:"self"`
-	CurrentDistrict     District              `json:"current_district"`
-	CurrentVenue        *Venue                `json:"current_venue,omitempty"`
-	DistrictState       *DistrictState        `json:"district_state,omitempty"`
-	CurrentHouse        *House                `json:"current_house,omitempty"`
-	AccessibleHouses    []House               `json:"accessible_houses,omitempty"`
-	Factions            []FactionView         `json:"factions,omitempty"`
-	Roads               []RoadView            `json:"roads,omitempty"`
-	VenueRoutes         []VenueRouteView      `json:"venue_routes,omitempty"`
-	Polity              *PolityPerceptionView `json:"polity,omitempty"`
-	Nearby              []Neighbor            `json:"nearby,omitempty"`
-	LocalCohorts        []CohortView          `json:"local_cohorts,omitempty"`
-	ActiveEffects       []ActiveEffect        `json:"active_effects,omitempty"`
-	Offers              []Offer               `json:"offers,omitempty"`
-	SpotlightSalience   int                   `json:"spotlight_salience,omitempty"`
-	HasActiveLoan       bool                  `json:"has_active_loan,omitempty"`
-	OverdueBorrowerID   string                `json:"overdue_borrower_id,omitempty"`
-	OverdueHouseID      string                `json:"overdue_house_id,omitempty"`
-	Married             bool                  `json:"married,omitempty"`
-	EligibleSpouseIDs   []string              `json:"eligible_spouse_ids,omitempty"`
-	ActiveGrudgeTargets []string              `json:"active_grudge_targets,omitempty"`
-	MediateTargetID     string                `json:"mediate_target_id,omitempty"`
-	DistrictController  string                `json:"district_controller,omitempty"`
-	HasOpenWrongfulCase bool                  `json:"has_open_wrongful_case,omitempty"`
-	AppealTargetID      string                `json:"appeal_target_id,omitempty"`
-	AppealBasisEventID  int64                 `json:"appeal_basis_event_id,omitempty"`
-	DistrictGrievance   int                   `json:"district_grievance,omitempty"`
-	KnownTechs          []string              `json:"known_techs,omitempty"`
-	WorldLaws           map[string]int        `json:"world_laws,omitempty"`
-	Map                 WorldMap              `json:"-"`
-	Catalog             Catalog               `json:"-"`
+	CareAgreements         []GrowthCareAgreement `json:"care_agreements,omitempty"`
+	Fields                 []FieldView           `json:"fields,omitempty"`
+	EnergyNodes            []FlowNode            `json:"energy_nodes,omitempty"`
+	Growth                 []GrowthBatch         `json:"growth,omitempty"`
+	Continuity             ContinuityView        `json:"continuity"`
+	ActivePlan             *PlanDirectiveView    `json:"active_plan,omitempty"`
+	LoanRequests           []LoanRequest         `json:"loan_requests,omitempty"`
+	LoanQuotes             []LoanRequest         `json:"loan_quotes,omitempty"`
+	Tick                   int64                 `json:"tick"`
+	Clock                  Clock                 `json:"clock"`
+	Calendar               CalendarState         `json:"calendar"`
+	Self                   Actor                 `json:"self"`
+	CurrentDistrict        District              `json:"current_district"`
+	CurrentVenue           *Venue                `json:"current_venue,omitempty"`
+	DistrictState          *DistrictState        `json:"district_state,omitempty"`
+	CurrentHouse           *House                `json:"current_house,omitempty"`
+	AccessibleHouses       []House               `json:"accessible_houses,omitempty"`
+	Factions               []FactionView         `json:"factions,omitempty"`
+	Roads                  []RoadView            `json:"roads,omitempty"`
+	VenueRoutes            []VenueRouteView      `json:"venue_routes,omitempty"`
+	Polity                 *PolityPerceptionView `json:"polity,omitempty"`
+	Nearby                 []Neighbor            `json:"nearby,omitempty"`
+	LocalCohorts           []CohortView          `json:"local_cohorts,omitempty"`
+	ActiveEffects          []ActiveEffect        `json:"active_effects,omitempty"`
+	Offers                 []Offer               `json:"offers,omitempty"`
+	OfferBlockReasons      map[int64]string      `json:"offer_block_reasons,omitempty"`
+	SpotlightSalience      int                   `json:"spotlight_salience,omitempty"`
+	HasActiveLoan          bool                  `json:"has_active_loan,omitempty"`
+	OverdueBorrowerID      string                `json:"overdue_borrower_id,omitempty"`
+	OverdueHouseID         string                `json:"overdue_house_id,omitempty"`
+	Married                bool                  `json:"married,omitempty"`
+	EligibleSpouseIDs      []string              `json:"eligible_spouse_ids,omitempty"`
+	ActiveGrudgeTargets    []string              `json:"active_grudge_targets,omitempty"`
+	MediationActions       []Action              `json:"mediation_actions,omitempty"`
+	GrowthCareActions      []Action              `json:"growth_care_actions,omitempty"`
+	ExpectedCraftYield     map[string]int        `json:"expected_craft_yield,omitempty"`
+	ProductionBlockReasons map[string]string     `json:"production_block_reasons,omitempty"`
+	DistrictController     string                `json:"district_controller,omitempty"`
+	HasOpenWrongfulCase    bool                  `json:"has_open_wrongful_case,omitempty"`
+	AppealTargetID         string                `json:"appeal_target_id,omitempty"`
+	AppealBasisEventID     int64                 `json:"appeal_basis_event_id,omitempty"`
+	DistrictGrievance      int                   `json:"district_grievance,omitempty"`
+	KnownTechs             []string              `json:"known_techs,omitempty"`
+	WorldLaws              map[string]int        `json:"world_laws,omitempty"`
+	Map                    WorldMap              `json:"-"`
+	Catalog                Catalog               `json:"-"`
 }
 
 type Decider interface {
@@ -351,7 +368,14 @@ func CombatPowerWithCatalog(cat Catalog, a Actor) int {
 	}
 	for itemID, qty := range a.Items {
 		if qty > 0 {
-			if spec, ok := cat.Items[itemID]; ok && spec.CombatBonus > 0 {
+			if spec, ok := cat.Items[itemID]; ok && spec.EquipSlot == "" && spec.CombatBonus > 0 {
+				power += spec.CombatBonus
+			}
+		}
+	}
+	for _, itemID := range a.Equipped {
+		if itemID != "" {
+			if spec, ok := cat.Items[itemID]; ok && spec.EquipSlot != "" && spec.CombatBonus > 0 {
 				power += spec.CombatBonus
 			}
 		}
@@ -632,6 +656,7 @@ func Village(id string) *World {
 		w.refreshActor(&w.Actors[i])
 	}
 	w.InitEcology(len(w.Actors))
+	w.initVillageFoodCycle()
 	w.InitLedgerAudit()
 	return w
 }
@@ -640,6 +665,13 @@ func (w *World) actor(id string) *Actor {
 	for i := range w.Actors {
 		if w.Actors[i].ID == id {
 			return &w.Actors[i]
+		}
+	}
+	if c := w.storedActorCohort(id); c != nil {
+		for i := range c.Members {
+			if c.Members[i].ID == id {
+				return &c.Members[i]
+			}
 		}
 	}
 	return nil
@@ -703,10 +735,14 @@ func (w *World) refreshActor(a *Actor) {
 	if len(a.ProfessionXP) == 0 {
 		a.ProfessionXP = nil
 	}
+	SyncActorPlan(a, w.Tick, w.Catalog)
 }
 
-// CheckRecipe is the single rule owner validating whether actor `a` can start recipe `r` right now.
+// CheckRecipe evaluates the catalog, inventory and location requirements for one batch.
 func CheckRecipe(cat Catalog, worldMap WorldMap, currentHouse *House, a Actor, r Recipe) (bool, string) {
+	if err := cat.ValidateProductionConversion(r); err != nil {
+		return false, err.Error()
+	}
 	if ok, reason := cat.ProfessionGating(a, r); !ok {
 		return false, reason
 	}
@@ -733,7 +769,9 @@ func CheckRecipe(cat Catalog, worldMap WorldMap, currentHouse *House, a Actor, r
 	if a.Money < r.MoneyCost {
 		return false, "insufficient money for " + r.ID
 	}
-	for item, qty := range recipeStartRequirements(r) {
+	requirements := r.StartRequirements()
+	for _, item := range sortedProductionKeys(requirements) {
+		qty := requirements[item]
 		if a.Items[item] < qty {
 			return false, fmt.Sprintf("recipe %s requires %d %s", r.ID, qty, item)
 		}
@@ -783,7 +821,7 @@ func appendUnique(list []string, value string) []string {
 }
 
 func (w *World) View(id string) Perception {
-	a := cloneActor(*w.actor(id))
+	a := CloneActor(*w.actor(id))
 	if a.Items == nil {
 		a.Items = map[string]int{}
 	}
@@ -806,12 +844,7 @@ func (w *World) View(id string) Perception {
 		Map:             CloneMap(w.Map),
 		Catalog:         CloneCatalog(w.Catalog),
 	}
-	if len(w.ActiveEffects) > 0 {
-		p.ActiveEffects = make([]ActiveEffect, len(w.ActiveEffects))
-		for i, eff := range w.ActiveEffects {
-			p.ActiveEffects[i] = CloneActiveEffect(eff)
-		}
-	}
+	p.ActiveEffects = w.perceivedActiveEffects(a, w.ActiveEffects)
 	for _, c := range w.Cohorts {
 		if c.Population > 0 && c.District == a.Location {
 			p.LocalCohorts = append(p.LocalCohorts, CohortView{
@@ -875,6 +908,9 @@ func (w *World) View(id string) Perception {
 				EnergyCost:  effEnergy,
 				LeadsToward: w.Map.LeadsToward(a.Location, r.To),
 			})
+		}
+		if len(w.Map.Venues) > 0 {
+			p.Roads = nil
 		}
 		p.VenueRoutes = buildVenueRouteViews(p.Map, p.Catalog, w.DistrictStates, w.actorWithEffectTags(a))
 	}
@@ -952,12 +988,45 @@ func (w *World) applyPerceptionEvoHints(p *Perception) {
 }
 
 func (w *World) applyPerceptionEvoHintsWithAgreements(p *Perception, agreements []Agreement) {
+	if p.Polity != nil && p.Polity.LedPolityID != "" {
+		actors, cohorts := w.reliefRecipients(w.Polities.NodeByID(p.Polity.LedPolityID), p.Self.ID)
+		p.Polity.ReliefGrantAvailable = len(actors) > 0 || len(cohorts) > 0
+	}
+	p.ExpectedCraftYield = map[string]int{}
+	for _, recipe := range w.Catalog.Recipes {
+		if recipe.Growth == nil {
+			whole, _ := w.previewNonBiologicalYield("actor", p.Self.ID, p.Self.Location, recipe)
+			p.ExpectedCraftYield[recipe.ID] = int(whole)
+		}
+	}
+	for _, field := range w.Production.Fields {
+		if field.UserKind == "actor" && field.UserID == p.Self.ID {
+			p.Fields = append(p.Fields, FieldView{FieldAsset: field, AvailableAreaM2: w.availableFieldArea(field)})
+		}
+	}
+	p.OfferBlockReasons = make(map[int64]string)
+	for _, offer := range p.Offers {
+		if offer.Buyer == p.Self.ID {
+			if reason := w.offerSettlementBlockReason(p.Self, offer); reason != "" {
+				p.OfferBlockReasons[offer.ID] = reason
+			}
+		}
+	}
 	if p == nil {
 		return
 	}
 	p.Self.Plan = ClonePersonalPlan(p.Self.Plan)
+	SyncActorPlan(&p.Self, w.Tick, w.Catalog)
 	p.Continuity = w.continuityForAgreements(p.Self.ID, agreements)
 	a := p.Self
+	for _, g := range p.Growth {
+		if terms := w.careAgreement(g); terms != nil {
+			p.CareAgreements = append(p.CareAgreements, *terms)
+		}
+	}
+	p.GrowthCareActions = w.growthCareActions(a)
+	p.ProductionBlockReasons = w.ProductionStartBlockReasons(a)
+	p.ActivePlan = BuildPlanDirective(*p)
 	p.LoanRequests = w.MarketCredit.PendingLoanRequests(a.ID)
 	spec := DefaultMarketCreditSpec()
 	if w.MarketCredit != nil {
@@ -1018,16 +1087,10 @@ func (w *World) applyPerceptionEvoHintsWithAgreements(p *Perception, agreements 
 				p.EligibleSpouseIDs = append(p.EligibleSpouseIDs, nb.ID)
 			}
 		}
-		nearbySet := make(map[string]bool, len(p.Nearby))
-		for _, nb := range p.Nearby {
-			nearbySet[nb.ID] = true
-		}
+		p.MediationActions = w.mediationActions(a)
 		for _, g := range w.Relations.Grudges {
 			if g.Resolved {
 				continue
-			}
-			if p.MediateTargetID == "" && g.OffenderID != "" && nearbySet[g.OffenderID] && actorKnowsAboutGrudge(a, g) {
-				p.MediateTargetID = g.OffenderID
 			}
 			if g.AggrievedID == a.ID && g.OffenderID != "" {
 				p.ActiveGrudgeTargets = appendUnique(p.ActiveGrudgeTargets, g.OffenderID)
@@ -1328,6 +1391,16 @@ func (w *World) Step(ctx context.Context, d Decider) ([]Event, error) {
 	}
 
 	events := w.stepFlowGrid()
+	for ci := range w.Cohorts {
+		c := &w.Cohorts[ci]
+		before := append([]Actor(nil), c.Members...)
+		for i := range c.Members {
+			if w.Tick >= c.Members[i].JailedUntil && c.Members[i].Task != nil {
+				events = append(events, w.Advance(c.Members[i].ID)...)
+			}
+		}
+		w.reconcileCohortMemberChanges(c, before)
+	}
 	for i := range w.Actors {
 		if w.Actors[i].Dead {
 			continue
@@ -1336,11 +1409,8 @@ func (w *World) Step(ctx context.Context, d Decider) ([]Event, error) {
 			if w.Actors[i].Energy < MaxEnergy {
 				w.Actors[i].Energy++
 			}
-			if w.Tick%4 == 0 && w.Actors[i].Health < MaxHealth {
+			if w.Tick%4 == 0 && w.Actors[i].Health < MaxHealth && w.Actors[i].Hunger <= 2 && w.Actors[i].Thirst <= 1 {
 				w.Actors[i].Health++
-			}
-			if w.Actors[i].Hunger > 2 {
-				w.Actors[i].Hunger = 2
 			}
 			continue
 		}
@@ -1369,27 +1439,8 @@ func (w *World) Step(ctx context.Context, d Decider) ([]Event, error) {
 	events = append(events, w.AdvanceContinuity()...)
 	// Physiological hunger accumulates once every 6 hours (24 quarter-hour ticks),
 	// scaled or disabled by each actor's FormSpec.
-	baseHungerInterval := int64(6 * TicksPerHour)
 	for i := range w.Actors {
-		a := &w.Actors[i]
-		if a.Dead || w.Tick < a.JailedUntil {
-			continue
-		}
-		interval := baseHungerInterval
-		if form, hasForm := w.actorFormSpec(*a); hasForm {
-			if form.DisableHunger {
-				continue
-			}
-			if form.HungerIntervalMulPct > 0 && form.HungerIntervalMulPct != 100 {
-				interval = (baseHungerInterval * int64(form.HungerIntervalMulPct)) / 100
-				if interval < 1 {
-					interval = 1
-				}
-			}
-		}
-		if w.Tick%interval == 0 {
-			a.Hunger++
-		}
+		w.advanceActorHunger(&w.Actors[i])
 	}
 	// Advance regional ecology/weather/disasters/encounters/rituals and actor lifecycle/physiology.
 	events = append(events, w.stepWorldEnvironment()...)
@@ -1408,16 +1459,7 @@ func (w *World) Step(ctx context.Context, d Decider) ([]Event, error) {
 			}))
 		}
 	}
-	// Standalone house assets weather slightly once per simulated day (96 ticks).
-	if w.Tick%TicksPerDay == 0 {
-		for i := range w.Houses {
-			if w.Houses[i].Condition >= 2 {
-				w.Houses[i].Condition -= 2
-			} else {
-				w.Houses[i].Condition = 0
-			}
-		}
-	}
+	w.weatherHouses()
 
 	var activeOffers []Offer
 	for _, o := range w.Offers {
@@ -1437,17 +1479,17 @@ func (w *World) Step(ctx context.Context, d Decider) ([]Event, error) {
 	if len(w.Cohorts) > 0 {
 		var actorWounded, actorHealed, actorWoundedDeaths int
 		for i := range w.Actors {
-			a := &w.Actors[i]
-			nowWounded := !a.Dead && a.Health < MaxHealth
-			if !a.WoundedTracked && nowWounded {
-				a.WoundedTracked = true
-				actorWounded++
-			} else if a.WoundedTracked && !a.Dead && a.Health >= MaxHealth {
-				a.WoundedTracked = false
-				actorHealed++
-			} else if a.WoundedTracked && a.Dead {
-				a.WoundedTracked = false
-				actorWoundedDeaths++
+			wounded, healed, deaths := reconcileActorWoundStatus(&w.Actors[i])
+			actorWounded += wounded
+			actorHealed += healed
+			actorWoundedDeaths += deaths
+		}
+		for ci := range w.Cohorts {
+			for i := range w.Cohorts[ci].Members {
+				wounded, healed, deaths := reconcileActorWoundStatus(&w.Cohorts[ci].Members[i])
+				actorWounded += wounded
+				actorHealed += healed
+				actorWoundedDeaths += deaths
 			}
 		}
 		if actorWounded > 0 || actorHealed > 0 || actorWoundedDeaths > 0 {
@@ -1468,6 +1510,7 @@ func (w *World) Step(ctx context.Context, d Decider) ([]Event, error) {
 			events = append(events, ev)
 		}
 	}
+	events = append(events, w.drainCohortMortalityEvents()...)
 	events = append(events, w.ObserveSpotlightAndRumors(w.ensureSpotlightRumor(), events)...)
 	events = append(events, w.StepDynamicSpotlight(w.ensureSpotlightRumor())...)
 	return events, nil
@@ -1508,6 +1551,7 @@ func (w *World) record(a *Actor, x Action, kind string, data map[string]any, obs
 		v := obs
 		m.Observation = &v
 	}
+	m.search = newMemorySearchCache(m)
 	a.Memories = appendMemory(a.Memories, m)
 	for _, b := range observers {
 		if b != nil && b.ID != a.ID {
@@ -1612,7 +1656,7 @@ func removeString(slice []string, val string) []string {
 
 func canonicalDeathCause(cause string) string {
 	switch cause {
-	case "old_age", "disease", "disaster", "accident", "beast", "starvation", "dehydration", "combat":
+	case "old_age", "disease", "disaster", "accident", "beast", "starvation", "dehydration", "cold", "combat":
 		return cause
 	default:
 		return "combat"
@@ -1625,6 +1669,9 @@ func (w *World) markDeadIfZero(target *Actor, killer *Actor, x Action, cause str
 	}
 	wasSick := target.DiseaseID != ""
 	wasJailed := target.JailedUntil > w.Tick
+	if c := w.storedActorCohort(target.ID); c != nil && c.Population == 1 {
+		w.transferLastCohortAssets(c, target)
+	}
 	target.Health = 0
 	target.Dead = true
 	target.DiseaseID = ""
@@ -1632,27 +1679,6 @@ func (w *World) markDeadIfZero(target *Actor, killer *Actor, x Action, cause str
 	target.Task = nil
 	target.JailedUntil = 0
 	target.IllicitGain = 0
-	if len(w.Cohorts) > 0 && target.Money > 0 {
-		transferred := false
-		for ci := range w.Cohorts {
-			if w.Cohorts[ci].Population > 0 && (w.Cohorts[ci].Profession == target.Role || w.Cohorts[ci].District == target.Location) {
-				w.Cohorts[ci].MoneyPool += int64(target.Money)
-				transferred = true
-				break
-			}
-		}
-		if !transferred {
-			w.creditTreasury(int64(target.Money), "confiscated")
-		}
-		target.Money = 0
-	} else if target.Money > 0 {
-		w.recordLedgerCurrencyConsumed("coins", int64(target.Money))
-	}
-	for cur, amt := range target.Currencies {
-		if amt > 0 {
-			w.recordLedgerCurrencyConsumed(cur, amt)
-		}
-	}
 	filtered := w.Offers[:0]
 	for _, o := range w.Offers {
 		if o.Seller != target.ID && o.Buyer != target.ID {
@@ -1679,7 +1705,9 @@ func (w *World) markDeadIfZero(target *Actor, killer *Actor, x Action, cause str
 		"was_sick":   wasSick,
 		"was_jailed": wasJailed,
 	}, killer)
-	return []Event{ev}
+	// Settle inheritance before deciding where any heirless estate goes. Observe
+	// marks this death event, so the end-of-step observer cannot settle it twice.
+	return append([]Event{ev}, w.ensureRelations().ObserveCausalRelationEvents(w, []Event{ev})...)
 }
 
 func (w *World) applySleepTick(a *Actor, carryTenths int) (newCarry int, factors string) {
@@ -1695,6 +1723,7 @@ func (w *World) applySleepTick(a *Actor, carryTenths int) (newCarry int, factors
 	if a.Energy >= MaxEnergy {
 		a.Energy = MaxEnergy
 		rem = 0
+		a.Resting = false
 	}
 	if a.Health < MaxHealth && !a.Dead && a.Hunger <= 2 {
 		if h != nil {
@@ -1717,6 +1746,10 @@ func (w *World) Advance(id string) []Event {
 	}
 	t := a.Task
 	x := t.Action
+	if c := w.storedActorCohort(x.TargetID); c != nil && x.TargetID != id {
+		before := append([]Actor(nil), c.Members...)
+		defer w.reconcileCohortMemberChanges(c, before)
+	}
 
 	if x.Kind == "sleep" {
 		carry, factors := w.applySleepTick(a, t.SleepTenths)
@@ -1735,12 +1768,42 @@ func (w *World) Advance(id string) []Event {
 		return nil
 	}
 
-	t.Remaining--
+	if x.Kind == "adopt_facility" {
+		if reason := w.facilityAdoptionSiteFailure(*a, x); reason != "" {
+			return []Event{w.record(a, x, "task_paused", map[string]any{"text": reason, "remaining_ticks": t.Remaining})}
+		}
+	}
+	if x.Kind == "craft" && !w.craftingTaskOperational(a, t) {
+		return []Event{w.record(a, x, "task_paused", map[string]any{
+			"text":            "crafting paused because the production site is unavailable or unpowered",
+			"remaining_ticks": t.Remaining,
+		})}
+	}
+	if x.Kind == "craft" {
+		w.advanceCraftingWork(a, t)
+	} else {
+		t.Remaining--
+	}
 	if t.Remaining > 0 {
 		return nil
 	}
 	a.Task = nil
 	return w.finishTask(a, *t)
+}
+
+// craftingTaskOperational checks sustained site requirements without consuming the
+// task's prepaid materials again or discarding them while work is paused.
+func (w *World) craftingTaskOperational(a *Actor, t *Task) bool {
+	r, ok := w.Catalog.RecipeByID(t.Action.RecipeID)
+	return ok && w.productionSiteOperational(a.Location, a.VenueID, a.InsideHouse, r)
+}
+
+// advanceCraftingWork grants acceleration only for this funded operating tick.
+// Fractional work survives a pause without granting future unfunded acceleration.
+func (w *World) advanceCraftingWork(a *Actor, t *Task) {
+	progress := 100 + t.WorkCredit + w.FacilityProductionBonusPct(*a)
+	t.Remaining -= progress / 100
+	t.WorkCredit = progress % 100
 }
 
 func (w *World) finishTask(a *Actor, t Task) []Event {
@@ -1771,31 +1834,42 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 				}
 			}
 			for item, qty := range r.Growth.Parents {
-				a.Items[item] -= qty
+				w.adjustActorItem(a, item, -qty, false)
 				parents[item] = int64(qty)
-				if a.Items[item] == 0 {
-					delete(a.Items, item)
-				}
 			}
 			if len(parents) == 0 {
 				parents = nil
 			}
-			return []Event{w.startGrowth(a.ID, a.Location, a.VenueID, false, r, 1, int64(t.Yield), parents)}
+			event := w.startGrowth(a.ID, a.Location, a.VenueID, false, r, 1, int64(t.Yield), parents)
+			g := &w.Growth[len(w.Growth)-1]
+			g.FieldID = t.FieldID
+			g.HouseID = a.InsideHouse
+			g.PreparationUntil = w.Tick
+			event.Payload["stage"] = "prepare"
+			event.Payload["stage_complete"] = true
+			event.Payload["field_id"] = g.FieldID
+			event.Payload["workers"] = []WorkerRun{{FirstID: a.ID, Count: 1}}
+			return []Event{event}
 		}
-		a.Items[r.OutputItem] += t.Yield
-		w.recordLedgerItemProduced(r.OutputItem, int64(t.Yield))
+		before := w.yieldCredit("actor", a.ID, r.ID)
+		delivered, next := settleYieldCredit(before, t.FundedHundredths)
+		w.setYieldCredit("actor", a.ID, r.ID, next)
+		t.Yield = int(delivered)
+		w.adjustActorItem(a, r.OutputItem, t.Yield, true)
 		tier := w.Catalog.Items[r.OutputItem].Tier
 		if tier < 1 {
 			tier = 1
 		}
 		obs := Observation{Kind: "item_produced", Item: r.OutputItem, Location: a.Location, Quantity: t.Yield}
 		events := []Event{w.record(a, x, "crafted", map[string]any{
-			"text":        fmt.Sprintf("%s completed %s (+%d %s)", a.Name, r.ID, t.Yield, r.OutputItem),
-			"recipe_id":   r.ID,
-			"item":        r.OutputItem,
-			"tier":        tier,
-			"quantity":    t.Yield,
-			"observation": obs,
+			"text":                fmt.Sprintf("%s completed %s (+%d %s)", a.Name, r.ID, t.Yield, r.OutputItem),
+			"recipe_id":           r.ID,
+			"item":                r.OutputItem,
+			"tier":                tier,
+			"quantity":            t.Yield,
+			"yield_credit_before": before,
+			"yield_credit_after":  next,
+			"observation":         obs,
 		})}
 		return append(events, w.grantProfessionXP(a, x, r.Profession, w.Catalog.CraftXP(r), tier)...)
 	case "maintain_infra":
@@ -1846,6 +1920,8 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 		if suppressed > curAct {
 			suppressed = curAct
 		}
+		dropQty := w.drawEncounterLoot(a.Location, *enc, int64(minInt(1, suppressed)), "act_hunt:"+a.ID)
+		ds = w.DistrictStates[a.Location]
 		ds.ThreatActivity[enc.ID] = curAct - suppressed
 		bounty := enc.BountyCoins
 		if ds.BountyPool > 0 {
@@ -1864,18 +1940,9 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 			bounty = paid
 		}
 		w.DistrictStates[a.Location] = ds
-		a.Money += bounty
-		if len(w.Cohorts) == 0 && bounty > 0 {
-			w.recordLedgerCurrencyProduced("coins", int64(bounty))
-		}
-		dropQty := 0
-		if enc.RareDropItem != "" {
-			roll := int(worldHash(w.ID, w.Tick, "act_hunt:"+a.ID+":"+enc.ID) % 1000)
-			if roll < enc.RareDropPermille {
-				dropQty = 1
-				a.Items[enc.RareDropItem]++
-				w.recordLedgerItemProduced(enc.RareDropItem, 1)
-			}
+		w.adjustActorCurrency(a, "coins", int64(bounty), len(w.Cohorts) == 0)
+		if dropQty > 0 {
+			w.adjustActorItem(a, enc.RareDropItem, int(dropQty), true)
 		}
 		if a.Health > 20 {
 			a.Health -= 4
@@ -1913,7 +1980,7 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 				if rit.ScheduledSeason != "" {
 					ds.LastRitualSeason = fmt.Sprintf("Y%d-%s", cal.Year, cal.SeasonID)
 				}
-				if rit.DisasterReliefWeightPct > 0 {
+				if rit.Supernatural && rit.DisasterReliefWeightPct > 0 {
 					appease := (rit.ThreatAppeaseAmount * rit.DisasterReliefWeightPct) / 100
 					for encID, act := range ds.ThreatActivity {
 						if act > appease {
@@ -2019,6 +2086,13 @@ func (w *World) Apply(id string, x Action) []Event {
 	}
 	fail := func(reason string) []Event { return emit("action_failed", reason) }
 
+	if w.storedActorCohort(id) != nil {
+		return fail("actor must be hydrated before taking an individual action")
+	}
+	if c := w.storedActorCohort(x.TargetID); c != nil {
+		before := append([]Actor(nil), c.Members...)
+		defer w.reconcileCohortMemberChanges(c, before)
+	}
 	if a.Dead {
 		return fail("actor is dead")
 	}
@@ -2031,18 +2105,12 @@ func (w *World) Apply(id string, x Action) []Event {
 	if !w.ActorCapabilities(*a)[x.Kind] {
 		return fail("identity tags do not grant action: " + x.Kind)
 	}
-	if x.BasisEventID != 0 {
-		known := false
-		for _, m := range a.Memories {
-			if m.EventID == x.BasisEventID {
-				known = true
-				break
-			}
-		}
-		if !known {
-			x.BasisEventID = 0
-			return fail("basis event was not experienced or heard by this actor")
-		}
+	if blocked, reason := w.IsActionBlockedByWorldLaw(*a, x); blocked {
+		return fail(reason)
+	}
+	if err := ValidateCitation(a.Memories, x.BasisEventID, x.Statement); err != nil {
+		x.BasisEventID = 0
+		return fail(err.Error())
 	}
 
 	b := w.actor(x.TargetID)
@@ -2061,19 +2129,18 @@ func (w *World) Apply(id string, x Action) []Event {
 				if x.Quantity <= 0 || a.Items[n.Source.FuelItem] < x.Quantity {
 					return fail("insufficient declared generator fuel")
 				}
-				a.Items[n.Source.FuelItem] -= x.Quantity
-				n.FuelStock += int64(x.Quantity)
-				if a.Items[n.Source.FuelItem] == 0 {
-					delete(a.Items, n.Source.FuelItem)
-				}
+				w.adjustActorItem(a, n.Source.FuelItem, -x.Quantity, false)
+				w.adjustFlowNodeFuel(n, int64(x.Quantity), false)
 				return emit("generator_refueled", fmt.Sprintf("transferred %d %s into %s", x.Quantity, n.Source.FuelItem, n.ID))
 			}
 		}
 		return fail("unknown generator")
+	case "propose_growth_care", "accept_growth_care", "dispatch_harvest":
+		return w.applyGrowthCareAction(a, x)
 	case "harvest":
 		for i, g := range w.Growth {
-			if fmt.Sprint(g.ID) == x.TargetID && !g.Cohort && g.OwnerID == a.ID && g.Ready && w.growthOwnerPresent(g) {
-				return w.harvestGrowth(i)
+			if fmt.Sprint(g.ID) == x.TargetID && w.canHarvestGrowth(g, a.ID, false) {
+				return w.harvestGrowth(i, GrowthBatch{OwnerID: a.ID, District: g.District, VenueID: g.VenueID})
 			}
 		}
 		return fail("no mature owned crop or stock at this location")
@@ -2082,6 +2149,12 @@ func (w *World) Apply(id string, x Action) []Event {
 			a.Energy++
 		}
 		return nil
+	case "begin_rest":
+		a.Resting = true
+		return emit("rest_planned", "plans to reach shelter and recover energy before starting new work")
+	case "end_rest":
+		a.Resting = false
+		return emit("rest_abandoned", "ends the planned rest")
 
 	case "join_faction":
 		f := w.faction(x.FactionID)
@@ -2187,6 +2260,9 @@ func (w *World) Apply(id string, x Action) []Event {
 		if a.InsideHouse != "" {
 			return fail("leave house before walking village roads")
 		}
+		if len(w.Map.Venues) > 0 {
+			return w.applyMoveDistrict(a, x)
+		}
 		road, ok := w.Map.RoadBetween(a.Location, x.Location)
 		if !ok {
 			return fail(fmt.Sprintf("no direct road from %s to %s", a.Location, x.Location))
@@ -2267,21 +2343,7 @@ func (w *World) Apply(id string, x Action) []Event {
 		if a.Hunger == 0 {
 			return nil
 		}
-		a.Items[itemID]--
-		if a.Items[itemID] == 0 {
-			delete(a.Items, itemID)
-		}
-		w.recordLedgerItemConsumed(itemID, 1)
-		relief := spec.HungerRelief
-		if relief <= 0 {
-			relief = 1
-		}
-		if relief > a.Hunger {
-			relief = a.Hunger
-		}
-		a.Hunger -= relief
-		a.Waste++
-		a.DigestedFood++
+		w.consumeHeldFood(a, itemID)
 		return emit("ate", fmt.Sprintf("%s ate 1 %s", a.Name, itemID))
 
 	case "drink":
@@ -2313,11 +2375,7 @@ func (w *World) Apply(id string, x Action) []Event {
 		if a.Items[itemID] < 1 {
 			return fail("no " + itemID)
 		}
-		a.Items[itemID]--
-		if a.Items[itemID] == 0 {
-			delete(a.Items, itemID)
-		}
-		w.recordLedgerItemConsumed(itemID, 1)
+		w.adjustActorItem(a, itemID, -1, true)
 		relief := spec.ThirstRelief
 		if relief <= 0 {
 			relief = 2
@@ -2326,6 +2384,7 @@ func (w *World) Apply(id string, x Action) []Event {
 		if a.Thirst < 0 {
 			a.Thirst = 0
 		}
+		w.applyItemSlotAndEnergyEffects(a, spec)
 		return emit("drank", fmt.Sprintf("%s drank 1 %s", a.Name, itemID))
 
 	case "relieve":
@@ -2349,12 +2408,11 @@ func (w *World) Apply(id string, x Action) []Event {
 		if w.DistrictStates != nil {
 			if ds, ok := w.DistrictStates[a.Location]; ok {
 				if cleanLatrine {
-					ds.NightsoilPool += int64(wasteAmt)
-					w.recordLedgerItemProduced(w.Catalog.Lifecycle.WasteItem, int64(wasteAmt))
+					w.adjustDistrictNightsoil(a.Location, w.Catalog.Lifecycle.WasteItem, int64(wasteAmt), true)
 				} else if ds.Sanitation > 10 {
 					ds.Sanitation--
+					w.DistrictStates[a.Location] = ds
 				}
-				w.DistrictStates[a.Location] = ds
 			}
 		}
 		return emit("relieved", fmt.Sprintf("%s used sanitation facility in %s", a.Name, a.Location))
@@ -2382,11 +2440,7 @@ func (w *World) Apply(id string, x Action) []Event {
 		if a.Items[itemID] < 1 {
 			return fail("no " + itemID)
 		}
-		a.Items[itemID]--
-		if a.Items[itemID] == 0 {
-			delete(a.Items, itemID)
-		}
-		w.recordLedgerItemConsumed(itemID, 1)
+		w.adjustActorItem(a, itemID, -1, true)
 		healAmt := spec.MedicinalHeal
 		if healAmt > MaxHealth-a.Health {
 			healAmt = MaxHealth - a.Health
@@ -2410,6 +2464,7 @@ func (w *World) Apply(id string, x Action) []Event {
 				a.DiseaseTicks = 0
 			}
 		}
+		w.applyItemSlotAndEnergyEffects(a, spec)
 		ev := w.record(a, x, "medicated", map[string]any{
 			"text":          fmt.Sprintf("%s treated wounds/illness with 1 %s (+%d health -> %d)", a.Name, itemID, healAmt, a.Health),
 			"item":          itemID,
@@ -2419,83 +2474,51 @@ func (w *World) Apply(id string, x Action) []Event {
 		})
 		return []Event{ev}
 
+	case "equip":
+		return w.applyEquip(a, x)
+
+	case "unequip":
+		return w.applyUnequip(a, x)
+
 	case "craft":
 		r, ok := w.Catalog.RecipeByID(x.RecipeID)
 		if !ok {
 			return fail("unknown recipe: " + x.RecipeID)
 		}
-		if blocked, reason := w.IsActionBlockedByWorldLaw(*a, x); blocked {
+		if reason := recipeBlockReason(w.Catalog, w.Map, w.house(a.InsideHouse), *a, r, w.productionStartBlockReason(*a, r), w.availableDistrictResource(a.Location, r.ResourcePool)); reason != "" {
 			return fail(reason)
 		}
-		var curHouse *House
-		if a.InsideHouse != "" {
-			curHouse = w.house(a.InsideHouse)
-		}
-		if can, reason := CheckRecipe(w.Catalog, w.Map, curHouse, *a, r); !can {
-			return fail(reason)
-		}
-		venueID := a.VenueID
-		if venueID == "" && curHouse != nil {
-			venueID = curHouse.VenueID
-		}
-		if w.isVenuePowerBlocked(venueID) {
-			return fail("venue lacks power: " + venueID)
-		}
+		fieldID, _ := w.fieldAvailable("actor", a.ID, a.Location, a.VenueID, r)
 		if r.ResourcePool != "" {
 			draw := int64(maxInt(1, r.ResourceDraw))
-			if w.availableDistrictResource(a.Location, r.ResourcePool) < draw {
-				return fail("insufficient ecological resource: " + r.ResourcePool)
-			}
 			w.drawDistrictResource(a.Location, r.ResourcePool, draw)
 		}
 		a.Energy -= r.EnergyCost
-		a.Money -= r.MoneyCost
 		if r.MoneyCost > 0 {
 			if len(w.Cohorts) > 0 {
+				w.adjustActorCurrency(a, "coins", -int64(r.MoneyCost), false)
 				w.creditTreasury(int64(r.MoneyCost), "fee")
 			} else {
-				w.recordLedgerCurrencyConsumed("coins", int64(r.MoneyCost))
+				w.adjustActorCurrency(a, "coins", -int64(r.MoneyCost), true)
 			}
 		}
 		for item, qty := range r.Inputs {
-			a.Items[item] -= qty
-			if a.Items[item] == 0 {
-				delete(a.Items, item)
-			}
-			w.recordLedgerItemConsumed(item, int64(qty))
+			w.adjustActorItem(a, item, -qty, true)
 		}
-		bonus := false
-		if r.BonusInput != "" && a.Items[r.BonusInput] >= 1 {
-			bonus = true
-			if !r.DurableBonus {
-				a.Items[r.BonusInput]--
-				if a.Items[r.BonusInput] == 0 {
-					delete(a.Items, r.BonusInput)
-				}
-				w.recordLedgerItemConsumed(r.BonusInput, 1)
-			}
+		bonus := w.Catalog.ConsumablesYieldBonus(r) && a.Items[r.BonusInput] >= 1
+		if bonus {
+			w.adjustActorItem(a, r.BonusInput, -1, true)
 		}
 		yield := w.Catalog.RecipeYield(*a, r, bonus)
-		if ecoPct := w.EcologicalYieldMultiplierPct(a.Location, r); ecoPct != 100 && r.OutputQty > 0 {
-			yield = (yield * ecoPct) / 100
-			if yield < 1 {
-				yield = 1
-			}
+		var funded int64
+		if r.Growth == nil {
+			whole, batch := w.previewNonBiologicalYield("actor", a.ID, a.Location, r)
+			yield, funded = int(whole), batch
 		}
-		if techPct := w.FacilityProductionBonusPct(*a); techPct > 0 && r.OutputQty > 0 {
-			yield = (yield * (100 + techPct)) / 100
-			if yield < 1 {
-				yield = 1
-			}
-		}
-		if r.Growth != nil {
-			yield = r.OutputQty
-		}
+		w.wearProductionTool("actor", a.ID, r, 1)
 		ticks := r.Ticks
-		if ticks < 1 {
-			ticks = 1
-		}
-		task := Task{Action: x, TotalTicks: ticks, Remaining: ticks - 1, StartedTick: w.Tick, Yield: yield}
+		task := Task{Action: x, TotalTicks: ticks, Remaining: ticks, StartedTick: w.Tick, Yield: yield, FundedHundredths: funded, FieldID: fieldID}
+		w.advanceCraftingWork(a, &task)
 		if task.Remaining <= 0 {
 			return w.finishTask(a, task)
 		}
@@ -2536,11 +2559,7 @@ func (w *World) Apply(id string, x Action) []Event {
 		}
 		a.Energy -= spec.BuildEnergy
 		for inItem, inQty := range spec.BuildInputs {
-			a.Items[inItem] -= inQty
-			if a.Items[inItem] == 0 {
-				delete(a.Items, inItem)
-			}
-			w.recordLedgerItemConsumed(inItem, int64(inQty))
+			w.adjustActorItem(a, inItem, -inQty, true)
 		}
 		task := Task{Action: x, TotalTicks: 3, Remaining: 2, StartedTick: w.Tick}
 		a.Task = &task
@@ -2623,20 +2642,16 @@ func (w *World) Apply(id string, x Action) []Event {
 			}
 		}
 		a.Energy -= rit.EnergyCost
-		a.Money -= rit.MoneyCost
 		if rit.MoneyCost > 0 {
 			if len(w.Cohorts) > 0 {
+				w.adjustActorCurrency(a, "coins", -int64(rit.MoneyCost), false)
 				w.creditTreasury(int64(rit.MoneyCost), "fee")
 			} else {
-				w.recordLedgerCurrencyConsumed("coins", int64(rit.MoneyCost))
+				w.adjustActorCurrency(a, "coins", -int64(rit.MoneyCost), true)
 			}
 		}
 		for inItem, inQty := range rit.Inputs {
-			a.Items[inItem] -= inQty
-			if a.Items[inItem] == 0 {
-				delete(a.Items, inItem)
-			}
-			w.recordLedgerItemConsumed(inItem, int64(inQty))
+			w.adjustActorItem(a, inItem, -inQty, true)
 		}
 		ticks := rit.Ticks
 		if ticks < 1 {
@@ -2668,11 +2683,7 @@ func (w *World) Apply(id string, x Action) []Event {
 			return fail("repairing a house requires 1 plank")
 		}
 		a.Energy -= 8
-		a.Items["plank"]--
-		if a.Items["plank"] == 0 {
-			delete(a.Items, "plank")
-		}
-		w.recordLedgerItemConsumed("plank", 1)
+		w.adjustActorItem(a, "plank", -1, true)
 		task := Task{Action: x, TotalTicks: 3, Remaining: 2, StartedTick: w.Tick}
 		a.Task = &task
 		return []Event{w.record(a, x, "task_started", map[string]any{
@@ -2709,17 +2720,13 @@ func (w *World) Apply(id string, x Action) []Event {
 		if a.Energy < 12 {
 			return fail("insufficient energy to renovate")
 		}
-		a.Items["plank"] -= planks
-		if a.Items["plank"] == 0 {
-			delete(a.Items, "plank")
-		}
-		w.recordLedgerItemConsumed("plank", int64(planks))
-		a.Money -= coins
+		w.adjustActorItem(a, "plank", -planks, true)
 		if coins > 0 {
 			if len(w.Cohorts) > 0 {
+				w.adjustActorCurrency(a, "coins", -int64(coins), false)
 				w.creditTreasury(int64(coins), "fee")
 			} else {
-				w.recordLedgerCurrencyConsumed("coins", int64(coins))
+				w.adjustActorCurrency(a, "coins", -int64(coins), true)
 			}
 		}
 		a.Energy -= 12
@@ -2887,11 +2894,8 @@ func (w *World) Apply(id string, x Action) []Event {
 				if b.Items[candidate] > 0 {
 					stolenItem = candidate
 					stolenQty = 1
-					b.Items[candidate]--
-					if b.Items[candidate] == 0 {
-						delete(b.Items, candidate)
-					}
-					a.Items[candidate]++
+					w.adjustActorItem(b, candidate, -1, false)
+					w.adjustActorItem(a, candidate, 1, false)
 					break
 				}
 			}
@@ -2973,11 +2977,8 @@ func (w *World) Apply(id string, x Action) []Event {
 				if b.Items[candidate] > 0 {
 					lootItem = candidate
 					lootQty = 1
-					b.Items[candidate]--
-					if b.Items[candidate] == 0 {
-						delete(b.Items, candidate)
-					}
-					a.Items[candidate]++
+					w.adjustActorItem(b, candidate, -1, false)
+					w.adjustActorItem(a, candidate, 1, false)
 					break
 				}
 			}
@@ -3220,23 +3221,18 @@ func (w *World) Apply(id string, x Action) []Event {
 			if confiscated > 8 {
 				confiscated = 8
 			}
-			b.Money -= confiscated
+			w.adjustActorCurrency(b, "coins", -int64(confiscated), false)
 			baseOfficial := 4
 			if usedWrit {
 				baseOfficial += 3
-				a.Items["bounty_writ"]--
-				if a.Items["bounty_writ"] == 0 {
-					delete(a.Items, "bounty_writ")
-				}
-				w.recordLedgerItemConsumed("bounty_writ", 1)
+				w.adjustActorItem(a, "bounty_writ", -1, true)
 			}
 			if len(w.Cohorts) > 0 {
 				baseOfficial = int(w.debitTreasury(int64(baseOfficial), "bounty"))
-			} else if baseOfficial > 0 {
-				w.recordLedgerCurrencyProduced("coins", int64(baseOfficial))
 			}
+			w.adjustActorCurrency(a, "coins", int64(baseOfficial), len(w.Cohorts) == 0)
+			w.adjustActorCurrency(a, "coins", int64(confiscated), false)
 			bounty := baseOfficial + confiscated
-			a.Money += bounty
 			if b.Health > 0 {
 				b.JailedUntil = w.Tick + 192
 				filtered := w.Offers[:0]
@@ -3319,11 +3315,7 @@ func (w *World) Apply(id string, x Action) []Event {
 				b.DiseaseTicks = 0
 			}
 		}
-		a.Items[itemID]--
-		if a.Items[itemID] == 0 {
-			delete(a.Items, itemID)
-		}
-		w.recordLedgerItemConsumed(itemID, 1)
+		w.adjustActorItem(a, itemID, -1, true)
 		a.Trust[b.ID]++
 		b.Trust[a.ID] += 2
 		ev := w.record(a, x, "healed", map[string]any{
@@ -3404,28 +3396,15 @@ func (w *World) Apply(id string, x Action) []Event {
 				}
 				return emit("trade_rejected", a.Name+" rejected offer", seller)
 			}
-			spec := w.Catalog.Items[o.Item]
 			cur := o.Currency
 			if cur == "" {
 				cur = "coins"
 			}
-			if !itemAcceptsCurrency(spec, cur) {
-				return fail(fmt.Sprintf("item %s does not accept currency %s", o.Item, cur))
+			if reason := w.offerSettlementBlockReason(*a, o); reason != "" {
+				return fail(reason)
 			}
-			if spec.BuyerRequiredTag != "" && !ActorHasTag(w.actorEffectiveTags(*a), spec.BuyerRequiredTag) {
-				return fail(fmt.Sprintf("buyer %s lacks required tag %s for %s", a.ID, spec.BuyerRequiredTag, o.Item))
-			}
-			if o.Expires < w.Tick || seller == nil || !SamePlace(*a, *seller) || seller.Items[o.Item] < o.Quantity || w.actorCurrencyBalance(a, cur) < int64(o.Price) {
-				return fail("offer cannot settle")
-			}
-			if w.IsItemEmbargoedAt(a.Location, a.VenueID, o.Item) {
-				return fail("item is embargoed by local polity decree: " + o.Item)
-			}
-			seller.Items[o.Item] -= o.Quantity
-			if seller.Items[o.Item] == 0 {
-				delete(seller.Items, o.Item)
-			}
-			a.Items[o.Item] += o.Quantity
+			w.adjustActorItem(seller, o.Item, -o.Quantity, false)
+			w.adjustActorItem(a, o.Item, o.Quantity, false)
 			taxCoins := 0
 			if taxPermille := w.EffectiveMarketTaxPermille(a.Location, a.VenueID); taxPermille > 0 && o.Price > 0 {
 				taxCoins = (o.Price * taxPermille) / 1000

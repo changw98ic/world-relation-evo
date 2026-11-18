@@ -27,6 +27,7 @@ type WorldPack struct {
 	Actors         []sim.Actor            `json:"actors"`
 	Cohorts        []sim.PopulationCohort `json:"cohorts,omitempty"`
 	Ecology        *sim.EcologySpec       `json:"ecology,omitempty"`
+	Production     *sim.ProductionState   `json:"production,omitempty"`
 	Governance     *sim.GovernanceSpec    `json:"governance,omitempty"`
 	MarketCredit   *sim.MarketCreditSpec  `json:"market_credit,omitempty"`
 	FlowGrid       *sim.FlowGridState     `json:"flow_grid,omitempty"`
@@ -54,6 +55,13 @@ func Decode(r io.Reader) (*WorldPack, error) {
 	dec := json.NewDecoder(r)
 	if err := dec.Decode(&p); err != nil {
 		return nil, fmt.Errorf("decode world pack JSON: %w", err)
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err != nil {
+			return nil, fmt.Errorf("world pack trailing data: %w", err)
+		}
+		return nil, fmt.Errorf("world pack must contain exactly one JSON definition")
 	}
 	if err := p.Validate(); err != nil {
 		return nil, err
@@ -217,8 +225,12 @@ func (p *WorldPack) Validate() error {
 		}
 	}
 
-	actors := make(map[string]bool, len(p.Actors))
-	for i, a := range p.Actors {
+	allActors := append([]sim.Actor(nil), p.Actors...)
+	for _, cohort := range p.Cohorts {
+		allActors = append(allActors, cohort.Members...)
+	}
+	actors := make(map[string]bool, len(allActors))
+	for i, a := range allActors {
 		if a.ID == "" {
 			return fmt.Errorf("actor[%d] has empty id", i)
 		}
@@ -249,8 +261,53 @@ func (p *WorldPack) Validate() error {
 				return fmt.Errorf("actor %q references unknown form_id %q", a.ID, a.FormID)
 			}
 		}
+		if len(p.Catalog.Professions) > 0 {
+			for pid := range a.Professions {
+				if _, ok := p.Catalog.ProfessionByID(pid); !ok {
+					return fmt.Errorf("actor %q references unknown profession %q", a.ID, pid)
+				}
+			}
+		}
+		if len(p.Catalog.EquipSlots) > 0 {
+			for slot := range a.Equipped {
+				hasSlot := false
+				for _, s := range p.Catalog.EquipSlots {
+					if s.ID == slot {
+						hasSlot = true
+						break
+					}
+				}
+				if !hasSlot {
+					return fmt.Errorf("actor %q equipped item in undeclared slot %q", a.ID, slot)
+				}
+			}
+		}
 	}
 
+	for _, h := range p.Houses {
+		if h.OwnerID != "" && !actors[h.OwnerID] {
+			return fmt.Errorf("house %q references unknown owner %q", h.ID, h.OwnerID)
+		}
+		for _, id := range h.Residents {
+			if !actors[id] {
+				return fmt.Errorf("house %q references unknown resident %q", h.ID, id)
+			}
+		}
+	}
+	for _, a := range allActors {
+		for _, id := range a.Guilds {
+			if !factions[id] {
+				return fmt.Errorf("actor %q references unknown guild %q", a.ID, id)
+			}
+		}
+	}
+	for _, f := range p.Factions {
+		for _, id := range f.Members {
+			if !actors[id] {
+				return fmt.Errorf("faction %q references unknown member %q", f.ID, id)
+			}
+		}
+	}
 	if p.Polities != nil {
 		for _, n := range p.Polities.Nodes {
 			if n.LeaderActorID != "" && !actors[n.LeaderActorID] {
@@ -268,14 +325,57 @@ func (p *WorldPack) Validate() error {
 			return fmt.Errorf("duplicate cohort id %q", c.ID)
 		}
 		cohorts[c.ID] = true
+		livingMembers := 0
+		for _, member := range c.Members {
+			if !member.Dead {
+				livingMembers++
+			}
+		}
+		if c.Population < livingMembers {
+			return fmt.Errorf("cohort %q population %d is below its %d living members", c.ID, c.Population, livingMembers)
+		}
 		if !districts[c.District] {
 			return fmt.Errorf("cohort %q references unknown district %q", c.ID, c.District)
 		}
 		if c.FactionID != "" && !factions[c.FactionID] {
 			return fmt.Errorf("cohort %q references unknown faction_id %q", c.ID, c.FactionID)
 		}
+		if c.Profession != "" && len(p.Catalog.Professions) > 0 {
+			if _, ok := p.Catalog.ProfessionByID(c.Profession); !ok {
+				return fmt.Errorf("cohort %q references unknown profession %q", c.ID, c.Profession)
+			}
+		}
+		if ageSum := c.Children + c.Adults + c.Elders; ageSum > 0 && ageSum != c.Population {
+			return fmt.Errorf("cohort %q age brackets sum %d != population %d", c.ID, ageSum, c.Population)
+		}
 	}
 
+	if err := p.validateProductionAssets(actors, cohorts, districts, venues); err != nil {
+		return err
+	}
+	mapFeatures := make(map[string]bool)
+	for _, d := range p.Map.Districts {
+		for _, f := range d.Features {
+			mapFeatures[f] = true
+		}
+	}
+	for _, v := range p.Map.Venues {
+		for _, f := range v.Features {
+			mapFeatures[f] = true
+		}
+	}
+	for _, r := range p.Catalog.Recipes {
+		if r.NodeFeature != "" && !mapFeatures[r.NodeFeature] {
+			return fmt.Errorf("recipe %q requires missing map node_feature %q", r.ID, r.NodeFeature)
+		}
+	}
+	initial := &sim.World{Actors: p.Actors, Cohorts: p.Cohorts, PublicTreasury: p.PublicTreasury, Polities: p.Polities, FlowGrid: p.FlowGrid}
+	if p.Ecology != nil {
+		initial.DistrictStates = p.Ecology.DistrictStates
+	}
+	if err := initial.VerifyHoldingBounds(); err != nil {
+		return fmt.Errorf("invalid initial holdings: %w", err)
+	}
 	if p.Ecology != nil {
 		for dID := range p.Ecology.DistrictStates {
 			if !districts[dID] {
@@ -404,7 +504,7 @@ func (p *WorldPack) Instantiate(worldIDOverride string) (*sim.World, error) {
 	sleepTraits := []string{sim.SleepDeep, sim.SleepEarlyBird, sim.SleepLight, sim.SleepNightOwl}
 	actors := make([]sim.Actor, len(p.Actors))
 	for i, a := range p.Actors {
-		ac := a
+		ac := sim.CloneActor(a)
 		if ac.Tags == nil {
 			ac.Tags = []string{}
 		} else {
@@ -486,9 +586,6 @@ func (p *WorldPack) Instantiate(worldIDOverride string) (*sim.World, error) {
 		if ac.SleepTrait == "" {
 			ac.SleepTrait = sleepTraits[i%len(sleepTraits)]
 		}
-		if ac.VenueID == "" && len(worldMap.Venues) > 0 {
-			ac.VenueID = worldMap.DefaultVenueForDistrict(ac.Location)
-		}
 		if len(ac.Currencies) == 0 {
 			ac.Currencies = nil
 		} else {
@@ -514,32 +611,11 @@ func (p *WorldPack) Instantiate(worldIDOverride string) (*sim.World, error) {
 	if len(p.Cohorts) > 0 {
 		cohorts = make([]sim.PopulationCohort, len(p.Cohorts))
 		for i, c := range p.Cohorts {
-			cc := c
-			if len(c.ItemPool) == 0 {
-				cc.ItemPool = nil
-			} else {
-				cp := make(map[string]int64, len(c.ItemPool))
-				for k, v := range c.ItemPool {
-					cp[k] = v
-				}
-				cc.ItemPool = cp
-			}
-			if len(c.Currencies) == 0 {
-				cc.Currencies = nil
-			} else {
-				cp := make(map[string]int64, len(c.Currencies))
-				for k, v := range c.Currencies {
-					cp[k] = v
-				}
-				cc.Currencies = cp
-			}
+			cc := sim.CloneCohort(c)
 			if cc.Population > 0 && cc.Children+cc.Adults+cc.Elders == 0 {
 				cc.Children = (cc.Population * 20) / 100
 				cc.Elders = (cc.Population * 14) / 100
 				cc.Adults = cc.Population - cc.Children - cc.Elders
-			}
-			if cc.AvgEnergy <= 0 {
-				cc.AvgEnergy = 84
 			}
 			cohorts[i] = cc
 		}
@@ -568,6 +644,12 @@ func (p *WorldPack) Instantiate(worldIDOverride string) (*sim.World, error) {
 		SpotlightRumor: sim.NewSpotlightRumorState(),
 		FlowGrid:       sim.CloneFlowGridState(p.FlowGrid),
 		Knowledge:      sim.CloneKnowledgeBook(p.Knowledge),
+	}
+	w.PlaceResidents()
+	if p.Production != nil {
+		w.Production = sim.CloneProductionState(*p.Production)
+	} else {
+		w.InitProductionAssets()
 	}
 	if len(p.WorldLaws) > 0 {
 		w.WorldLaws = make(map[string]int, len(p.WorldLaws))
@@ -706,6 +788,9 @@ func (p *WorldPack) Instantiate(worldIDOverride string) (*sim.World, error) {
 
 	if w.FlowGrid != nil {
 		w.RecomputeFlowGrid()
+	}
+	if err := w.InitCohortResidents(); err != nil {
+		return nil, err
 	}
 	w.InitLedgerAudit()
 

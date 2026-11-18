@@ -2,10 +2,14 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 
+	"github.com/changw98ic/world-relation-evo/internal/modelreply"
+	"github.com/changw98ic/world-relation-evo/internal/runtrace"
 	"github.com/changw98ic/world-relation-evo/internal/sim"
 )
 
@@ -19,11 +23,7 @@ type Selector interface {
 	Select(context.Context, sim.Perception, []Option) (string, error)
 }
 
-type Content struct {
-	Text         string         `json:"text"`
-	Statement    *sim.Statement `json:"statement,omitempty"`
-	BasisEventID int64          `json:"basis_event_id,omitempty"`
-}
+type Content = modelreply.Content
 
 type Generator interface {
 	Generate(context.Context, sim.Perception, sim.Action) (Content, error)
@@ -32,14 +32,41 @@ type Generator interface {
 type Pipeline struct {
 	Selector  Selector
 	Generator Generator
+	Trace     *runtrace.Writer
 }
 
-func (p Pipeline) Decide(ctx context.Context, view sim.Perception) (sim.Action, error) {
+func (p Pipeline) Decide(ctx context.Context, view sim.Perception) (action sim.Action, err error) {
+	stage := "input"
+	defer func() {
+		if err == nil {
+			stage = "ready"
+			err = p.Trace.Record("decision_ready", view.Tick, view.Self.ID, map[string]any{"action": action})
+		}
+		if err != nil {
+			if traceErr := p.Trace.Record("decision_error", view.Tick, view.Self.ID, map[string]any{"stage": stage, "error": err.Error()}); traceErr != nil {
+				err = errors.Join(err, traceErr)
+			}
+		}
+	}()
 	options := Options(view)
+	selector := p.Selector
+	source := "selector"
+	switch p.Selector.(type) {
+	case RuleSelector, *RuleSelector:
+		source = "rules"
+		selector = RuleSelector{trace: p.Trace}
+	case Jev, *Jev:
+		source = "jev"
+	}
+	if err = p.Trace.Record("decision_input", view.Tick, view.Self.ID, map[string]any{"perception": view, "options": options, "decision_source": source}); err != nil {
+		return sim.Action{}, err
+	}
+	stage = "options"
 	if len(options) == 0 {
 		return sim.Action{}, fmt.Errorf("actor %s has no actions granted by tags", view.Self.ID)
 	}
-	id, err := p.Selector.Select(ctx, view, options)
+	stage = "selector"
+	id, err := selector.Select(ctx, view, options)
 	if err != nil {
 		return sim.Action{}, err
 	}
@@ -54,9 +81,14 @@ func (p Pipeline) Decide(ctx context.Context, view sim.Perception) (sim.Action, 
 	if selected == nil {
 		return sim.Action{}, fmt.Errorf("selector returned unavailable option %q", id)
 	}
+	stage = "selected"
+	if err = p.Trace.Record("decision_selected", view.Tick, view.Self.ID, map[string]any{"option_id": id, "action": *selected}); err != nil {
+		return sim.Action{}, err
+	}
 	if selected.Kind != "speak" && selected.Kind != "transmit_message" && selected.Kind != "issue_decree" {
 		return *selected, nil
 	}
+	stage = "generator"
 	content, err := p.Generator.Generate(ctx, view, *selected)
 	if err != nil {
 		return sim.Action{}, err
@@ -72,6 +104,35 @@ func (p Pipeline) Decide(ctx context.Context, view sim.Perception) (sim.Action, 
 	selected.Statement = content.Statement
 	selected.BasisEventID = content.BasisEventID
 	return *selected, nil
+}
+
+// modelRequestError preserves the original error chain without exposing endpoint
+// credentials through Pipeline's decision_error record.
+type modelRequestError struct {
+	cause   error
+	message string
+}
+
+func (e modelRequestError) Error() string { return e.message }
+func (e modelRequestError) Unwrap() error { return e.cause }
+
+func recordModelError(trace *runtrace.Writer, kind string, p sim.Perception, endpoint, apiKey string, err error) error {
+	if err == nil || trace == nil {
+		return err
+	}
+	message := err.Error()
+	var requestErr *url.Error
+	if errors.As(err, &requestErr) {
+		// net/http includes the full request URL in url.Error.Error(). Omit it.
+		message = requestErr.Op + ": " + requestErr.Err.Error()
+	}
+	for _, secret := range []string{endpoint, apiKey} {
+		if secret != "" {
+			message = strings.ReplaceAll(message, secret, "[redacted]")
+		}
+	}
+	safeErr := modelRequestError{cause: err, message: message}
+	return errors.Join(safeErr, trace.Record(kind, p.Tick, p.Self.ID, map[string]any{"error": message}))
 }
 
 func requirementSummary(req map[string]int) string {
@@ -91,11 +152,21 @@ func requirementSummary(req map[string]int) string {
 }
 
 func Options(p sim.Perception) []Option {
+	p.Self.Plan = sim.ClonePersonalPlan(p.Self.Plan)
+	sim.SyncActorPlan(&p.Self, p.Tick, p.Catalog)
+	if p.ActivePlan == nil && p.Self.Plan != nil && p.Self.Plan.Status == "active" {
+		p.ActivePlan = sim.BuildPlanDirective(p)
+	}
 	a := p.Self
+	dir := p.ActivePlan
 	allowed := p.Capabilities()
 	var options []Option
+	worldRules := sim.World{Catalog: p.Catalog, WorldLaws: p.WorldLaws}
 	add := func(label string, action sim.Action) {
 		if allowed[action.Kind] {
+			if blocked, _ := worldRules.IsActionBlockedByWorldLaw(a, action); blocked {
+				return
+			}
 			options = append(options, Option{ID: fmt.Sprintf("o%03d", len(options)), Label: label, Action: action})
 		}
 	}
@@ -106,19 +177,37 @@ func Options(p sim.Perception) []Option {
 			add(fmt.Sprintf("Refuel %s with %d %s", n.ID, qty, n.Source.FuelItem), sim.Action{Kind: "refuel", TargetID: n.ID, Quantity: int(qty)})
 		}
 	}
-	for _, g := range p.Growth {
-		if g.Ready && g.District == a.Location && (g.VenueID == "" || g.VenueID == a.VenueID) {
-			add(fmt.Sprintf("Harvest %d %s", g.Quantity, g.Item), sim.Action{Kind: "harvest", TargetID: fmt.Sprint(g.ID)})
+	for _, action := range p.GrowthCareActions {
+		label := action.Kind + " " + action.TargetID
+		if action.Care != nil {
+			label = fmt.Sprintf("%s for growth %d: %s supplies care and materials for %d/1000 of the harvest; owner %s keeps the balance", action.Kind, action.Care.GrowthID, action.Care.CaretakerID, action.Care.SharePermille, action.Care.OwnerID)
+		} else if action.Kind == "harvest" && dir != nil {
+			for _, hid := range dir.ReadyHarvestIDs {
+				if fmt.Sprint(hid) == action.TargetID {
+					label += " [active plan harvest]"
+					break
+				}
+			}
 		}
+		add(label, action)
 	}
 	add("Wait 15m and catch breath (+1 energy)", sim.Action{Kind: "wait"})
+	if a.Resting {
+		add("End the planned rest", sim.Action{Kind: "end_rest"})
+	} else if a.Energy < sim.MaxEnergy {
+		add("Plan rest: reach shelter, then recover energy before resuming work", sim.Action{Kind: "begin_rest"})
+	}
 
 	if a.InsideHouse != "" {
 		houseName := a.InsideHouse
 		if p.CurrentHouse != nil {
 			houseName = p.CurrentHouse.Name
 		}
-		add(fmt.Sprintf("Step outside from %s onto %s (15m)", houseName, a.Location), sim.Action{Kind: "leave_house"})
+		leaveLabel := fmt.Sprintf("Step outside from %s onto %s (15m)", houseName, a.Location)
+		if dir != nil && strings.HasPrefix(dir.NextStep, "leave_house") {
+			leaveLabel += " [active plan: " + dir.NextStep + "]"
+		}
+		add(leaveLabel, sim.Action{Kind: "leave_house"})
 		if h := p.CurrentHouse; h != nil && h.OwnerID == a.ID && h.Level < 3 {
 			planks := h.Level
 			coins := 4 * h.Level
@@ -162,7 +251,11 @@ func Options(p sim.Perception) []Option {
 		}
 		for _, h := range p.AccessibleHouses {
 			if h.District == a.Location && (h.VenueID == "" || a.VenueID == "" || h.VenueID == a.VenueID) {
-				add(fmt.Sprintf("Enter %s (level %d, comfort %d, condition %d/100)", h.Name, h.Level, h.Comfort, h.Condition), sim.Action{Kind: "enter_house", HouseID: h.ID})
+				enterLabel := fmt.Sprintf("Enter %s (level %d, comfort %d, condition %d/100)", h.Name, h.Level, h.Comfort, h.Condition)
+				if dir != nil && dir.TargetHouseID == h.ID {
+					enterLabel += " [active plan workshop]"
+				}
+				add(enterLabel, sim.Action{Kind: "enter_house", HouseID: h.ID})
 			}
 		}
 		for _, r := range p.Roads {
@@ -174,6 +267,9 @@ func Options(p sim.Perception) []Option {
 				label += "; leads toward " + strings.Join(r.LeadsToward, ", ")
 			}
 			label += ")"
+			if dir != nil && dir.TargetDistrict != "" && (r.To == dir.TargetDistrict || sim.ActorHasTag(r.LeadsToward, dir.TargetDistrict)) {
+				label += " [active plan route -> " + dir.TargetDistrict + "]"
+			}
 			add(label, sim.Action{Kind: "move", Location: r.To})
 		}
 		for _, vr := range p.VenueRoutes {
@@ -189,9 +285,17 @@ func Options(p sim.Perception) []Option {
 				label += "; leads toward " + strings.Join(vr.LeadsToward, ", ")
 			}
 			label += ")"
+			if dir != nil {
+				if dir.TargetVenueID != "" && (vr.ToVenue == dir.TargetVenueID || sim.ActorHasTag(vr.LeadsToward, dir.TargetVenueID)) {
+					label += " [active plan route -> " + dir.TargetVenueID + "]"
+				} else if dir.TargetVenueID == "" && dir.TargetDistrict != "" && vr.ToDistrict == dir.TargetDistrict {
+					label += " [active plan route -> " + dir.TargetDistrict + "]"
+				}
+			}
 			add(label, sim.Action{Kind: "move_venue", Location: vr.ToVenue, Channel: vr.ModeID})
 		}
 		if p.Polity != nil && p.Polity.LedPolityID != "" && a.Energy >= 4 &&
+			(p.Polity.LedPolitySeatDistrict == "" || a.Location == p.Polity.LedPolitySeatDistrict) &&
 			(p.Polity.LedPolitySeatVenue == "" || a.VenueID == "" || a.VenueID == p.Polity.LedPolitySeatVenue) {
 			pid := p.Polity.LedPolityID
 			pname := p.Polity.LedPolityName
@@ -210,7 +314,7 @@ func Options(p sim.Perception) []Option {
 				add(fmt.Sprintf("Lift night curfew decree across %s (-4 energy)", pname),
 					sim.Action{Kind: "issue_decree", FactionID: pid, Item: "curfew_off", Quantity: 0})
 			}
-			if p.Polity.LedPolityTreasury >= 10 {
+			if p.Polity.LedPolityTreasury > 0 && p.Polity.ReliefGrantAvailable {
 				grant := 20
 				if int64(grant) > p.Polity.LedPolityTreasury {
 					grant = int(p.Polity.LedPolityTreasury)
@@ -321,16 +425,14 @@ func Options(p sim.Perception) []Option {
 	}
 
 	for _, r := range p.Catalog.Recipes {
-		if r.ResourcePool != "" && (p.DistrictState == nil || p.DistrictState.AvailableResource(r.ResourcePool) < int64(max(1, r.ResourceDraw))) {
-			continue
-		}
-
-		if blocked, _ := sim.IsRecipeBlockedByWorldLaw(p.WorldLaws, r); blocked {
-			continue
-		}
-		if ok, _ := sim.CheckRecipe(p.Catalog, p.Map, p.CurrentHouse, a, r); ok {
+		if p.RecipeBlockReason(r) == "" {
 			bonus := r.BonusInput != "" && a.Items[r.BonusInput] >= 1
 			expected := p.Catalog.RecipeYield(a, r, bonus)
+			if r.Growth == nil {
+				if whole, ok := p.ExpectedCraftYield[r.ID]; ok {
+					expected = whole
+				}
+			}
 			tier := p.Catalog.Items[r.OutputItem].Tier
 			mastery := ""
 			if r.Profession != "" {
@@ -345,9 +447,16 @@ func Options(p sim.Perception) []Option {
 			if r.Growth != nil {
 				duration += fmt.Sprintf(", %dm maturation, care every %dm", r.Growth.DurationTicks*15, r.Growth.MaintenanceIntervalTicks*15)
 			}
-			add(fmt.Sprintf("%s (%s, -%d energy%s, tier %d, expect %d %s, you hold %d)",
-				r.Label, duration, r.EnergyCost, mastery, tier, expected, r.OutputItem, a.Items[r.OutputItem]),
-				sim.Action{Kind: "craft", RecipeID: r.ID})
+			craftLabel := fmt.Sprintf("%s (%s, -%d energy%s, tier %d, expect %d %s, you hold %d)",
+				r.Label, duration, r.EnergyCost, mastery, tier, expected, r.OutputItem, a.Items[r.OutputItem])
+			if dir != nil && dir.NextStep == "craft:"+r.ID {
+				if r.ID == dir.RecipeID {
+					craftLabel += fmt.Sprintf(" [active plan target: need %d more %s]", dir.DeficitToProduce, dir.Item)
+				} else if r.ID == dir.ActiveRecipeID {
+					craftLabel += fmt.Sprintf(" [active plan input for %s]", dir.RecipeID)
+				}
+			}
+			add(craftLabel, sim.Action{Kind: "craft", RecipeID: r.ID})
 		}
 	}
 
@@ -365,17 +474,32 @@ func Options(p sim.Perception) []Option {
 			embargoed[emb] = true
 		}
 	}
-	var surplusItems []sim.ItemSpec
-	var surplusPrices []int
+	type offerCandidate struct {
+		spec     sim.ItemSpec
+		qty      int
+		price    int
+		planSale bool
+	}
+	var offerItems []offerCandidate
 	if allowed["offer"] {
 		for _, itemID := range itemKeys {
 			if embargoed[itemID] {
 				continue
 			}
 			spec := p.Catalog.Items[itemID]
-			if spec.Tradeable && spec.BatchQty > 0 && a.Items[itemID] >= spec.OfferThreshold && a.Items[itemID] >= spec.BatchQty {
-				surplusItems = append(surplusItems, spec)
-				surplusPrices = append(surplusPrices, p.Catalog.SalePrice(a, spec.ID))
+			if !spec.Tradeable || spec.BatchQty <= 0 {
+				continue
+			}
+			if a.Plan != nil && a.Plan.Status == "active" && itemID == a.Plan.Item && a.Plan.RemainingToSell() > 0 {
+				qty := min(spec.BatchQty, a.Plan.RemainingToSell())
+				if qty > 0 && a.Items[itemID] >= qty {
+					price := planBatchPrice(p.Catalog.SalePrice(a, spec.ID), qty, spec.BatchQty)
+					offerItems = append(offerItems, offerCandidate{spec: spec, qty: qty, price: price, planSale: true})
+					continue
+				}
+			}
+			if a.Items[itemID] >= spec.OfferThreshold && a.Items[itemID] >= spec.BatchQty {
+				offerItems = append(offerItems, offerCandidate{spec: spec, qty: spec.BatchQty, price: p.Catalog.SalePrice(a, spec.ID)})
 			}
 		}
 	}
@@ -414,7 +538,8 @@ func Options(p sim.Perception) []Option {
 			continue
 		}
 		add(fmt.Sprintf("Talk to %s (%s, %s, level %d)", b.Name, b.ID, b.Role, b.Level), sim.Action{Kind: "speak", TargetID: b.ID})
-		for si, spec := range surplusItems {
+		for _, cand := range offerItems {
+			spec := cand.spec
 			if spec.BuyerRequiredTag != "" && !sim.ActorHasTag(b.Tags, spec.BuyerRequiredTag) {
 				continue
 			}
@@ -434,9 +559,12 @@ func Options(p sim.Perception) []Option {
 				if cur != "coins" {
 					actCur = cur
 				}
-				salePrice := surplusPrices[si]
-				add(fmt.Sprintf("Offer %d %s (tier %d) to %s for %d %s", spec.BatchQty, spec.ID, spec.Tier, b.Name, salePrice, cur), sim.Action{
-					Kind: "offer", TargetID: b.ID, Item: spec.ID, Quantity: spec.BatchQty, Price: salePrice, Currency: actCur,
+				offerLabel := fmt.Sprintf("Offer %d %s (tier %d) to %s for %d %s", cand.qty, spec.ID, spec.Tier, b.Name, cand.price, cur)
+				if cand.planSale {
+					offerLabel += fmt.Sprintf(" [active plan sale: %d %s remaining]", a.Plan.RemainingToSell(), spec.ID)
+				}
+				add(offerLabel, sim.Action{
+					Kind: "offer", TargetID: b.ID, Item: spec.ID, Quantity: cand.qty, Price: cand.price, Currency: actCur,
 				})
 			}
 		}
@@ -487,11 +615,6 @@ func Options(p sim.Perception) []Option {
 				Kind: "avenge_feud", TargetID: b.ID,
 			})
 		}
-		if p.MediateTargetID != "" && b.ID == p.MediateTargetID && a.Money >= 4 && a.Energy >= 4 {
-			add(fmt.Sprintf("Mediate blood feud with %s", b.Name), sim.Action{
-				Kind: "mediate_feud", TargetID: b.ID,
-			})
-		}
 		if (a.IllicitGain > 0 || p.DistrictGrievance >= 35) && a.Energy >= 5 && !sim.ActorHasTag(b.Tags, "law") && !sim.ActorHasTag(b.Tags, "censor") && !sim.ActorHasTag(b.Tags, "outlaw") {
 			add(fmt.Sprintf("Frame %s in scapegoat court docket (-5 energy)", b.Name), sim.Action{
 				Kind: "frame_suspect", TargetID: b.ID,
@@ -499,6 +622,9 @@ func Options(p sim.Perception) []Option {
 		}
 	}
 
+	for _, action := range p.MediationActions {
+		add(fmt.Sprintf("Propose or accept %d coins to settle known feud %s", action.Price, action.Text), action)
+	}
 	selfEffTags := p.EffectiveTags()
 	for _, o := range p.Offers {
 		if o.Buyer != a.ID {
@@ -516,7 +642,7 @@ func Options(p sim.Perception) []Option {
 			canAfford = a.Currencies[cur] >= int64(o.Price)
 		}
 		tagOK := spec.BuyerRequiredTag == "" || sim.ActorHasTag(selfEffTags, spec.BuyerRequiredTag)
-		if canAfford && sim.ItemAcceptsCurrency(spec, cur) && tagOK {
+		if canAfford && sim.ItemAcceptsCurrency(spec, cur) && tagOK && p.OfferBlockReasons[o.ID] == "" {
 			for _, b := range p.Nearby {
 				if b.ID == o.Seller && !b.Jailed {
 					add(fmt.Sprintf("Buy %d %s from %s for %d %s (offer %d)", o.Quantity, o.Item, b.Name, o.Price, cur, o.ID), sim.Action{
@@ -528,7 +654,7 @@ func Options(p sim.Perception) []Option {
 		add(fmt.Sprintf("Reject offer %d (%d %s)", o.ID, o.Quantity, o.Item), sim.Action{Kind: "reject", TargetID: o.Seller, OfferID: o.ID})
 	}
 	for _, action := range sim.ContinuityActions(p) {
-		add(fmt.Sprintf("%s: target=%s recipe=%s item=%s quantity=%d price=%d agreement=%d", action.Kind, action.TargetID, action.RecipeID, action.Item, action.Quantity, action.Price, action.AgreementID), action)
+		add(continuityOptionLabel(p, action, dir), action)
 	}
 	pendingBorrow := false
 	for _, request := range p.LoanRequests {
@@ -539,7 +665,9 @@ func Options(p sim.Perception) []Option {
 		if request.LenderID == a.ID {
 			for _, nb := range p.Nearby {
 				if nb.ID == request.BorrowerID && !nb.Jailed {
-					add(fmt.Sprintf("Accept loan request from %s: %d coins, interest %d per mille/day, term %d ticks, collateral %s", nb.Name, request.Principal, request.RatePermille, request.TermTicks, request.CollateralHouse), sim.Action{Kind: "accept_loan", TargetID: nb.ID})
+					if a.Money >= request.Principal {
+						add(fmt.Sprintf("Accept loan request from %s: %d coins, interest %d per mille/day, term %d ticks, collateral %s", nb.Name, request.Principal, request.RatePermille, request.TermTicks, request.CollateralHouse), sim.Action{Kind: "accept_loan", TargetID: nb.ID})
+					}
 					add("Reject loan request from "+nb.Name, sim.Action{Kind: "reject_loan", TargetID: nb.ID})
 				}
 			}
@@ -725,6 +853,26 @@ func Options(p sim.Perception) []Option {
 		}
 	}
 	addDeclarativeActionOptions(p, allowed, add)
+	for _, itemID := range itemKeys {
+		if ok, _ := sim.CanEquipItem(p.Catalog, a, itemID); ok {
+			slot := p.Catalog.Items[itemID].EquipSlot
+			if a.Equipped[slot] != itemID {
+				add(fmt.Sprintf("Equip %s into %s", itemID, slot), sim.Action{Kind: "equip", Item: itemID})
+			}
+		}
+	}
+	if len(a.Equipped) > 0 {
+		slots := make([]string, 0, len(a.Equipped))
+		for slot := range a.Equipped {
+			slots = append(slots, slot)
+		}
+		sort.Strings(slots)
+		for _, slot := range slots {
+			if itemID := a.Equipped[slot]; itemID != "" {
+				add(fmt.Sprintf("Unequip %s from %s", itemID, slot), sim.Action{Kind: "unequip", TargetID: slot, Item: itemID})
+			}
+		}
+	}
 	return options
 }
 
@@ -755,6 +903,18 @@ func actionSpecCostSummary(spec sim.ActionSpec) string {
 	for _, k := range sortedIntMapKeys(spec.ItemCosts) {
 		if spec.ItemCosts[k] > 0 {
 			parts = append(parts, fmt.Sprintf("-%d %s", spec.ItemCosts[k], k))
+		}
+	}
+	if spec.ResourcePool != "" {
+		draw := spec.ResourceDraw
+		if draw < 1 {
+			draw = 1
+		}
+		parts = append(parts, fmt.Sprintf("-%d %s", draw, spec.ResourcePool))
+	}
+	for _, k := range sortedIntMapKeys(spec.ItemGains) {
+		if spec.ItemGains[k] > 0 {
+			parts = append(parts, fmt.Sprintf("+%d %s", spec.ItemGains[k], k))
 		}
 	}
 	if len(parts) == 0 {
@@ -794,13 +954,7 @@ func addDeclarativeActionOptions(p sim.Perception, allowed map[string]bool, add 
 		if actionID == "" || !allowed[actionID] {
 			continue
 		}
-		if len(spec.WorldLawDelta) > 0 && !spec.AllowRewriteWorldLaw {
-			continue
-		}
-		if spec.RequiredVenueFeature != "" && !p.Map.VenueOrDistrictHasFeature(a.VenueID, a.Location, spec.RequiredVenueFeature) {
-			continue
-		}
-		if ok, _ := sim.ActorMeetsDeclarativeCosts(a, spec); !ok {
+		if p.ActionSpecBlockReason(spec) != "" {
 			continue
 		}
 		name := spec.Name
@@ -870,6 +1024,48 @@ func sortedItemIDs(items map[string]sim.ItemSpec) []string {
 	return keys
 }
 
+func planBatchPrice(batchPrice, qty, batchQty int) int {
+	if batchPrice <= 0 || qty <= 0 {
+		return 0
+	}
+	if batchQty <= 0 || qty >= batchQty {
+		return batchPrice
+	}
+	return max(1, (batchPrice*qty+batchQty-1)/batchQty)
+}
+
+func continuityOptionLabel(p sim.Perception, action sim.Action, dir *sim.PlanDirectiveView) string {
+	a := p.Self
+	switch action.Kind {
+	case "start_plan":
+		if r, ok := p.Catalog.RecipeByID(action.RecipeID); ok {
+			qty := max(r.OutputQty, p.Catalog.Items[r.OutputItem].BatchQty)
+			return fmt.Sprintf("Start personal plan: produce and sell %d %s via %s (you hold %d)", qty, r.OutputItem, r.ID, a.Items[r.OutputItem])
+		}
+	case "abandon_plan":
+		if a.Plan != nil {
+			return fmt.Sprintf("Abandon active plan (%s: sold %d/%d %s, you hold %d)", a.Plan.RecipeID, a.Plan.Sold, a.Plan.Quantity, a.Plan.Item, a.Items[a.Plan.Item])
+		}
+	case "propose_agreement":
+		label := fmt.Sprintf("Propose delivery agreement to %s: %d %s for %d coins", action.TargetID, action.Quantity, action.Item, action.Price)
+		if dir != nil && action.Item == dir.Item && dir.RemainingToSell > 0 {
+			label += fmt.Sprintf(" [active plan sale: %d %s remaining]", dir.RemainingToSell, dir.Item)
+		}
+		return label
+	case "fulfill_agreement":
+		label := fmt.Sprintf("Fulfill delivery agreement #%d to %s: %d %s for %d coins", action.AgreementID, action.TargetID, action.Quantity, action.Item, action.Price)
+		if dir != nil && action.Item == dir.Item && dir.RemainingToSell > 0 {
+			label += " [active plan delivery]"
+		}
+		return label
+	case "accept_agreement":
+		return fmt.Sprintf("Accept delivery agreement #%d from %s: %d %s for %d coins", action.AgreementID, action.TargetID, action.Quantity, action.Item, action.Price)
+	case "reject_agreement":
+		return fmt.Sprintf("Reject delivery agreement #%d from %s", action.AgreementID, action.TargetID)
+	}
+	return fmt.Sprintf("%s: target=%s recipe=%s item=%s quantity=%d price=%d agreement=%d", action.Kind, action.TargetID, action.RecipeID, action.Item, action.Quantity, action.Price, action.AgreementID)
+}
+
 func holdsAllItems(inv map[string]int, req map[string]int) bool {
 	for itemID, qty := range req {
 		if inv[itemID] < qty {
@@ -929,13 +1125,30 @@ func defaultEdibleItem(cat sim.Catalog) string {
 }
 
 // RuleSelector is explicitly the offline baseline, never a Jev substitute.
-type RuleSelector struct{}
+type RuleSelector struct{ trace *runtrace.Writer }
 
-func (RuleSelector) Select(ctx context.Context, p sim.Perception, options []Option) (string, error) {
-	desired, err := (rulesPolicy{}).Decide(ctx, p)
-	if err != nil {
-		return "", err
+func (r RuleSelector) Select(_ context.Context, p sim.Perception, options []Option) (string, error) {
+	var id string
+	var unavailable []sim.Action
+	(rulesPolicy{options: options}).preferences(p, func(desired sim.Action) bool {
+		id = ruleOptionID(desired, options)
+		if id == "" && r.trace != nil {
+			unavailable = append(unavailable, desired)
+		}
+		return id != ""
+	})
+	if len(unavailable) > 0 {
+		if err := r.trace.Record("rule_unavailable", p.Tick, p.Self.ID, map[string]any{"preferences": unavailable}); err != nil {
+			return "", err
+		}
 	}
+	if id == "" {
+		return "", fmt.Errorf("no available action matches the rules for %s at tick %d", p.Self.ID, p.Tick)
+	}
+	return id, nil
+}
+
+func ruleOptionID(desired sim.Action, options []Option) string {
 	for _, o := range options {
 		a := o.Action
 		if a.Kind == desired.Kind &&
@@ -950,17 +1163,15 @@ func (RuleSelector) Select(ctx context.Context, p sim.Perception, options []Opti
 			(desired.TransitionID == "" || a.TransitionID == desired.TransitionID) &&
 			a.OfferID == desired.OfferID &&
 			a.AgreementID == desired.AgreementID &&
+			(desired.Kind != "mediate_feud" || a.Text == desired.Text && a.Price == desired.Price) &&
+			((desired.Kind != "propose_agreement" && desired.Kind != "offer") || (a.Price == desired.Price && a.Quantity == desired.Quantity)) &&
+			(desired.Care == nil || a.Care != nil && *a.Care == *desired.Care) &&
 			(desired.Item == "" || a.Item == desired.Item) &&
 			(a.TargetID == desired.TargetID || a.OfferID != 0) {
-			return o.ID, nil
+			return o.ID
 		}
 	}
-	for _, o := range options {
-		if o.Action.Kind == "wait" {
-			return o.ID, nil
-		}
-	}
-	return "", fmt.Errorf("no matching offline choice")
+	return ""
 }
 
 // PrimaryTopicItem determines which item a speaker's recent memories or role focus on for contextual expression.
@@ -1026,128 +1237,121 @@ func (TemplateContent) Generate(_ context.Context, p sim.Perception, a sim.Actio
 		if p.Tick-m.Tick > sim.TicksPerDay || alreadyToldTarget(m.RootEventID) {
 			continue
 		}
-		if m.Observation != nil {
-			switch m.Observation.Kind {
-			case "item_produced":
-				q := m.Observation.Quantity
-				return Content{
-					Text:         fmt.Sprintf("I produced %d %s at %s.", q, m.Observation.Item, m.Observation.Location),
-					BasisEventID: m.EventID,
-					Statement:    &sim.Statement{Topic: "item_produced", Item: m.Observation.Item, Location: m.Observation.Location, Quantity: q},
-				}, nil
-			case "macro_anomaly":
-				mod := m.Observation.Modality
-				if mod == "" {
-					mod = "eyewitness"
-				}
-				return Content{
-					Text:         fmt.Sprintf("I observed %s (%s) at %s (intensity %d).", m.Observation.SubjectID, mod, m.Observation.Location, m.Observation.Quantity),
-					BasisEventID: m.EventID,
-					Statement: &sim.Statement{
-						Topic:     "macro_anomaly",
-						SubjectID: m.Observation.SubjectID,
-						Item:      m.Observation.Item,
-						Location:  m.Observation.Location,
-						Quantity:  m.Observation.Quantity,
-					},
-				}, nil
-			case "corruption":
-				if m.Observation.SubjectID == "" || m.Observation.SubjectID == p.Self.ID || m.Observation.SubjectID == a.TargetID || p.Self.IllicitGain > 0 {
-					continue
-				}
-				return Content{
-					Text:         fmt.Sprintf("I witnessed %s taking %d illicit bribe coins at %s.", m.Observation.SubjectID, m.Observation.Quantity, m.Observation.Location),
-					BasisEventID: m.EventID,
-					Statement: &sim.Statement{
-						Topic:     "corruption",
-						SubjectID: m.Observation.SubjectID,
-						ObjectID:  m.Observation.ObjectID,
-						Item:      "coins",
-						Location:  m.Observation.Location,
-						Quantity:  m.Observation.Quantity,
-					},
-				}, nil
-			case "wrongful_conviction":
-				if m.Observation.ObjectID == "" || m.Observation.SubjectID == p.Self.ID || m.Observation.SubjectID == a.TargetID {
-					continue
-				}
-				return Content{
-					Text:         fmt.Sprintf("I witnessed %s wrongfully framing %s in %s (case #%d).", m.Observation.SubjectID, m.Observation.ObjectID, m.Observation.Location, m.Observation.CaseID),
-					BasisEventID: m.EventID,
-					Statement: &sim.Statement{
-						Topic:     "wrongful_conviction",
-						SubjectID: m.Observation.SubjectID,
-						ObjectID:  m.Observation.ObjectID,
-						CaseID:    m.Observation.CaseID,
-						Location:  m.Observation.Location,
-						Quantity:  1,
-					},
-				}, nil
-			case "ambient_shift":
-				mod := m.Observation.Modality
-				if mod == "" {
-					mod = "eyewitness"
-				}
-				return Content{
-					Text:         fmt.Sprintf("I perceived %s shift (%s) at %s (level %d).", m.Observation.Item, mod, m.Observation.Location, m.Observation.Quantity),
-					BasisEventID: m.EventID,
-					Statement: &sim.Statement{
-						Topic:     "ambient_shift",
-						SubjectID: m.Observation.SubjectID,
-						Item:      m.Observation.Item,
-						Location:  m.Observation.Location,
-						Quantity:  m.Observation.Quantity,
-					},
-				}, nil
-			case "facility_adopted":
-				return Content{
-					Text:         fmt.Sprintf("I witnessed %s adopting %s at %s.", m.Observation.SubjectID, m.Observation.Item, m.Observation.ObjectID),
-					BasisEventID: m.EventID,
-					Statement: &sim.Statement{
-						Topic:     "facility_adopted",
-						SubjectID: m.Observation.SubjectID,
-						ObjectID:  m.Observation.ObjectID,
-						Item:      m.Observation.Item,
-						Location:  m.Observation.Location,
-						Quantity:  1,
-					},
-				}, nil
-			}
-		}
-		if (m.Kind == "speech" || m.Kind == "channel_message") && m.Source != p.Self.ID && m.Source != a.TargetID && m.Statement != nil {
-			v := *m.Statement
-			if v.SubjectID != "" && v.SubjectID == a.TargetID {
-				continue
-			}
-			switch v.Topic {
-			case "macro_anomaly":
-				return Content{
-					Text:         fmt.Sprintf("%s reported anomaly %s at %s (intensity %d).", m.Source, v.SubjectID, v.Location, v.Quantity),
-					BasisEventID: m.EventID,
-					Statement:    &v,
-				}, nil
-			case "corruption":
-				return Content{
-					Text:         fmt.Sprintf("%s said %s took illicit bribes (%d coins) at %s.", m.Source, v.SubjectID, v.Quantity, v.Location),
-					BasisEventID: m.EventID,
-					Statement:    &v,
-				}, nil
-			case "wrongful_conviction":
-				return Content{
-					Text:         fmt.Sprintf("%s said %s wrongfully framed %s in %s (case #%d).", m.Source, v.SubjectID, v.ObjectID, v.Location, v.CaseID),
-					BasisEventID: m.EventID,
-					Statement:    &v,
-				}, nil
-			default:
-				return Content{
-					Text:         fmt.Sprintf("%s said %d %s was produced at %s.", m.Source, v.Quantity, v.Item, v.Location),
-					BasisEventID: m.EventID,
-					Statement:    &v,
-				}, nil
-			}
+		if content, ok := reportFromMemory(m, p.Self, a.TargetID); ok {
+			return content, nil
 		}
 	}
 	return Content{Text: fmt.Sprintf("I have %d food, %d energy, and am trying to %s.", p.Self.Items["food"], p.Self.Energy, p.Self.Goal)}, nil
+}
+
+// reportFromMemory gives planning and speech the same account of one memory.
+func reportFromMemory(m sim.Memory, self sim.Actor, listenerID string) (Content, bool) {
+	if m.Observation != nil {
+		switch m.Observation.Kind {
+		case "item_produced":
+			q := m.Observation.Quantity
+			text := fmt.Sprintf("I saw %d %s produced at %s.", q, m.Observation.Item, m.Observation.Location)
+			if m.Source == self.ID {
+				text = fmt.Sprintf("I produced %d %s at %s.", q, m.Observation.Item, m.Observation.Location)
+			}
+			return Content{
+				Text:         text,
+				BasisEventID: m.EventID,
+				Statement:    &sim.Statement{Topic: "item_produced", Item: m.Observation.Item, Location: m.Observation.Location, Quantity: q},
+			}, true
+		case "macro_anomaly":
+			mod := m.Observation.Modality
+			if mod == "" {
+				mod = "eyewitness"
+			}
+			return Content{
+				Text:         fmt.Sprintf("I observed %s (%s) at %s (intensity %d).", m.Observation.SubjectID, mod, m.Observation.Location, m.Observation.Quantity),
+				BasisEventID: m.EventID,
+				Statement: &sim.Statement{
+					Topic:     "macro_anomaly",
+					SubjectID: m.Observation.SubjectID,
+					Item:      m.Observation.Item,
+					Location:  m.Observation.Location,
+					Quantity:  m.Observation.Quantity,
+				},
+			}, true
+		case "corruption":
+			if m.Observation.SubjectID == "" || m.Observation.SubjectID == self.ID || m.Observation.SubjectID == listenerID || self.IllicitGain > 0 {
+				return Content{}, false
+			}
+			return Content{
+				Text:         fmt.Sprintf("I witnessed %s taking %d illicit bribe coins at %s.", m.Observation.SubjectID, m.Observation.Quantity, m.Observation.Location),
+				BasisEventID: m.EventID,
+				Statement: &sim.Statement{
+					Topic:     "corruption",
+					SubjectID: m.Observation.SubjectID,
+					ObjectID:  m.Observation.ObjectID,
+					Item:      "coins",
+					Location:  m.Observation.Location,
+					Quantity:  m.Observation.Quantity,
+				},
+			}, true
+		case "wrongful_conviction":
+			if m.Observation.ObjectID == "" || m.Observation.SubjectID == self.ID || m.Observation.SubjectID == listenerID {
+				return Content{}, false
+			}
+			return Content{
+				Text:         fmt.Sprintf("I witnessed %s wrongfully framing %s in %s (case #%d).", m.Observation.SubjectID, m.Observation.ObjectID, m.Observation.Location, m.Observation.CaseID),
+				BasisEventID: m.EventID,
+				Statement: &sim.Statement{
+					Topic:     "wrongful_conviction",
+					SubjectID: m.Observation.SubjectID,
+					ObjectID:  m.Observation.ObjectID,
+					CaseID:    m.Observation.CaseID,
+					Location:  m.Observation.Location,
+					Quantity:  1,
+				},
+			}, true
+		case "ambient_shift":
+			mod := m.Observation.Modality
+			if mod == "" {
+				mod = "eyewitness"
+			}
+			return Content{
+				Text:         fmt.Sprintf("I perceived %s shift (%s) at %s (level %d).", m.Observation.Item, mod, m.Observation.Location, m.Observation.Quantity),
+				BasisEventID: m.EventID,
+				Statement: &sim.Statement{
+					Topic:     "ambient_shift",
+					SubjectID: m.Observation.SubjectID,
+					Item:      m.Observation.Item,
+					Location:  m.Observation.Location,
+					Quantity:  m.Observation.Quantity,
+				},
+			}, true
+		case "facility_adopted":
+			return Content{
+				Text:         fmt.Sprintf("I witnessed %s adopting %s at %s.", m.Observation.SubjectID, m.Observation.Item, m.Observation.ObjectID),
+				BasisEventID: m.EventID,
+				Statement: &sim.Statement{
+					Topic:     "facility_adopted",
+					SubjectID: m.Observation.SubjectID,
+					ObjectID:  m.Observation.ObjectID,
+					Item:      m.Observation.Item,
+					Location:  m.Observation.Location,
+					Quantity:  1,
+				},
+			}, true
+		}
+	}
+	if (m.Kind == "speech" || m.Kind == "channel_message") && m.Source != self.ID && m.Source != listenerID && m.Statement != nil {
+		v := *m.Statement
+		if v.SubjectID != "" && v.SubjectID == listenerID {
+			return Content{}, false
+		}
+		// Retell the speaker's words, including any price, uncertainty and
+		// attribution. A topic alone does not describe what was said.
+		text := fmt.Sprintf("%s said: %s", m.Source, m.Text)
+		if m.Text == "" {
+			text = fmt.Sprintf("%s reported %s: %d %s at %s.", m.Source, v.Topic, v.Quantity, v.Item, v.Location)
+		}
+		return Content{Text: text, BasisEventID: m.EventID, Statement: &v}, true
+	}
+	return Content{}, false
 }
 
 func Offline() Pipeline { return Pipeline{Selector: RuleSelector{}, Generator: TemplateContent{}} }

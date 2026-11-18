@@ -554,8 +554,11 @@ func (w *World) ApplyJusticeAction(jr *JusticeRevoltState, actorID string, x Act
 			return fail("no known open wrongful conviction found in current district"), true
 		}
 
-		a.Energy -= 4
 		cc := &jr.CourtCases[caseIdx]
+		if !w.courtPartiesPresent(*cc) {
+			return fail("court parties must be present in the case district for release and enforcement"), true
+		}
+		a.Energy -= 4
 		if x.TargetID == "" {
 			x.TargetID = cc.SuspectID
 		}
@@ -781,12 +784,12 @@ func (w *World) stepMacroCourtTrials(jr *JusticeRevoltState, spec JusticeRevoltS
 
 	var events []Event
 	for _, dID := range selected {
-		mag := w.findCollectorCohort(dID)
+		mag := w.presentLawCollector(dID)
 		if mag == nil {
 			continue
 		}
 
-		// Find largest civilian non-civic, non-outlaw cohort in dID (or fallback across world).
+		// Court participants must be physically present in this jurisdiction.
 		var civ *PopulationCohort
 		for i := range w.Cohorts {
 			c := &w.Cohorts[i]
@@ -800,23 +803,12 @@ func (w *World) stepMacroCourtTrials(jr *JusticeRevoltState, spec JusticeRevoltS
 				civ = c
 			}
 		}
-		if civ == nil {
-			for i := range w.Cohorts {
-				c := &w.Cohorts[i]
-				if c.EffectivePopulation() < 4 || w.isOutlawCohort(c, spec) || w.isCivicServiceProfession(c.Profession) || jr.isActiveRebelCohort(c.ID) {
-					continue
-				}
-				if civ == nil || c.EffectivePopulation() > civ.EffectivePopulation() {
-					civ = c
-				}
-			}
-		}
 
-		// Find an outlaw cohort (preferring same district).
+		// Find an outlaw cohort already present at the court's district.
 		var outlaw *PopulationCohort
 		for i := range w.Cohorts {
 			c := &w.Cohorts[i]
-			if c.EffectivePopulation() < 3 || !w.isOutlawCohort(c, spec) {
+			if c.District != dID || c.EffectivePopulation() < 3 || !w.isOutlawCohort(c, spec) {
 				continue
 			}
 			if outlaw == nil || (c.District == dID && outlaw.District != dID) || (c.District == outlaw.District && c.EffectivePopulation() > outlaw.EffectivePopulation()) {
@@ -955,23 +947,16 @@ func (w *World) stepMacroCourtTrials(jr *JusticeRevoltState, spec JusticeRevoltS
 	return events
 }
 
+func (w *World) courtPartiesPresent(cc CourtCase) bool {
+	if cc.IsCohort {
+		victim, magistrate := w.findCohortByID(cc.SuspectID), w.findCohortByID(cc.MagistrateID)
+		return victim != nil && magistrate != nil && victim.Population > 0 && magistrate.Population > 0 && victim.District == cc.District && magistrate.District == cc.District
+	}
+	victim, magistrate := w.actor(cc.SuspectID), w.actor(cc.MagistrateID)
+	return victim != nil && magistrate != nil && !victim.Dead && !magistrate.Dead && !victim.InTransit() && !magistrate.InTransit() && victim.Location == cc.District && magistrate.Location == cc.District
+}
+
 func (w *World) stepMacroAppeals(jr *JusticeRevoltState, spec JusticeRevoltSpec) []Event {
-	var censorCohort *PopulationCohort
-	for i := range w.Cohorts {
-		c := &w.Cohorts[i]
-		if w.isOversightCohort(c, spec) && c.EffectivePopulation() >= 2 {
-			if censorCohort == nil || c.Tier > censorCohort.Tier || c.Population > censorCohort.Population {
-				censorCohort = c
-			}
-		}
-	}
-	if censorCohort == nil {
-		return nil
-	}
-
-	censorID := censorCohort.ID
-	censorName := censorCohort.Name
-
 	var events []Event
 	overturnedCount := 0
 	for i := range jr.CourtCases {
@@ -979,9 +964,22 @@ func (w *World) stepMacroAppeals(jr *JusticeRevoltState, spec JusticeRevoltSpec)
 			break
 		}
 		cc := &jr.CourtCases[i]
-		if cc.Status != "convicted" || !cc.Wrongful || !cc.IsCohort {
+		if cc.Status != "convicted" || !cc.Wrongful || !cc.IsCohort || !w.courtPartiesPresent(*cc) {
 			continue
 		}
+		var censorCohort *PopulationCohort
+		for j := range w.Cohorts {
+			c := &w.Cohorts[j]
+			if w.cohortHasJurisdiction(c, cc.District) && w.isOversightCohort(c, spec) && c.EffectivePopulation() >= 2 {
+				if censorCohort == nil || c.Tier > censorCohort.Tier || c.Population > censorCohort.Population {
+					censorCohort = c
+				}
+			}
+		}
+		if censorCohort == nil {
+			continue
+		}
+		censorID, censorName := censorCohort.ID, censorCohort.Name
 
 		cc.Status = "overturned"
 		cc.AppealByID = censorID
@@ -1230,10 +1228,8 @@ func (w *World) triggerGranaryRiot(jr *JusticeRevoltState, spec JusticeRevoltSpe
 			}
 		}
 		surplus := c.ItemPool[foodItem] - int64(c.Population)*3
-		if surplus >= 4 {
-			if donorIdx == -1 ||
-				(c.District == dID && w.Cohorts[donorIdx].District != dID) ||
-				(c.ItemPool[foodItem] > w.Cohorts[donorIdx].ItemPool[foodItem]) {
+		if c.District == dID && surplus >= 4 {
+			if donorIdx == -1 || c.ItemPool[foodItem] > w.Cohorts[donorIdx].ItemPool[foodItem] {
 				donorIdx = i
 			}
 		}
@@ -1271,7 +1267,7 @@ func (w *World) triggerGranaryRiot(jr *JusticeRevoltState, spec JusticeRevoltSpe
 	riotForce := maxInt(2, minInt(16, hungry.EffectivePopulation()/100+2))
 	wHungry, dHungry, jHungry := w.applyCohortCasualtiesWithCause(hungry, maxInt(1, riotForce/3), riotForce/16, maxInt(0, riotForce/5), "combat")
 	var wLaw, dLaw int
-	if law := w.findCollectorCohort(dID); law != nil && law.ID != hungry.ID {
+	if law := w.presentLawCollector(dID); law != nil && law.ID != hungry.ID {
 		wLaw, dLaw, _ = w.applyCohortCasualtiesWithCause(law, riotForce/6, 0, 0, "combat")
 	}
 
@@ -1310,7 +1306,7 @@ func (w *World) triggerPopularUprising(jr *JusticeRevoltState, spec JusticeRevol
 		if w.isOutlawCohort(c, spec) || w.isCivicServiceProfession(c.Profession) || jr.isActiveRebelCohort(c.ID) {
 			continue
 		}
-		freeHealthy := cohortFreeHealthyAdults(*c)
+		freeHealthy := cohortFreeHealthyAdults(w.anonymousCohort(*c))
 		if freeHealthy >= 4 && freeHealthy > bestFree {
 			srcIdx = i
 			bestFree = freeHealthy
@@ -1321,7 +1317,7 @@ func (w *World) triggerPopularUprising(jr *JusticeRevoltState, spec JusticeRevol
 	}
 
 	src := &w.Cohorts[srcIdx]
-	srcPopBefore := src.Population
+	srcPopBefore := w.anonymousCohort(*src).Population
 	if srcPopBefore <= 0 {
 		return nil
 	}
@@ -1406,6 +1402,8 @@ func (w *World) triggerPopularUprising(jr *JusticeRevoltState, spec JusticeRevol
 		MoneyPool:  coinShare,
 		ItemPool:   rebelItems,
 	}
+	w.transferCohortEnergyAndHunger(src, &reb, moved, srcPopBefore, 0)
+	w.transferCohortStoredShare(src, &reb, moved, srcPopBefore)
 	w.Cohorts = append(w.Cohorts, reb)
 
 	jr.ActiveRevolts = append(jr.ActiveRevolts, ActiveRevolt{
@@ -1441,7 +1439,7 @@ func (w *World) triggerPopularUprising(jr *JusticeRevoltState, spec JusticeRevol
 }
 
 func cohortFreeHealthyAdults(c PopulationCohort) int {
-	avail := c.Population - c.Wounded - c.Sick - c.Jailed
+	avail := c.Population - c.Wounded - c.Sick + c.WoundedSick - c.Jailed
 	if avail <= 0 {
 		return 0
 	}
@@ -1475,11 +1473,11 @@ func (w *World) stepPacificationAndAmnesty(jr *JusticeRevoltState, spec JusticeR
 			continue
 		}
 
-		// Find nearest/strongest garrison cohort
+		// Only a garrison already present under the local governing authority can suppress rebels.
 		var garrison *PopulationCohort
 		for j := range w.Cohorts {
 			c := &w.Cohorts[j]
-			if c.ID == reb.ID || !w.isGarrisonCohort(c, spec) || c.EffectivePopulation() < 3 {
+			if c.ID == reb.ID || !w.cohortHasJurisdiction(c, reb.District) || !w.isGarrisonCohort(c, spec) || c.EffectivePopulation() < 3 {
 				continue
 			}
 			if garrison == nil || (c.District == r.District && garrison.District != r.District) || c.EffectivePopulation() > garrison.EffectivePopulation() {
@@ -1711,11 +1709,11 @@ func (w *World) reintegrateRebels(jr *JusticeRevoltState, spec JusticeRevoltSpec
 	}
 
 	dst := w.findCohortByID(r.SourceCohortID)
-	if dst == nil || dst.Population <= 0 || w.isOutlawCohort(dst, spec) {
+	if dst == nil || dst.District != reb.District || dst.Population <= 0 || w.isOutlawCohort(dst, spec) {
 		dst = nil
 		for i := range w.Cohorts {
 			c := &w.Cohorts[i]
-			if c.ID == reb.ID || c.Population <= 0 || w.isOutlawCohort(c, spec) || w.isCivicServiceProfession(c.Profession) {
+			if c.ID == reb.ID || c.District != reb.District || c.Population <= 0 || w.isOutlawCohort(c, spec) || w.isCivicServiceProfession(c.Profession) {
 				continue
 			}
 			if dst == nil || (c.District == r.District && dst.District != r.District) || c.Population > dst.Population {
@@ -1731,8 +1729,11 @@ func (w *World) reintegrateRebels(jr *JusticeRevoltState, spec JusticeRevoltSpec
 	// otherwise transfer only healthy free adults so Wound/Sick/Jail ledgers stay exact.
 	canFullDrain := reb.Wounded == 0 && reb.Sick == 0 && reb.Jailed == 0
 	var moved int
-	popBefore := reb.Population
+	anonymousBefore := w.anonymousCohort(*reb).Population
+	dstAnonymousBefore := w.anonymousCohort(*dst).Population
+	popBefore := anonymousBefore
 	if canFullDrain {
+		popBefore = reb.Population
 		moved = reb.Population
 		dst.Population += moved
 		if reb.Children+reb.Adults+reb.Elders > 0 {
@@ -1742,10 +1743,17 @@ func (w *World) reintegrateRebels(jr *JusticeRevoltState, spec JusticeRevoltSpec
 		} else {
 			dst.Adults += moved
 		}
+		dst.Members = append(dst.Members, reb.Members...)
+		reb.Members = nil
+		dst.ChildAgeRemainder += reb.ChildAgeRemainder
+		dst.AdultAgeRemainder += reb.AdultAgeRemainder
+		reb.ChildAgeRemainder, reb.AdultAgeRemainder = 0, 0
 		reb.Population = 0
 		reb.Children, reb.Adults, reb.Elders = 0, 0, 0
+		w.transferShipmentOwnership(reb.ID, dst.ID)
+		w.transferGrowingAssets("cohort", reb.ID, "cohort", dst.ID)
 	} else {
-		freeHealthy := cohortFreeHealthyAdults(*reb)
+		freeHealthy := cohortFreeHealthyAdults(w.anonymousCohort(*reb))
 		if freeHealthy <= 0 {
 			return nil
 		}
@@ -1759,6 +1767,13 @@ func (w *World) reintegrateRebels(jr *JusticeRevoltState, spec JusticeRevoltSpec
 		dst.Population += moved
 		dst.Adults += moved
 	}
+
+	energyMoved := moved
+	if canFullDrain {
+		energyMoved = anonymousBefore
+	}
+	w.transferCohortEnergyAndHunger(reb, dst, energyMoved, anonymousBefore, dstAnonymousBefore)
+	w.transferCohortStoredShare(reb, dst, moved, popBefore)
 
 	var coinShare int64
 	if canFullDrain {

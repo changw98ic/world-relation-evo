@@ -143,14 +143,14 @@ type ForeclosedTenancy struct {
 
 // MarketCreditState holds dynamic district prices, hoarded stocks, usury loan ledgers, and property/land annexation state.
 type MarketCreditState struct {
-	Spec                 MarketCreditSpec             `json:"spec,omitempty"`
-	DistrictPrices       map[string]map[string]int    `json:"district_prices"`
-	HoardedStock         map[string]map[string]int64  `json:"hoarded_stock"`
-	LoanRequests         []LoanRequest                `json:"loan_requests,omitempty"`
-	Loans                []LoanRecord                 `json:"loans,omitempty"`
-	CohortDebts          []CohortDebtRecord           `json:"cohort_debts,omitempty"`
-	AnnexedSharePermille map[string]int               `json:"annexed_share_permille"`
-	CreditorCohort       map[string]string            `json:"creditor_cohort"`
+	Spec           MarketCreditSpec            `json:"spec,omitempty"`
+	DistrictPrices map[string]map[string]int   `json:"district_prices"`
+	HoardedStock   map[string]map[string]int64 `json:"hoarded_stock"`
+	LoanRequests   []LoanRequest               `json:"loan_requests,omitempty"`
+	Loans          []LoanRecord                `json:"loans,omitempty"`
+	CohortDebts    []CohortDebtRecord          `json:"cohort_debts,omitempty"`
+	// CohortEquityPermille records each creditor's share, keyed by debtor then creditor.
+	CohortEquityPermille map[string]map[string]int    `json:"cohort_equity_permille"`
 	ForeclosedTenancies  map[string]ForeclosedTenancy `json:"foreclosed_tenancies"`
 	NextLoanID           int64                        `json:"next_loan_id,omitempty"`
 	LastPriceUpdateTick  int64                        `json:"last_price_update_tick,omitempty"`
@@ -163,8 +163,7 @@ func NewMarketCreditState() *MarketCreditState {
 		Spec:                 DefaultMarketCreditSpec(),
 		DistrictPrices:       map[string]map[string]int{},
 		HoardedStock:         map[string]map[string]int64{},
-		AnnexedSharePermille: map[string]int{},
-		CreditorCohort:       map[string]string{},
+		CohortEquityPermille: map[string]map[string]int{},
 		ForeclosedTenancies:  map[string]ForeclosedTenancy{},
 		NextLoanID:           1,
 		LastCreditDay:        -1,
@@ -205,11 +204,11 @@ func CloneMarketCreditState(s *MarketCreditState) *MarketCreditState {
 	if s.CohortDebts != nil {
 		out.CohortDebts = append([]CohortDebtRecord(nil), s.CohortDebts...)
 	}
-	if s.AnnexedSharePermille != nil {
-		out.AnnexedSharePermille = cloneIntMap(s.AnnexedSharePermille)
-	}
-	if s.CreditorCohort != nil {
-		out.CreditorCohort = cloneStringMap(s.CreditorCohort)
+	if s.CohortEquityPermille != nil {
+		out.CohortEquityPermille = make(map[string]map[string]int, len(s.CohortEquityPermille))
+		for debtorID, shares := range s.CohortEquityPermille {
+			out.CohortEquityPermille[debtorID] = cloneIntMap(shares)
+		}
 	}
 	if s.ForeclosedTenancies != nil {
 		out.ForeclosedTenancies = make(map[string]ForeclosedTenancy, len(s.ForeclosedTenancies))
@@ -227,11 +226,8 @@ func (mc *MarketCreditState) ensureInit() MarketCreditSpec {
 	if mc.HoardedStock == nil {
 		mc.HoardedStock = map[string]map[string]int64{}
 	}
-	if mc.AnnexedSharePermille == nil {
-		mc.AnnexedSharePermille = map[string]int{}
-	}
-	if mc.CreditorCohort == nil {
-		mc.CreditorCohort = map[string]string{}
+	if mc.CohortEquityPermille == nil {
+		mc.CohortEquityPermille = map[string]map[string]int{}
 	}
 	if mc.ForeclosedTenancies == nil {
 		mc.ForeclosedTenancies = map[string]ForeclosedTenancy{}
@@ -249,6 +245,15 @@ func (mc *MarketCreditState) allocLoanID() int64 {
 	id := mc.NextLoanID
 	mc.NextLoanID++
 	return id
+}
+
+// TotalAnnexedSharePermille derives the total from the individual creditors' registered shares.
+func (mc *MarketCreditState) TotalAnnexedSharePermille(debtorID string) int {
+	var total int
+	for _, share := range mc.CohortEquityPermille[debtorID] {
+		total += share
+	}
+	return total
 }
 
 // TotalHoardedStock returns total hoarded units of itemID across all holders (or all items if itemID == "").
@@ -793,7 +798,7 @@ func (w *World) stepMerchantHoarding(mc *MarketCreditState, spec MarketCreditSpe
 						reason = "glut_clear"
 					}
 				}
-				a.Items[itemID] += int(curHoarded)
+				w.adjustActorItem(a, itemID, int(curHoarded), false)
 				delete(mc.HoardedStock[a.ID], itemID)
 				if len(mc.HoardedStock[a.ID]) == 0 {
 					delete(mc.HoardedStock, a.ID)
@@ -829,10 +834,7 @@ func (w *World) stepMerchantHoarding(mc *MarketCreditState, spec MarketCreditSpe
 				if hoardQty > room {
 					hoardQty = room
 				}
-				a.Items[itemID] -= int(hoardQty)
-				if a.Items[itemID] <= 0 {
-					delete(a.Items, itemID)
-				}
+				w.adjustActorItem(a, itemID, -int(hoardQty), false)
 				addHoard(a.ID, itemID, hoardQty)
 				ev := w.record(a, Action{Kind: "wait", Location: a.Location, Item: itemID, Quantity: int(hoardQty)}, "merchant_hoarded", map[string]any{
 					"text":           fmt.Sprintf("%s hoarded %d %s in %s during scarcity (%d‰ price)", a.Name, hoardQty, itemID, a.Location, pricePermille),
@@ -1002,14 +1004,10 @@ func (w *World) ApplyMarketCreditAction(mc *MarketCreditState, actorID string, x
 		}
 		borrower := w.actor(l.BorrowerID)
 		borrowerCohort := w.findCohort(l.BorrowerCohortID)
-		houseID := l.CollateralHouse
-		if houseID == "" {
-			houseID = x.HouseID
+		if l.CollateralHouse == "" {
+			return fail("loan has no agreed collateral house"), true
 		}
-		if houseID == "" && borrower != nil {
-			houseID = borrower.HomeID
-		}
-		h := w.house(houseID)
+		h := w.house(l.CollateralHouse)
 		borrowerAlive := (borrower != nil && !borrower.Dead) || (borrower == nil && borrowerCohort != nil && borrowerCohort.Population > 0)
 		if h == nil || !borrowerAlive || h.OwnerID != l.BorrowerID {
 			return fail("no foreclosable collateral house owned by borrower"), true
@@ -1325,23 +1323,25 @@ func (w *World) stepDailyCreditAndAnnexation(mc *MarketCreditState, spec MarketC
 		mc.ForeclosedTenancies[hID] = ten
 	}
 
-	// 3. Collect daily land/workshop annexation rent from debtor cohorts to creditor cohorts.
-	debtorIDs := make([]string, 0, len(mc.AnnexedSharePermille))
-	for dID := range mc.AnnexedSharePermille {
+	// 3. Assess rent once per debtor, then divide the same cash and output assessment
+	// between the registered creditors. Splitting a claim never raises total rent.
+	debtorIDs := make([]string, 0, len(mc.CohortEquityPermille))
+	for dID := range mc.CohortEquityPermille {
 		debtorIDs = append(debtorIDs, dID)
 	}
 	sort.Strings(debtorIDs)
 	for _, dID := range debtorIDs {
-		sharePermille := mc.AnnexedSharePermille[dID]
-		if sharePermille <= 0 {
-			continue
-		}
-		cID := mc.CreditorCohort[dID]
+		shares := mc.CohortEquityPermille[dID]
+		sharePermille := mc.TotalAnnexedSharePermille(dID)
 		debtor := w.findCohort(dID)
-		creditor := w.findCohort(cID)
-		if debtor == nil || debtor.Population <= 0 || creditor == nil || creditor.Population <= 0 || debtor.ID == creditor.ID {
+		if sharePermille <= 0 || debtor == nil || debtor.Population <= 0 {
 			continue
 		}
+		creditorIDs := make([]string, 0, len(shares))
+		for cID := range shares {
+			creditorIDs = append(creditorIDs, cID)
+		}
+		sort.Strings(creditorIDs)
 
 		var rentCoins int64
 		surplusCoins := debtor.MoneyPool - int64(debtor.Population)*2
@@ -1350,13 +1350,7 @@ func (w *World) stepDailyCreditAndAnnexation(mc *MarketCreditState, spec MarketC
 			if rentCoins < 1 && surplusCoins >= 10 {
 				rentCoins = 1
 			}
-			if rentCoins > debtor.MoneyPool {
-				rentCoins = debtor.MoneyPool
-			}
-			if rentCoins > 0 {
-				debtor.MoneyPool -= rentCoins
-				creditor.MoneyPool += rentCoins
-			}
+			rentCoins = minInt64(rentCoins, debtor.MoneyPool)
 		}
 
 		var rentItem string
@@ -1374,6 +1368,9 @@ func (w *World) stepDailyCreditAndAnnexation(mc *MarketCreditState, spec MarketC
 				continue
 			}
 			excess := debtor.ItemPool[itemID] - int64(debtor.Population)*2
+			if w.Catalog.Items[itemID].Edible {
+				excess = w.cohortFoodSurplus(*debtor, itemID)
+			}
 			if excess <= 0 {
 				continue
 			}
@@ -1381,44 +1378,53 @@ func (w *World) stepDailyCreditAndAnnexation(mc *MarketCreditState, spec MarketC
 			if qty < 1 && excess >= 10 {
 				qty = 1
 			}
-			if qty > debtor.ItemPool[itemID] {
-				qty = debtor.ItemPool[itemID]
-			}
 			if qty > 0 {
-				debtor.ItemPool[itemID] -= qty
-				if debtor.ItemPool[itemID] <= 0 {
-					delete(debtor.ItemPool, itemID)
-				}
-				if creditor.ItemPool == nil {
-					creditor.ItemPool = map[string]int64{}
-				}
-				creditor.ItemPool[itemID] += qty
 				rentItem = itemID
-				rentQty = qty
+				rentQty = minInt64(qty, debtor.ItemPool[itemID])
 				break
 			}
 		}
 
-		if rentCoins > 0 || rentQty > 0 {
-			ev := Event{
-				ID:       w.NextID,
-				Tick:     w.Tick,
-				ActorID:  debtor.ID,
-				TargetID: creditor.ID,
-				Kind:     "cohort_rent_paid",
-				Action:   Action{Kind: "wait", TargetID: creditor.ID, Item: rentItem, Quantity: int(rentQty), Price: int(rentCoins)},
-				Payload: map[string]any{
-					"text":            fmt.Sprintf("%s paid land/workshop rent (%d coins, %d %s) on %d‰ annexed share to %s", debtor.Name, rentCoins, rentQty, rentItem, sharePermille, creditor.Name),
-					"debtor_cohort":   debtor.ID,
-					"creditor_cohort": creditor.ID,
-					"share_permille":  sharePermille,
-					"coins":           rentCoins,
-					"item":            rentItem,
-					"item_qty":        rentQty,
-				},
+		// Integer remainders carry across sorted creditors so every assessed unit
+		// has one recipient, with deterministic rounding and no duplicated minimum.
+		var cumulativeShare int64
+		var allocatedCoins, allocatedQty int64
+		for _, cID := range creditorIDs {
+			cumulativeShare += int64(shares[cID])
+			coinsThrough := rentCoins * cumulativeShare / int64(sharePermille)
+			qtyThrough := rentQty * cumulativeShare / int64(sharePermille)
+			coins, qty := coinsThrough-allocatedCoins, qtyThrough-allocatedQty
+			allocatedCoins, allocatedQty = coinsThrough, qtyThrough
+			creditor := w.findCohort(cID)
+			if creditor == nil || creditor.Population <= 0 || debtor.ID == creditor.ID {
+				continue // An unavailable creditor's entitlement stays with the debtor.
 			}
-			w.NextID++
-			events = append(events, ev)
+			debtor.MoneyPool -= coins
+			creditor.MoneyPool += coins
+			if qty > 0 {
+				debtor.ItemPool[rentItem] -= qty
+				if debtor.ItemPool[rentItem] == 0 {
+					delete(debtor.ItemPool, rentItem)
+				}
+				if creditor.ItemPool == nil {
+					creditor.ItemPool = map[string]int64{}
+				}
+				creditor.ItemPool[rentItem] += qty
+			}
+			if coins > 0 || qty > 0 {
+				ev := Event{
+					ID: w.NextID, Tick: w.Tick, ActorID: debtor.ID, TargetID: creditor.ID,
+					Kind:   "cohort_rent_paid",
+					Action: Action{Kind: "wait", TargetID: creditor.ID, Item: rentItem, Quantity: int(qty), Price: int(coins)},
+					Payload: map[string]any{
+						"text":          fmt.Sprintf("%s paid land/workshop rent (%d coins, %d %s) on %d‰ annexed share to %s", debtor.Name, coins, qty, rentItem, shares[cID], creditor.Name),
+						"debtor_cohort": debtor.ID, "creditor_cohort": creditor.ID,
+						"share_permille": shares[cID], "coins": coins, "item": rentItem, "item_qty": qty,
+					},
+				}
+				w.NextID++
+				events = append(events, ev)
+			}
 		}
 	}
 
@@ -1513,11 +1519,16 @@ func (w *World) stepDailyCreditAndAnnexation(mc *MarketCreditState, spec MarketC
 				if addShare > 350 {
 					addShare = 350
 				}
-				curShare := mc.AnnexedSharePermille[debtor.ID]
+				curShare := mc.TotalAnnexedSharePermille(debtor.ID)
 				newShare := minInt(spec.MaxTenantSharePermille, curShare+addShare)
 				delta := newShare - curShare
-				mc.AnnexedSharePermille[debtor.ID] = newShare
-				mc.CreditorCohort[debtor.ID] = creditor.ID
+				if delta <= 0 {
+					continue // No equity remains to settle this debt.
+				}
+				if mc.CohortEquityPermille[debtor.ID] == nil {
+					mc.CohortEquityPermille[debtor.ID] = map[string]int{}
+				}
+				mc.CohortEquityPermille[debtor.ID][creditor.ID] += delta
 				d.Status = "annexed"
 				ev := Event{
 					ID:       w.NextID,

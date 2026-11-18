@@ -176,7 +176,8 @@ func cloneInt64Map(m map[string]int64) map[string]int64 {
 	return r
 }
 
-func cloneActor(a Actor) Actor {
+// CloneActor isolates every mutable part of a person's state from its source.
+func CloneActor(a Actor) Actor {
 	a.Tags = append([]string(nil), a.Tags...)
 	a.Guilds = append([]string(nil), a.Guilds...)
 	a.Professions = cloneIntMap(a.Professions)
@@ -184,6 +185,7 @@ func cloneActor(a Actor) Actor {
 	a.ProfessionXP = cloneIntMap(a.ProfessionXP)
 	a.GuildLevels = cloneIntMap(a.GuildLevels)
 	a.Items = cloneIntMap(a.Items)
+	a.Equipped = cloneStringMap(a.Equipped)
 	a.Trust = cloneIntMap(a.Trust)
 	a.StateSlots = cloneIntMap(a.StateSlots)
 	a.Currencies = cloneInt64Map(a.Currencies)
@@ -192,14 +194,23 @@ func cloneActor(a Actor) Actor {
 	}
 	if a.Task != nil {
 		tc := *a.Task
-		if tc.Action.Statement != nil {
-			sc := *tc.Action.Statement
-			tc.Action.Statement = &sc
-		}
+		tc.Action = cloneAction(tc.Action)
 		a.Task = &tc
 	}
 	if a.Memories != nil {
 		a.Memories = append([]Memory(nil), a.Memories...)
+		for i := range a.Memories {
+			m := &a.Memories[i]
+			m.SourceTags = append([]string(nil), m.SourceTags...)
+			if m.Observation != nil {
+				observation := *m.Observation
+				m.Observation = &observation
+			}
+			if m.Statement != nil {
+				statement := *m.Statement
+				m.Statement = &statement
+			}
+		}
 	}
 	return a
 }
@@ -238,15 +249,30 @@ func (w *World) actorCurrencyBalance(a *Actor, currency string) int64 {
 }
 
 func (w *World) addActorCurrency(a *Actor, currency string, delta int64) {
+	w.adjustActorCurrency(a, currency, delta, false)
+}
+
+// adjustActorCurrency mutates an actor's currency balance (coins or custom currency) and optionally records production/consumption in LedgerAudit.
+func (w *World) adjustActorCurrency(a *Actor, currency string, delta int64, trackLedger bool) {
 	if a == nil || delta == 0 {
 		return
 	}
 	if currency == "" || currency == "coins" {
 		a.Money += int(delta)
+		if trackLedger {
+			if delta > 0 {
+				w.recordLedgerCurrencyProduced("coins", delta)
+			} else {
+				w.recordLedgerCurrencyConsumed("coins", -delta)
+			}
+		}
 		return
 	}
 	if a.Currencies == nil {
 		if delta < 0 {
+			if trackLedger {
+				w.recordLedgerCurrencyConsumed(currency, -delta)
+			}
 			return
 		}
 		a.Currencies = map[string]int64{}
@@ -257,6 +283,13 @@ func (w *World) addActorCurrency(a *Actor, currency string, delta int64) {
 	}
 	if len(a.Currencies) == 0 {
 		a.Currencies = nil
+	}
+	if trackLedger {
+		if delta > 0 {
+			w.recordLedgerCurrencyProduced(currency, delta)
+		} else {
+			w.recordLedgerCurrencyConsumed(currency, -delta)
+		}
 	}
 }
 
@@ -343,18 +376,7 @@ func clampSlotValue(val int, spec StateSlotSpec, hasSpec bool) int {
 }
 
 func setActorSlotValue(a *Actor, slotID string, val int) {
-	if val == 0 && (a.StateSlots == nil) {
-		return
-	}
-	if val == 0 {
-		if a.StateSlots != nil {
-			delete(a.StateSlots, slotID)
-			if len(a.StateSlots) == 0 {
-				a.StateSlots = nil
-			}
-		}
-		return
-	}
+	// An explicit zero is an exhausted slot; only an absent key is uninitialized.
 	if a.StateSlots == nil {
 		a.StateSlots = map[string]int{}
 	}
@@ -374,92 +396,100 @@ func (w *World) stepStateSlotsAndForms() []Event {
 	sort.Strings(slotKeys)
 
 	for i := range w.Actors {
-		a := &w.Actors[i]
+		events = append(events, w.stepActorStateSlotsAndForm(&w.Actors[i], slotKeys)...)
+	}
+	for ci := range w.Cohorts {
+		c := &w.Cohorts[ci]
+		before := append([]Actor(nil), c.Members...)
+		for mi := range c.Members {
+			events = append(events, w.stepActorStateSlotsAndForm(&c.Members[mi], slotKeys)...)
+		}
+		w.reconcileCohortMemberChanges(c, before)
+	}
+	return events
+}
+
+func (w *World) stepActorStateSlotsAndForm(a *Actor, slotKeys []string) []Event {
+	if a.Dead {
+		return nil
+	}
+	var events []Event
+	form, hasForm := w.actorFormSpec(*a)
+	var reg GeoRegion
+	hasReg := false
+	if regID := w.Map.GeoRegionIDForLocation(a.Location, a.VenueID); regID != "" {
+		reg, hasReg = w.Map.GeoRegionByID(regID)
+	}
+
+	// Update every slot before evaluating transitions, so prerequisites never depend on key order.
+	handled := make(map[string]bool, len(slotKeys))
+	var overflowTransitions []string
+	for _, slotID := range slotKeys {
 		if a.Dead {
+			break
+		}
+		handled[slotID] = true
+		spec := w.Catalog.StateSlots[slotID]
+		cur, existed := a.StateSlots[slotID]
+		if !existed && spec.Default != 0 {
+			cur = spec.Default
+		}
+		delta := spec.RegenPerTick
+		if hasForm && form.SlotMetabolism != nil {
+			delta += form.SlotMetabolism[slotID]
+		}
+		if spec.AmbientFieldKey != "" && hasReg && reg.AmbientFields != nil {
+			ambient := reg.AmbientFields[spec.AmbientFieldKey]
+			if ambient != 0 {
+				div := spec.AmbientAbsorbDivisor
+				if div <= 0 {
+					div = 1
+				}
+				delta += ambient / div
+			}
+		}
+
+		next := cur + delta
+		overflowed := spec.OverflowThreshold > 0 && next >= spec.OverflowThreshold
+		clamped := clampSlotValue(next, spec, true)
+		setActorSlotValue(a, slotID, clamped)
+
+		if overflowed && spec.OverflowTransitionID != "" {
+			overflowTransitions = append(overflowTransitions, spec.OverflowTransitionID)
+		}
+	}
+
+	// Apply any form SlotMetabolism entries for slots not declared in Catalog.StateSlots.
+	if !a.Dead && hasForm && len(form.SlotMetabolism) > 0 {
+		extraKeys := make([]string, 0, len(form.SlotMetabolism))
+		for k := range form.SlotMetabolism {
+			if !handled[k] {
+				extraKeys = append(extraKeys, k)
+			}
+		}
+		sort.Strings(extraKeys)
+		for _, slotID := range extraKeys {
+			cur := a.StateSlots[slotID]
+			next := cur + form.SlotMetabolism[slotID]
+			if next < 0 {
+				next = 0
+			}
+			if a.StateSlots != nil || next != 0 {
+				setActorSlotValue(a, slotID, next)
+			}
+		}
+	}
+	for _, transID := range overflowTransitions {
+		if a.Dead || a.Task != nil || w.Tick < a.JailedUntil {
+			break
+		}
+		trans := w.Catalog.Transitions[transID]
+		if a.FormID != "" && (a.FormID == trans.SuccessFormID || a.FormID == trans.FailureFormID) {
 			continue
 		}
-		form, hasForm := w.actorFormSpec(*a)
-		var reg GeoRegion
-		hasReg := false
-		if regID := w.Map.GeoRegionIDForLocation(a.Location, a.VenueID); regID != "" {
-			reg, hasReg = w.Map.GeoRegionByID(regID)
-		}
-
-		// Track slots updated via StateSlots catalog first.
-		handled := make(map[string]bool, len(slotKeys))
-		for _, slotID := range slotKeys {
-			if a.Dead {
-				break
-			}
-			handled[slotID] = true
-			spec := w.Catalog.StateSlots[slotID]
-			cur, existed := a.StateSlots[slotID]
-			if !existed && spec.Default != 0 {
-				cur = spec.Default
-			}
-			delta := spec.RegenPerTick
-			if hasForm && form.SlotMetabolism != nil {
-				delta += form.SlotMetabolism[slotID]
-			}
-			if spec.AmbientFieldKey != "" && hasReg && reg.AmbientFields != nil {
-				ambient := reg.AmbientFields[spec.AmbientFieldKey]
-				if ambient != 0 {
-					div := spec.AmbientAbsorbDivisor
-					if div <= 0 {
-						div = 1
-					}
-					delta += ambient / div
-				}
-			}
-
-			next := cur + delta
-			overflowed := spec.OverflowThreshold > 0 && next >= spec.OverflowThreshold
-			clamped := clampSlotValue(next, spec, true)
-			if existed || clamped != 0 {
-				setActorSlotValue(a, slotID, clamped)
-			}
-
-			if overflowed && spec.OverflowTransitionID != "" {
-				if trans, ok := w.Catalog.Transitions[spec.OverflowTransitionID]; ok {
-					eligible := trans.RequiredFormID == "" || a.FormID == trans.RequiredFormID
-					if eligible && a.FormID != "" && (a.FormID == trans.SuccessFormID || a.FormID == trans.FailureFormID) {
-						eligible = false
-					}
-					if eligible {
-						for costSlot, cost := range trans.SlotCosts {
-							if cost <= 0 {
-								continue
-							}
-							costSpec, hasCostSpec := w.Catalog.StateSlots[costSlot]
-							updated := clampSlotValue(a.StateSlots[costSlot]-cost, costSpec, hasCostSpec)
-							setActorSlotValue(a, costSlot, updated)
-						}
-						x := Action{Kind: "attempt_transition", TransitionID: trans.ID}
-						events = append(events, w.executeTransition(a, x, trans.ID)...)
-					}
-				}
-			}
-		}
-
-		// Apply any form SlotMetabolism entries for slots not declared in Catalog.StateSlots.
-		if !a.Dead && hasForm && len(form.SlotMetabolism) > 0 {
-			extraKeys := make([]string, 0, len(form.SlotMetabolism))
-			for k := range form.SlotMetabolism {
-				if !handled[k] {
-					extraKeys = append(extraKeys, k)
-				}
-			}
-			sort.Strings(extraKeys)
-			for _, slotID := range extraKeys {
-				cur := a.StateSlots[slotID]
-				next := cur + form.SlotMetabolism[slotID]
-				if next < 0 {
-					next = 0
-				}
-				if a.StateSlots != nil || next != 0 {
-					setActorSlotValue(a, slotID, next)
-				}
-			}
+		if w.transitionRequirementReason(*a, trans) == "" {
+			x := Action{Kind: "attempt_transition", TransitionID: transID}
+			events = append(events, w.applyAttemptTransition(a, x)...)
 		}
 	}
 	return events
@@ -487,42 +517,19 @@ func (w *World) applyAttemptTransition(a *Actor, x Action) []Event {
 	if !ok {
 		return fail("unknown transition: " + transID)
 	}
-	if trans.RequiredFormID != "" && a.FormID != trans.RequiredFormID {
-		return fail(fmt.Sprintf("transition %s requires form %s (has %s)", trans.ID, trans.RequiredFormID, a.FormID))
-	}
-	reqSlotKeys := make([]string, 0, len(trans.RequiredSlots))
-	for k := range trans.RequiredSlots {
-		reqSlotKeys = append(reqSlotKeys, k)
-	}
-	sort.Strings(reqSlotKeys)
-	for _, slotID := range reqSlotKeys {
-		req := trans.RequiredSlots[slotID]
-		if a.StateSlots[slotID] < req {
-			return fail(fmt.Sprintf("transition %s requires %s >= %d (has %d)", trans.ID, slotID, req, a.StateSlots[slotID]))
-		}
+	if reason := w.transitionRequirementReason(*a, trans); reason != "" {
+		return fail(reason)
 	}
 	costSlotKeys := make([]string, 0, len(trans.SlotCosts))
 	for k := range trans.SlotCosts {
 		costSlotKeys = append(costSlotKeys, k)
 	}
 	sort.Strings(costSlotKeys)
-	for _, slotID := range costSlotKeys {
-		cost := trans.SlotCosts[slotID]
-		if cost > 0 && a.StateSlots[slotID] < cost {
-			return fail(fmt.Sprintf("transition %s requires %d %s", trans.ID, cost, slotID))
-		}
-	}
 	costItemKeys := make([]string, 0, len(trans.ItemCosts))
 	for k := range trans.ItemCosts {
 		costItemKeys = append(costItemKeys, k)
 	}
 	sort.Strings(costItemKeys)
-	for _, itemID := range costItemKeys {
-		qty := trans.ItemCosts[itemID]
-		if qty > 0 && a.Items[itemID] < qty {
-			return fail(fmt.Sprintf("transition %s requires %d %s", trans.ID, qty, itemID))
-		}
-	}
 
 	// Deduct slot and item costs upfront.
 	for _, slotID := range costSlotKeys {
@@ -536,11 +543,7 @@ func (w *World) applyAttemptTransition(a *Actor, x Action) []Event {
 	for _, itemID := range costItemKeys {
 		qty := trans.ItemCosts[itemID]
 		if qty > 0 {
-			a.Items[itemID] -= qty
-			if a.Items[itemID] <= 0 {
-				delete(a.Items, itemID)
-			}
-			w.recordLedgerItemConsumed(itemID, int64(qty))
+			w.adjustActorItem(a, itemID, -qty, true)
 		}
 	}
 
@@ -662,14 +665,9 @@ func (w *World) applyRefineCurrencyItem(a *Actor, x Action) []Event {
 	if a.Items[itemID] < qty {
 		return fail(fmt.Sprintf("insufficient %s to refine (need %d, has %d)", itemID, qty, a.Items[itemID]))
 	}
-	a.Items[itemID] -= qty
-	if a.Items[itemID] == 0 {
-		delete(a.Items, itemID)
-	}
+	w.adjustActorItem(a, itemID, -qty, true)
 	minted := int64(qty) * int64(spec.DualUseRate)
-	w.addActorCurrency(a, spec.DualUseCurrency, minted)
-	w.recordLedgerItemConsumed(itemID, int64(qty))
-	w.recordLedgerCurrencyProduced(spec.DualUseCurrency, minted)
+	w.adjustActorCurrency(a, spec.DualUseCurrency, minted, true)
 
 	return []Event{w.record(a, x, "currency_item_refined", map[string]any{
 		"text":            fmt.Sprintf("%s refined %d %s into %d %s", a.Name, qty, itemID, minted, spec.DualUseCurrency),
@@ -740,11 +738,7 @@ func (w *World) applyAbsorbItemSlot(a *Actor, x Action) []Event {
 		gainPerUnit = 10
 	}
 
-	a.Items[itemID] -= qty
-	if a.Items[itemID] == 0 {
-		delete(a.Items, itemID)
-	}
-	w.recordLedgerItemConsumed(itemID, int64(qty))
+	w.adjustActorItem(a, itemID, -qty, true)
 
 	slotSpec, hasSpec := w.Catalog.StateSlots[slotID]
 	nextVal := clampSlotValue(a.StateSlots[slotID]+qty*gainPerUnit, slotSpec, hasSpec)
@@ -825,7 +819,7 @@ func recomputeFlowGrid(g *FlowGridState) map[string]int64 {
 		return cur, cur > 0
 	}
 
-	// Route power from active generators to each consumer via shortest augmenting paths.
+	// Route power through paths that can deliver a positive integer quantity.
 	for _, cid := range consumerIDs {
 		cNode := g.Nodes[nodeIdx[cid]]
 		need := cNode.Demand
@@ -833,42 +827,47 @@ func recomputeFlowGrid(g *FlowGridState) map[string]int64 {
 			need = 1
 		}
 		for cNode.Active && received[cid] < need {
-			// BFS from all generators with remaining supply to target consumer cid.
+			// Maximum deliverable flow is monotone along a path: each edge caps
+			// its input and rounds down its output after loss. Keep the best
+			// positive quantity per node, so a dead path cannot hide a bypass.
 			parentEdge := make(map[string]int)
 			parentNode := make(map[string]string)
 			sourceGen := make(map[string]string)
+			deliverable := make(map[string]int)
 			visited := make(map[string]bool)
-			var queue []string
 			for _, gid := range genIDs {
-				if remGen[gid] > 0 {
-					visited[gid] = true
-					sourceGen[gid] = gid
-					queue = append(queue, gid)
-				}
+				deliverable[gid] = remGen[gid]
+				sourceGen[gid] = gid
 			}
-			found := false
-			for head := 0; head < len(queue); head++ {
-				u := queue[head]
-				if u == cid {
-					found = true
+			for {
+				u := ""
+				best := 0
+				for _, n := range g.Nodes {
+					if !visited[n.ID] && deliverable[n.ID] > best {
+						u, best = n.ID, deliverable[n.ID]
+					}
+				}
+				if u == "" || u == cid {
 					break
 				}
+				visited[u] = true
 				for _, ei := range adj[u] {
-					if remCap[ei] <= 0 || !g.Nodes[nodeIdx[g.Edges[ei].ToNodeID]].Active {
+					e := g.Edges[ei]
+					v := e.ToNodeID
+					if visited[v] || !g.Nodes[nodeIdx[v]].Active {
 						continue
 					}
-					v := g.Edges[ei].ToNodeID
-					if visited[v] {
+					out := min(best, remCap[ei]) * (1000 - max(0, min(1000, e.LossPermille))) / 1000
+					if out <= deliverable[v] {
 						continue
 					}
-					visited[v] = true
+					deliverable[v] = out
 					parentEdge[v] = ei
 					parentNode[v] = u
 					sourceGen[v] = sourceGen[u]
-					queue = append(queue, v)
 				}
 			}
-			if !found {
+			if deliverable[cid] <= 0 {
 				break
 			}
 			var pathEdges []int
@@ -1013,11 +1012,7 @@ func (w *World) stepFlowGrid() []Event {
 	used := recomputeFlowGrid(w.FlowGrid)
 	for i := range w.FlowGrid.Nodes {
 		n := &w.FlowGrid.Nodes[i]
-		amount := used[n.ID]
-		n.StoredEnergy -= amount
-		if w.LedgerAudit != nil {
-			w.LedgerAudit.Energy.Consumed += amount
-		}
+		w.adjustFlowNodeEnergy(n, -used[n.ID], true)
 	}
 	var events []Event
 	for _, n := range w.FlowGrid.Nodes {
@@ -1175,6 +1170,11 @@ func (w *World) totalCurrencyHeld(currency string) int64 {
 	}
 	for i := range w.Cohorts {
 		total += w.Cohorts[i].Currencies[currency]
+		for _, member := range w.Cohorts[i].Members {
+			if !member.Dead {
+				total += member.Currencies[currency]
+			}
+		}
 	}
 	return total
 }
@@ -1183,9 +1183,27 @@ func (w *World) totalItemHeld(itemID string) int64 {
 	var total int64
 	for i := range w.Actors {
 		total += int64(w.Actors[i].Items[itemID])
+		for _, eqID := range w.Actors[i].Equipped {
+			if eqID == itemID {
+				total++
+			}
+		}
 	}
 	for i := range w.Cohorts {
 		total += w.Cohorts[i].ItemPool[itemID]
+		for _, b := range w.Cohorts[i].Residents {
+			if q := b.Items[itemID]; q > 0 {
+				total += int64(b.Count) * int64(q)
+			}
+		}
+		for _, member := range w.Cohorts[i].Members {
+			total += int64(member.Items[itemID])
+			for _, eqID := range member.Equipped {
+				if eqID == itemID {
+					total++
+				}
+			}
+		}
 	}
 	if w.MarketCredit != nil {
 		total += w.TotalHoardedStock(w.MarketCredit, itemID)
@@ -1251,6 +1269,13 @@ func (w *World) allHeldCurrencies() []string {
 				seen[k] = true
 			}
 		}
+		for _, member := range w.Cohorts[i].Members {
+			if !member.Dead {
+				for id := range member.Currencies {
+					seen[id] = true
+				}
+			}
+		}
 	}
 	if w.LedgerAudit != nil {
 		for k := range w.LedgerAudit.Currencies {
@@ -1273,11 +1298,33 @@ func (w *World) allHeldItems() []string {
 				seen[k] = true
 			}
 		}
+		for _, eqID := range w.Actors[i].Equipped {
+			if eqID != "" {
+				seen[eqID] = true
+			}
+		}
 	}
 	for i := range w.Cohorts {
 		for k, v := range w.Cohorts[i].ItemPool {
 			if v != 0 {
 				seen[k] = true
+			}
+		}
+		for _, b := range w.Cohorts[i].Residents {
+			for k, v := range b.Items {
+				if v != 0 {
+					seen[k] = true
+				}
+			}
+		}
+		for _, member := range w.Cohorts[i].Members {
+			for id := range member.Items {
+				seen[id] = true
+			}
+			for _, eqID := range member.Equipped {
+				if eqID != "" {
+					seen[eqID] = true
+				}
 			}
 		}
 	}
@@ -1358,11 +1405,15 @@ func (w *World) InitLedgerAudit() {
 	w.LedgerAudit = la
 }
 
-// VerifyLedgerConservation checks that Initial + Produced - Consumed == CurrentTotalHeld
-// with zero error for every currency (including "coins") and every item.
+// VerifyLedgerConservation checks nonnegative individual holdings and exact recorded
+// currency/item/resource/energy totals. Transaction delivery and physical conversion
+// rules are enforced at their settlement entry points; totals alone cannot prove them.
 func (w *World) VerifyLedgerConservation() error {
 	if w.LedgerAudit == nil {
 		return fmt.Errorf("ledger audit is not initialized")
+	}
+	if err := w.VerifyHoldingBounds(); err != nil {
+		return err
 	}
 	for _, cur := range w.allHeldCurrencies() {
 		entry := w.LedgerAudit.Currencies[cur]
@@ -1427,6 +1478,227 @@ func (w *World) recordLedgerItemConsumed(itemID string, qty int64) {
 	t := w.LedgerAudit.Items[itemID]
 	t.Consumed += qty
 	w.LedgerAudit.Items[itemID] = t
+}
+
+// adjustActorItem mutates an actor's item stack and optionally records production/consumption in LedgerAudit in one place.
+func (w *World) adjustActorItem(a *Actor, itemID string, delta int, trackLedger bool) {
+	if a == nil || itemID == "" || delta == 0 {
+		return
+	}
+	if delta > 0 {
+		if a.Items == nil {
+			a.Items = map[string]int{}
+		}
+		a.Items[itemID] += delta
+		if trackLedger {
+			w.recordLedgerItemProduced(itemID, int64(delta))
+		}
+		return
+	}
+	if a.Items != nil {
+		a.Items[itemID] += delta
+		if a.Items[itemID] <= 0 {
+			delete(a.Items, itemID)
+		}
+	}
+	if trackLedger {
+		w.recordLedgerItemConsumed(itemID, int64(-delta))
+	}
+}
+
+// adjustCohortItem mutates a cohort's ItemPool and optionally records production/consumption in LedgerAudit in one place.
+func (w *World) adjustCohortItem(c *PopulationCohort, itemID string, delta int64, trackLedger bool) {
+	if c == nil || itemID == "" || delta == 0 {
+		return
+	}
+	if delta > 0 {
+		if c.ItemPool == nil {
+			c.ItemPool = map[string]int64{}
+		}
+		c.ItemPool[itemID] += delta
+		if trackLedger {
+			w.recordLedgerItemProduced(itemID, delta)
+		}
+		return
+	}
+	if c.ItemPool != nil {
+		c.ItemPool[itemID] += delta
+		if c.ItemPool[itemID] <= 0 {
+			delete(c.ItemPool, itemID)
+		}
+	}
+	if trackLedger {
+		w.recordLedgerItemConsumed(itemID, -delta)
+	}
+}
+
+// adjustResidentBandItem mutates a ResidentBand's per-person item stack and optionally records scaled production/consumption.
+func (w *World) adjustResidentBandItem(b *ResidentBand, itemID string, delta int, trackLedger bool) {
+	if b == nil || itemID == "" || delta == 0 || b.Count <= 0 {
+		return
+	}
+	if delta > 0 {
+		if b.Items == nil {
+			b.Items = map[string]int{}
+		}
+		b.Items[itemID] += delta
+		if trackLedger {
+			w.recordLedgerItemProduced(itemID, int64(delta)*int64(b.Count))
+		}
+		return
+	}
+	if b.Items != nil {
+		b.Items[itemID] += delta
+		if b.Items[itemID] <= 0 {
+			delete(b.Items, itemID)
+		}
+		if len(b.Items) == 0 {
+			b.Items = nil
+		}
+	}
+	if trackLedger {
+		w.recordLedgerItemConsumed(itemID, int64(-delta)*int64(b.Count))
+	}
+}
+
+// removeActorEquippedItem removes an equipped slot item from an actor and optionally records consumption in LedgerAudit.
+func (w *World) removeActorEquippedItem(a *Actor, slot string, trackLedger bool) bool {
+	if a == nil || slot == "" || len(a.Equipped) == 0 {
+		return false
+	}
+	itemID, ok := a.Equipped[slot]
+	if !ok || itemID == "" {
+		return false
+	}
+	delete(a.Equipped, slot)
+	if len(a.Equipped) == 0 {
+		a.Equipped = nil
+	}
+	if trackLedger {
+		w.recordLedgerItemConsumed(itemID, 1)
+	}
+	return true
+}
+
+// adjustFlowNodeEnergy mutates a FlowNode's StoredEnergy and optionally records production/consumption in LedgerAudit.
+func (w *World) adjustFlowNodeEnergy(n *FlowNode, delta int64, trackLedger bool) {
+	if n == nil || delta == 0 {
+		return
+	}
+	n.StoredEnergy += delta
+	if n.StoredEnergy < 0 {
+		n.StoredEnergy = 0
+	}
+	if !trackLedger {
+		return
+	}
+	if delta > 0 {
+		w.recordLedgerEnergyProduced(delta)
+	} else {
+		w.recordLedgerEnergyConsumed(-delta)
+	}
+}
+
+func (w *World) recordLedgerEnergyProduced(amt int64) {
+	if w.LedgerAudit == nil || amt <= 0 {
+		return
+	}
+	w.LedgerAudit.Energy.Produced += amt
+}
+
+func (w *World) recordLedgerEnergyConsumed(amt int64) {
+	if w.LedgerAudit == nil || amt <= 0 {
+		return
+	}
+	w.LedgerAudit.Energy.Consumed += amt
+}
+
+// adjustFlowNodeFuel mutates a FlowNode's FuelStock and optionally records production/consumption in LedgerAudit.
+func (w *World) adjustFlowNodeFuel(n *FlowNode, delta int64, trackLedger bool) {
+	if n == nil || delta == 0 || n.Source == nil || n.Source.FuelItem == "" {
+		return
+	}
+	n.FuelStock += delta
+	if n.FuelStock < 0 {
+		n.FuelStock = 0
+	}
+	if !trackLedger {
+		return
+	}
+	if delta > 0 {
+		w.recordLedgerItemProduced(n.Source.FuelItem, delta)
+	} else {
+		w.recordLedgerItemConsumed(n.Source.FuelItem, -delta)
+	}
+}
+
+// adjustDistrictNightsoil mutates a district's NightsoilPool and optionally records production/consumption in LedgerAudit.
+func (w *World) adjustDistrictNightsoil(districtID, wasteItem string, delta int64, trackLedger bool) {
+	if w.DistrictStates == nil || districtID == "" || wasteItem == "" || delta == 0 {
+		return
+	}
+	ds, ok := w.DistrictStates[districtID]
+	if !ok {
+		return
+	}
+	ds.NightsoilPool += delta
+	if ds.NightsoilPool < 0 {
+		ds.NightsoilPool = 0
+	}
+	w.DistrictStates[districtID] = ds
+	if !trackLedger {
+		return
+	}
+	if delta > 0 {
+		w.recordLedgerItemProduced(wasteItem, delta)
+	} else {
+		w.recordLedgerItemConsumed(wasteItem, -delta)
+	}
+}
+
+// adjustGrowthParentItem mutates a GrowthBatch's Parents stock and optionally records production/consumption in LedgerAudit.
+func (w *World) adjustGrowthParentItem(g *GrowthBatch, itemID string, delta int64, trackLedger bool) {
+	if g == nil || itemID == "" || delta == 0 {
+		return
+	}
+	if delta > 0 {
+		if g.Parents == nil {
+			g.Parents = map[string]int64{}
+		}
+		g.Parents[itemID] += delta
+		if trackLedger {
+			w.recordLedgerItemProduced(itemID, delta)
+		}
+		return
+	}
+	if g.Parents != nil {
+		g.Parents[itemID] += delta
+		if g.Parents[itemID] <= 0 {
+			delete(g.Parents, itemID)
+		}
+	}
+	if trackLedger {
+		w.recordLedgerItemConsumed(itemID, -delta)
+	}
+}
+
+// adjustGrowthOutputItem mutates a ready GrowthBatch's held Quantity and optionally records production/consumption in LedgerAudit.
+func (w *World) adjustGrowthOutputItem(g *GrowthBatch, delta int64, trackLedger bool) {
+	if g == nil || g.Item == "" || delta == 0 {
+		return
+	}
+	g.Quantity += delta
+	if g.Quantity < 0 {
+		g.Quantity = 0
+	}
+	if !trackLedger {
+		return
+	}
+	if delta > 0 {
+		w.recordLedgerItemProduced(g.Item, delta)
+	} else {
+		w.recordLedgerItemConsumed(g.Item, -delta)
+	}
 }
 
 func (w *World) recordLedgerCurrencyProduced(currency string, amt int64) {

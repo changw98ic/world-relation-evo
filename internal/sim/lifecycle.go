@@ -28,9 +28,7 @@ func (w *World) recordDeathCause(cause string, count int) {
 	if count <= 0 {
 		return
 	}
-	if cause == "" {
-		cause = "other"
-	}
+	cause = canonicalDeathCause(cause)
 	if w.DeathsByCause == nil {
 		w.DeathsByCause = map[string]int64{}
 	}
@@ -90,6 +88,8 @@ func reconcileCohortAgeBrackets(c *PopulationCohort) {
 	if c.Population <= 0 {
 		c.Population = 0
 		c.Children, c.Adults, c.Elders = 0, 0, 0
+		c.WoundedSick = 0
+		c.ChildAgeRemainder, c.AdultAgeRemainder = 0, 0
 		if c.Wounded > 0 {
 			c.Wounded = 0
 		}
@@ -141,20 +141,66 @@ func (w *World) applyCohortCasualtiesWithCause(c *PopulationCohort, wounded, dea
 	if c == nil || c.Population <= 0 {
 		return 0, 0, 0
 	}
-	avail := c.Population - c.Wounded - c.Sick - c.Jailed
-	if avail < 0 {
-		avail = 0
+	if len(c.Members) > 0 {
+		members := c.Members
+		anonymous := w.anonymousCohort(*c)
+		cw, cd, cj := w.applyCohortCasualtiesWithCause(&anonymous, wounded, dead, jailed, cause)
+		anonymous.Members = members
+		for _, a := range members {
+			w.adjustCohortMember(&anonymous, a, 1)
+		}
+		*c = anonymous
+		return cw, cd, cj
+	}
+	avail := c.Population
+	if cause == "combat" {
+		avail = maxInt(0, c.Population-c.Wounded-c.Sick+c.WoundedSick-c.Jailed)
+	} else if cause == "old_age" {
+		avail = c.Elders
+	} else if cause == "disease" {
+		avail = c.Sick
 	}
 	if dead > avail {
 		dead = avail
 	}
 	if dead > 0 {
+		oldPopulation := c.Population
+		oldWounded, oldSick, oldJailed := c.Wounded, c.Sick, c.Jailed
+		energy := w.anonymousCohortEnergy(c, oldPopulation)
+		if cause != "starvation" {
+			c.ensureResidents(oldPopulation)
+			hunger := c.hungerUnits(oldPopulation) - c.moveResidents(nil, dead)
+			c.setHungerUnits(oldPopulation-dead, hunger)
+		}
 		c.Population -= dead
+		w.setAnonymousCohortEnergy(c, c.Population, energy-energy*int64(dead)/int64(oldPopulation))
+		if cause == "disease" {
+			woundedDeaths := c.WoundedSick * dead / c.Sick
+			c.Sick -= dead
+			c.Wounded -= woundedDeaths
+			c.WoundedSick -= woundedDeaths
+			c.Jailed = c.Jailed * c.Population / oldPopulation
+		} else if cause != "combat" {
+			if cause == "starvation" {
+				// A lethal ten-point hunger hit is necessarily to an already injured resident.
+				c.Wounded -= min(dead, c.Wounded)
+			} else {
+				c.Wounded = c.Wounded * c.Population / oldPopulation
+			}
+			c.Sick = c.Sick * c.Population / oldPopulation
+			c.WoundedSick = min(c.WoundedSick*c.Population/oldPopulation, c.Wounded, c.Sick)
+			c.Jailed = c.Jailed * c.Population / oldPopulation
+		}
 		c.CumulativeDeaths += dead
 		if cause == "old_age" && c.Elders >= dead {
 			c.Elders -= dead
 		}
 		reconcileCohortAgeBrackets(c)
+		c.PendingWoundedDeaths += oldWounded - c.Wounded
+		if cause != "disease" {
+			c.PendingSickDiedOther += oldSick - c.Sick
+		}
+		c.PendingJailedDeaths += oldJailed - c.Jailed
 		w.recordDeathCause(cause, dead)
 	}
 	eff := c.EffectivePopulation()
@@ -162,13 +208,27 @@ func (w *World) applyCohortCasualtiesWithCause(c *PopulationCohort, wounded, dea
 		jailed = eff
 	}
 	if jailed > 0 {
+		c.ensureResidents(c.Population)
+		c.updateResidentBandState(jailed, func(b ResidentBand) bool { return !b.Jailed }, func(b *ResidentBand) { b.Jailed = true })
 		c.Jailed += jailed
 		eff -= jailed
+	}
+	populationWide := cause == "disaster" || cause == "beast" || cause == "starvation"
+	if populationWide {
+		// Exposure includes children, elders, sick people and prisoners.
+		eff = c.Population - c.Wounded
 	}
 	if wounded > eff {
 		wounded = eff
 	}
 	if wounded > 0 {
+		if cause != "starvation" {
+			c.ensureResidents(c.Population)
+			c.updateResidentBandState(wounded, func(b ResidentBand) bool { return b.Health == MaxHealth }, func(b *ResidentBand) { b.Health = maxInt(1, MaxHealth-1) })
+		}
+		if populationWide {
+			c.WoundedSick += (c.Sick - c.WoundedSick) * wounded / eff
+		}
 		c.Wounded += wounded
 	}
 	return wounded, dead, jailed
@@ -176,7 +236,12 @@ func (w *World) applyCohortCasualtiesWithCause(c *PopulationCohort, wounded, dea
 
 func actorHasWarmClothing(cat Catalog, a Actor) bool {
 	for itemID, qty := range a.Items {
-		if qty > 0 && cat.Items[itemID].WarmthBonus > 0 {
+		if qty > 0 && cat.Items[itemID].EquipSlot == "" && cat.Items[itemID].WarmthBonus > 0 {
+			return true
+		}
+	}
+	for _, itemID := range a.Equipped {
+		if itemID != "" && cat.Items[itemID].WarmthBonus > 0 {
 			return true
 		}
 	}
@@ -237,6 +302,40 @@ func (w *World) ActorAnnualMortalityPermille(formID string, ageYears int) int {
 // stepActorPhysiologyAndLifecycle settles individual Actor thirst, low-friction drinking & latrine excretion,
 // cold exposure, disease progression, annual aging, household births, elder mortality, and successor hydration.
 func (w *World) stepActorPhysiologyAndLifecycle() []Event {
+	events := w.stepActorPhysiologyAndLifecycleFor(w.Actors, true)
+	for ci := range w.Cohorts {
+		c := &w.Cohorts[ci]
+		for i := range c.Members {
+			a := &c.Members[i]
+			if a.JailedUntil > 0 && w.Tick >= a.JailedUntil {
+				c.Jailed--
+				a.JailedUntil = 0
+				a.RestUntil = w.Tick + 48
+				a.Tags = removeString(a.Tags, "outlaw")
+				events = append(events, w.record(a, Action{Kind: "wait"}, "released_from_jail", map[string]any{
+					"text": fmt.Sprintf("%s served their Yamen jail sentence and was released", a.Name),
+				}))
+			}
+		}
+		before := append([]Actor(nil), c.Members...)
+		for i := range c.Members {
+			a := &c.Members[i]
+			w.advanceActorHunger(a)
+			if w.Tick >= a.JailedUntil {
+				events = append(events, w.consumeActorRation(a)...)
+			}
+		}
+		events = append(events, w.stepActorPhysiologyAndLifecycleFor(c.Members, false)...)
+		w.reconcileCohortMemberChanges(c, before)
+	}
+	clock := ClockAt(w.Tick)
+	if clock.Hour == 20 && clock.Minute == 0 {
+		events = append(events, w.settleDailyCivicPayrollAndRetailUpkeep(CalendarAt(w.Tick, w.Catalog.Calendar))...)
+	}
+	return events
+}
+
+func (w *World) stepActorPhysiologyAndLifecycleFor(actors []Actor, allowSuccessors bool) []Event {
 	var events []Event
 	sixHour := w.Tick%(6*TicksPerHour) == 0
 	daily := w.Tick%TicksPerDay == 0
@@ -249,20 +348,26 @@ func (w *World) stepActorPhysiologyAndLifecycle() []Event {
 
 	var newlyDeadIndices []int
 
-	for i := range w.Actors {
-		a := &w.Actors[i]
+	for i := range actors {
+		a := &actors[i]
 		if a.Dead {
 			continue
 		}
 		jailed := w.Tick < a.JailedUntil
 
 		// 1. Every 6 hours: Thirst, low-friction facility drinking & latrine settlement, starvation/dehydration checks
-		if sixHour && !jailed {
+		if sixHour {
+			if jailed {
+				events = append(events, w.consumeActorRation(a)...)
+			}
 			a.Thirst++
 
-			// Automatic drinking uses the same finite source as an explicit drink action.
-			if pool := w.potablePoolID(w.DistrictStates[a.Location]); pool != "" && w.drawDistrictResource(a.Location, pool, 1) == 1 {
-				a.Thirst = 0
+			// A traveler can use carried supplies, but cannot reach a stationary
+			// district water source before arriving.
+			if !a.InTransit() {
+				if pool := w.potablePoolID(w.DistrictStates[a.Location]); pool != "" && w.drawDistrictResource(a.Location, pool, 1) == 1 {
+					a.Thirst = 0
+				}
 			}
 
 			if a.Thirst >= 2 {
@@ -270,11 +375,7 @@ func (w *World) stepActorPhysiologyAndLifecycle() []Event {
 				for itemID, qty := range a.Items {
 					spec := w.Catalog.Items[itemID]
 					if qty > 0 && spec.Potable {
-						a.Items[itemID]--
-						if a.Items[itemID] == 0 {
-							delete(a.Items, itemID)
-						}
-						w.recordLedgerItemConsumed(itemID, 1)
+						w.adjustActorItem(a, itemID, -1, true)
 						relief := spec.ThirstRelief
 						if relief <= 0 {
 							relief = 2
@@ -289,7 +390,7 @@ func (w *World) stepActorPhysiologyAndLifecycle() []Event {
 			}
 
 			// Low-friction excretion settlement: indoor latrine/compost_pit or public_latrine converts waste cleanly into nightsoil
-			if a.Waste >= 2 {
+			if a.Waste >= 2 && !a.InTransit() {
 				cleanLatrine := false
 				if a.InsideHouse != "" {
 					if h := w.house(a.InsideHouse); h != nil && (h.HasFacility("compost_pit") || h.HasFacility("latrine") || h.Level >= 1) {
@@ -303,17 +404,10 @@ func (w *World) stepActorPhysiologyAndLifecycle() []Event {
 					}
 				}
 				if cleanLatrine {
-					if w.DistrictStates != nil {
-						if ds, ok := w.DistrictStates[a.Location]; ok {
-							if divisor := w.Catalog.Lifecycle.WastePerFoodDivisor; divisor > 0 && w.Catalog.Lifecycle.WasteItem != "" {
-								waste := a.DigestedFood / divisor
-								a.DigestedFood -= waste * divisor
-								ds.NightsoilPool += waste
-								w.recordLedgerItemProduced(w.Catalog.Lifecycle.WasteItem, waste)
-							}
-
-							w.DistrictStates[a.Location] = ds
-						}
+					if divisor := w.Catalog.Lifecycle.WastePerFoodDivisor; divisor > 0 && w.Catalog.Lifecycle.WasteItem != "" {
+						waste := a.DigestedFood / divisor
+						a.DigestedFood -= waste * divisor
+						w.adjustDistrictNightsoil(a.Location, w.Catalog.Lifecycle.WasteItem, waste, true)
 					}
 					a.Waste = 0
 				} else if a.Waste >= 4 {
@@ -341,9 +435,9 @@ func (w *World) stepActorPhysiologyAndLifecycle() []Event {
 					continue
 				}
 			}
-			form, hasForm := w.actorFormSpec(*a)
-			if a.Hunger >= 6 && !(hasForm && form.DisableHunger) {
-				a.Health -= 10
+			form, _ := w.actorFormSpec(*a)
+			if damage := starvationDamage(a.Hunger, w.Catalog.Lifecycle, form); damage > 0 {
+				a.Health -= damage
 				if a.Health <= 0 {
 					evs := w.markDeadIfZero(a, nil, Action{Kind: "wait"}, "starvation")
 					events = append(events, evs...)
@@ -360,8 +454,11 @@ func (w *World) stepActorPhysiologyAndLifecycle() []Event {
 						if a.Energy < 0 {
 							a.Energy = 0
 						}
-						if a.Health > ws.ColdDamage {
-							a.Health -= ws.ColdDamage
+						a.Health -= ws.ColdDamage
+						if a.Health <= 0 {
+							events = append(events, w.markDeadIfZero(a, nil, Action{Kind: "wait"}, "cold")...)
+							newlyDeadIndices = append(newlyDeadIndices, i)
+							continue
 						}
 					}
 				}
@@ -427,7 +524,7 @@ func (w *World) stepActorPhysiologyAndLifecycle() []Event {
 		}
 
 		// 3. Annual lifecycle settlement: +1 year age, prime-adult household birth, elder attribute & natural mortality
-		if annual && !a.Dead && a.AgeYears > 0 {
+		if annual && !a.Dead {
 			a.AgeYears++
 			lc := w.Catalog.Lifecycle
 			var formPtr *FormSpec
@@ -447,7 +544,7 @@ func (w *World) stepActorPhysiologyAndLifecycle() []Event {
 				roll := int(worldHash(w.ID, w.Tick, "birth:"+a.ID) % 1000)
 				if roll < lc.AnnualBirthPermille*4 {
 					for ci := range w.Cohorts {
-						if w.Cohorts[ci].District == a.Location || w.Cohorts[ci].Profession == a.Role {
+						if w.Cohorts[ci].District == a.Location {
 							w.Cohorts[ci].Population++
 							w.Cohorts[ci].Children++
 							w.Cohorts[ci].CumulativeBirths++
@@ -485,7 +582,7 @@ func (w *World) stepActorPhysiologyAndLifecycle() []Event {
 	}
 
 	// 4. Auto-hydrate successors from local cohorts for any newly deceased active focal actors
-	if len(newlyDeadIndices) > 0 && len(w.Cohorts) > 0 && w.Catalog.Lifecycle.AutoHydrateSuccessor {
+	if allowSuccessors && len(newlyDeadIndices) > 0 && len(w.Cohorts) > 0 && w.Catalog.Lifecycle.AutoHydrateSuccessor {
 		events = append(events, w.hydrateSuccessorsForDead(newlyDeadIndices)...)
 	}
 
@@ -561,6 +658,8 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 	if len(w.Cohorts) == 0 {
 		return nil
 	}
+	restoreMembers := w.detachCohortMembers()
+	defer restoreMembers()
 	var events []Event
 	clock := ClockAt(w.Tick)
 	nextTick := w.Tick + 1
@@ -573,7 +672,6 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 
 	// 1. Every 6 hours: potable water consumption, dehydration/starvation check, and excretion -> nightsoil -> compost!
 	if sixHour {
-		nightsoilByDistrict := map[string]int64{}
 		popByDistrict := map[string]int{}
 
 		for i := range w.Cohorts {
@@ -607,15 +705,15 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 				if use <= 0 {
 					continue
 				}
-				c.ItemPool[itemID] -= use
-				w.recordLedgerItemConsumed(itemID, use)
+				w.adjustCohortItem(c, itemID, -use, true)
 				remainingWater -= use
-				if c.ItemPool[itemID] == 0 {
-					delete(c.ItemPool, itemID)
-				}
 			}
-			if remainingWater == 0 {
-				c.AvgThirst--
+			delivered := waterNeed - remainingWater
+			reliefNumerator := delivered*int64(c.AvgThirst) + c.ThirstReliefRemainder
+			c.AvgThirst -= int(reliefNumerator / waterNeed)
+			c.ThirstReliefRemainder = reliefNumerator % waterNeed
+			if c.AvgThirst == 0 {
+				c.ThirstReliefRemainder = 0
 			}
 
 			// Prefecture granary anti-famine relief when food reserves exist across agricultural cohorts
@@ -637,11 +735,8 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 							if donor.District != c.District || donor.ID == c.ID || donor.Population <= 0 {
 								continue
 							}
-							if donor.ItemPool[itemID] <= int64(donor.Population)*7 {
-								continue
-							}
-							availSurplus := donor.ItemPool[itemID] - int64(donor.Population)*7
-							grant := reliefNeed
+							availSurplus := w.cohortFoodSurplus(*donor, itemID)
+							grant := (reliefNeed + int64(maxInt(1, spec.HungerRelief)) - 1) / int64(maxInt(1, spec.HungerRelief))
 							if grant > availSurplus {
 								grant = availSurplus
 							}
@@ -672,6 +767,18 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 							if stateSubsidy > maxSubsidy {
 								stateSubsidy = maxSubsidy
 							}
+							if c.MoneyPool >= reliefCost {
+								selfPaid = reliefCost - stateSubsidy
+							}
+							// Pay only for the quantity supported by the actual assessed
+							// household and public budgets. A capped subsidy is not paid money.
+							grant = min(grant, (selfPaid+stateSubsidy)/unitPrice*batchQty)
+							if grant == 0 {
+								continue
+							}
+							reliefCost = ((grant + batchQty - 1) / batchQty) * unitPrice
+							selfPaid = min(selfPaid, reliefCost)
+							stateSubsidy = reliefCost - selfPaid
 							if selfPaid > 0 {
 								c.MoneyPool -= selfPaid
 								donor.MoneyPool += selfPaid
@@ -701,40 +808,21 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 									}
 								}
 							}
-							donor.ItemPool[itemID] -= grant
-							if c.ItemPool == nil {
-								c.ItemPool = map[string]int64{}
-							}
-							c.ItemPool[itemID] += grant
+							w.adjustCohortItem(donor, itemID, -grant, false)
+							w.adjustCohortItem(c, itemID, grant, false)
 							reliefNeed -= grant * int64(maxInt(1, spec.HungerRelief))
+							events = append(events, Event{ID: w.NextID, Tick: w.Tick, ActorID: c.ID, TargetID: donor.ID,
+								Kind: "cohort_food_relief_purchased", Action: Action{Kind: "accept", TargetID: donor.ID, Item: itemID, Quantity: int(grant), Price: int(reliefCost)},
+								Payload: map[string]any{"item": itemID, "quantity": grant, "household_paid": selfPaid, "state_paid": stateSubsidy}})
+							w.NextID++
 							if reliefNeed <= 0 {
 								break
 							}
 						}
 					}
-					if reliefNeed <= int64(c.Population)/4 && c.AvgHunger > 0 {
-						c.AvgHunger--
-					}
 				}
 			}
 
-			// Severe cohort famine / drought dehydration mortality
-			if c.AvgHunger >= 5 {
-				starveReq := maxInt(1, c.Population/2500)
-				cw, dead, _ := w.applyCohortCasualtiesWithCause(c, starveReq*2, starveReq, 0, "starvation")
-				if cw > 0 || dead > 0 {
-					ev := Event{
-						ID: w.NextID, Tick: w.Tick, ActorID: c.ID, Kind: "cohort_famine_deaths",
-						Action: Action{Kind: "wait", Location: c.District},
-						Payload: map[string]any{
-							"text":      fmt.Sprintf("%s suffered %d starvation deaths (%d weakened) in %s", c.Name, dead, cw, c.District),
-							"cohort_id": c.ID, "wounded": cw, "deaths": dead, "cause": "starvation",
-						},
-					}
-					w.NextID++
-					events = append(events, ev)
-				}
-			}
 			if c.AvgThirst >= 5 {
 				thirstReq := maxInt(1, c.Population/2500)
 				cw, dead, _ := w.applyCohortCasualtiesWithCause(c, thirstReq*2, thirstReq, 0, "dehydration")
@@ -756,8 +844,7 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 			if divisor := w.Catalog.Lifecycle.WastePerFoodDivisor; divisor > 0 && w.Catalog.Lifecycle.WasteItem != "" {
 				waste := c.DigestedFood / divisor
 				c.DigestedFood -= waste * divisor
-				nightsoilByDistrict[c.District] += waste
-				w.recordLedgerItemProduced(w.Catalog.Lifecycle.WasteItem, waste)
+				w.adjustDistrictNightsoil(c.District, w.Catalog.Lifecycle.WasteItem, waste, true)
 			}
 		}
 
@@ -773,32 +860,25 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 
 			for _, dID := range distKeys {
 				ds := w.DistrictStates[dID]
-				ns := nightsoilByDistrict[dID] + ds.NightsoilPool
-				ds.NightsoilPool = 0
+				ns := ds.NightsoilPool
 				latrineCond, _ := w.sanitationInfraCondition(ds)
 				collectionPct := 55 + (latrineCond*40)/100 // up to 95% collected when public sanitation facilities are maintained!
 				if collectionPct > 96 {
 					collectionPct = 96
 				}
 				collected := (ns * int64(collectionPct)) / 100
-				w.recordLedgerItemConsumed(wasteItem, ns-collected)
-				delivered := false
+				w.adjustDistrictNightsoil(dID, wasteItem, -(ns - collected), true)
 				if wasteItem != "" && collected > 0 {
 					for ci := range w.Cohorts {
 						c := &w.Cohorts[ci]
 						if c.Population > 0 && c.District == dID && w.Catalog.TagsConsume(cohortIdentityTags(w.Catalog, c.Profession), wasteItem) {
-							if c.ItemPool == nil {
-								c.ItemPool = map[string]int64{}
-							}
-							c.ItemPool[wasteItem] += collected
-							delivered = true
+							w.adjustDistrictNightsoil(dID, wasteItem, -collected, false)
+							w.adjustCohortItem(c, wasteItem, collected, false)
 							break
 						}
 					}
 				}
-				if !delivered {
-					ds.NightsoilPool = collected
-				}
+				ds = w.DistrictStates[dID]
 
 				// Sanitation balance: crowding & uncollected waste vs latrine & clean water recovery
 				dPop := popByDistrict[dID]
@@ -822,8 +902,6 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 
 	// 2. Daily Civic Stipends, Household/Retail Upkeep, Epidemic Settlement, Births & Elder Mortality (at 20:00)
 	if clock.Hour == 20 && clock.Minute == 0 {
-		events = append(events, w.settleDailyCivicPayrollAndRetailUpkeep(cal)...)
-
 		lc := w.Catalog.Lifecycle
 		birthPermille := lc.AnnualBirthPermille
 		if birthPermille <= 0 {
@@ -880,11 +958,7 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 						if need > c.ItemPool[itemID] {
 							need = c.ItemPool[itemID]
 						}
-						c.ItemPool[itemID] -= need
-						w.recordLedgerItemConsumed(itemID, need)
-						if c.ItemPool[itemID] <= 0 {
-							delete(c.ItemPool, itemID)
-						}
+						w.adjustCohortItem(c, itemID, -need, true)
 						dailyMedUsed += need
 						h := int(need) * spec.DiseaseCure * 2
 						if h > rem {
@@ -921,8 +995,7 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 								} else {
 									continue
 								}
-								hc.ItemPool[itemID] -= need
-								w.recordLedgerItemConsumed(itemID, need)
+								w.adjustCohortItem(hc, itemID, -need, true)
 								dailyMedUsed += need
 								h := int(need) * spec.DiseaseCure * 2
 								if h > rem {
@@ -945,6 +1018,7 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 					remSick -= immuneRecover
 				}
 				c.Sick -= cured
+				c.WoundedSick = min(c.WoundedSick, c.Wounded, c.Sick)
 				dailyCured += cured
 
 				if remSick > 0 {
@@ -956,16 +1030,9 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 					if disDead > remSick {
 						disDead = remSick
 					}
-					if disDead > c.Population-c.Wounded-c.Jailed {
-						disDead = maxInt(0, c.Population-c.Wounded-c.Jailed)
-					}
 					if disDead > 0 {
-						c.Sick -= disDead
-						c.Population -= disDead
-						c.CumulativeDeaths += disDead
-						reconcileCohortAgeBrackets(c)
-						w.recordDeathCause("disease", disDead)
-						dailyDiseaseDeaths += disDead
+						_, actual, _ := w.applyCohortCasualtiesWithCause(c, 0, disDead, 0, "disease")
+						dailyDiseaseDeaths += actual
 					}
 				}
 			}
@@ -1025,7 +1092,11 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 					births++
 				}
 				if births > 0 {
+					c.ensureResidents(c.Population)
+					c.issueResidents(births, 0)
+					hunger := c.hungerUnits(c.Population)
 					c.Population += births
+					c.setHungerUnits(c.Population, hunger)
 					c.Children += births
 					c.CumulativeBirths += births
 					w.TotalBirthsCount += int64(births)
@@ -1053,8 +1124,14 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 
 			// 2e. End-of-Year Age Bracket Progression (少 -> 壮 -> 老) on final day of each calendar year!
 			if cal.DayOfYear == daysInYear {
-				matured := c.Children / 12
-				retired := c.Adults / 32
+				// Keep the existing 12/32-year transition rates without discarding
+				// the fractional years of small populations.
+				c.ChildAgeRemainder += c.Children
+				c.AdultAgeRemainder += c.Adults
+				matured := c.ChildAgeRemainder / 12
+				retired := c.AdultAgeRemainder / 32
+				c.ChildAgeRemainder %= 12
+				c.AdultAgeRemainder %= 32
 				if matured > c.Children {
 					matured = c.Children
 				}
@@ -1128,9 +1205,6 @@ func (w *World) isCivicServiceProfession(profID string) bool {
 // service cohorts and focal actors (including payroll/admin embezzlement leakage), settles merchant retail
 // turnover with commercial sales tax, and applies daily structural & cold-season wear on durable household goods.
 func (w *World) settleDailyCivicPayrollAndRetailUpkeep(cal CalendarState) []Event {
-	if len(w.Cohorts) == 0 {
-		return nil
-	}
 	var events []Event
 	gov := w.Catalog.EffectiveGovernance()
 	stipendPerCap := int64(gov.CivicStipendPerCap)
@@ -1152,6 +1226,17 @@ func (w *World) settleDailyCivicPayrollAndRetailUpkeep(cal CalendarState) []Even
 			}
 		}
 		if totalReq > 0 && budget > 0 {
+			// One shared assessment covers cohorts and focal actors, including any
+			// payroll diverted to collectors. Carry integer remainders across payees.
+			budget = min(budget, totalReq)
+			var requestedThrough, allocatedThrough int64
+			allocatePay := func(req int64) int64 {
+				requestedThrough += req
+				entitledThrough := requestedThrough * budget / totalReq
+				pay := entitledThrough - allocatedThrough
+				allocatedThrough = entitledThrough
+				return pay
+			}
 			var totalPaid, totalEmbezzled int64
 			corr := w.AvgCorruption()
 			embPermille := gov.EmbezzleBasePermille + corr*2
@@ -1164,10 +1249,7 @@ func (w *World) settleDailyCivicPayrollAndRetailUpkeep(cal CalendarState) []Even
 					continue
 				}
 				req := int64(c.Population) * stipendPerCap
-				pay := req
-				if totalReq > budget {
-					pay = (req * budget) / totalReq
-				}
+				pay := allocatePay(req)
 				if pay <= 0 || w.PublicTreasury <= 0 {
 					continue
 				}
@@ -1195,7 +1277,7 @@ func (w *World) settleDailyCivicPayrollAndRetailUpkeep(cal CalendarState) []Even
 				if a.Dead || w.Tick < a.JailedUntil || !w.isCivicServiceProfession(a.Role) {
 					continue
 				}
-				paid := w.debitTreasury(stipendPerCap+1, "payroll")
+				paid := w.debitTreasury(allocatePay(stipendPerCap+1), "payroll")
 				if paid > 0 {
 					a.Money += int(paid)
 					totalPaid += paid
@@ -1256,11 +1338,7 @@ func (w *World) settleDailyCivicPayrollAndRetailUpkeep(cal CalendarState) []Even
 				wear = qty / 18
 			}
 			if wear > 0 {
-				c.ItemPool[itemID] -= wear
-				w.recordLedgerItemConsumed(itemID, wear)
-				if c.ItemPool[itemID] <= 0 {
-					delete(c.ItemPool, itemID)
-				}
+				w.adjustCohortItem(c, itemID, -wear, true)
 			}
 		}
 	}

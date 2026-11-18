@@ -71,6 +71,41 @@ type freightRoutePlan struct {
 	carrierTag     string
 }
 
+// FreightCapacityUsage records all dispatches sharing a road during one tick.
+// Persisting this state prevents a restored world from reusing the same capacity.
+type FreightCapacityUsage struct {
+	Tick        int64            `json:"tick"`
+	UsedBatches map[string]int64 `json:"used_batches"`
+}
+
+// freightRouteAvailableBatches returns the remaining bottleneck capacity of a
+// non-local route, using the road's existing seasonal and weather adjustments.
+func (w *World) freightRouteAvailableBatches(plan freightRoutePlan) int64 {
+	cal := CalendarAt(w.Tick, w.Catalog.Calendar)
+	var available int64
+	for i, edge := range plan.edges {
+		capacity, _, _, _, _, _ := w.edgeEffectiveLogistics(edge, cal)
+		if w.FreightUsage != nil && w.FreightUsage.Tick == w.Tick {
+			capacity -= w.FreightUsage.UsedBatches[plan.edgeKeys[i]]
+		}
+		if i == 0 || capacity < available {
+			available = capacity
+		}
+	}
+	return max(int64(0), available)
+}
+
+// reserveFreightRoute consumes batches already bounded by the available route
+// capacity. Market clearing and harvest delivery both use this same record.
+func (w *World) reserveFreightRoute(plan freightRoutePlan, batches int64) {
+	if w.FreightUsage == nil || w.FreightUsage.Tick != w.Tick {
+		w.FreightUsage = &FreightCapacityUsage{Tick: w.Tick, UsedBatches: make(map[string]int64)}
+	}
+	for _, edgeKey := range plan.edgeKeys {
+		w.FreightUsage.UsedBatches[edgeKey] += batches
+	}
+}
+
 func canonicalEdgeKey(a, b string) string {
 	if a < b {
 		return a + "<->" + b
@@ -119,8 +154,12 @@ func (w *World) edgeEffectiveLogistics(r Road, cal CalendarState) (capBatches in
 	return capBatches, feePermille, lossPermille, hazardPermille, medium, carrier
 }
 
-// planFreightRoute finds the lowest-fee freight path between two districts using Dijkstra over effective route fee.
-func (w *World) planFreightRoute(from, to string, cal CalendarState) (freightRoutePlan, bool) {
+// planFreightRoute finds the lowest-fee permitted path for this cargo item.
+// Embargoed jurisdictions are excluded during routing so an open bypass remains usable.
+func (w *World) planFreightRoute(from, to, itemID string, cal CalendarState) (freightRoutePlan, bool) {
+	if w.IsItemEmbargoedAt(from, "", itemID) || w.IsItemEmbargoedAt(to, "", itemID) {
+		return freightRoutePlan{}, false
+	}
 	if from == to {
 		return freightRoutePlan{primaryMedium: "local"}, true
 	}
@@ -153,6 +192,9 @@ func (w *World) planFreightRoute(from, to string, cal CalendarState) (freightRou
 		}
 		visited[u] = true
 		for _, edge := range w.Map.NeighborsOf(u) {
+			if w.IsItemEmbargoedAt(edge.To, "", itemID) {
+				continue
+			}
 			capacity, fee, _, _, _, _ := w.edgeEffectiveLogistics(edge, cal)
 			if capacity <= 0 || edge.Ticks <= 0 {
 				continue

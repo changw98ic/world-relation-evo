@@ -10,33 +10,37 @@ import (
 // Discovery is personal (KnowledgeBook.Records[id].KnownActors) and physical effects only manifest
 // where a facility is locally built/adopted (House.Facilities or Venue), never via a global tech tree.
 type TechSpec struct {
-	ID                       string         `json:"id"`
-	Name                     string         `json:"name"`
-	GrantedByTags            []string       `json:"granted_by_tags,omitempty"`
-	PrerequisiteTechs        []string       `json:"prerequisite_techs,omitempty"`
-	ResearchTicks            int            `json:"research_ticks,omitempty"`
-	ResearchEnergyCost       int            `json:"research_energy_cost,omitempty"`
-	ResearchInputs           map[string]int `json:"research_inputs,omitempty"`
-	FacilityName             string         `json:"facility_name,omitempty"`
-	AdoptInputs              map[string]int `json:"adopt_inputs,omitempty"`
-	AdoptTicks               int            `json:"adopt_ticks,omitempty"`
-	AdoptEnergyCost          int            `json:"adopt_energy_cost,omitempty"`
-	GrantsVenueFeature       string         `json:"grants_venue_feature,omitempty"`
-	AmbientFieldDeltaPerTick map[string]int `json:"ambient_field_delta_per_tick,omitempty"`
-	ProductionBonusPct       int            `json:"production_bonus_pct,omitempty"`
-	ShareWithFaction         bool           `json:"share_with_faction,omitempty"`
+	ID                 string         `json:"id"`
+	Name               string         `json:"name"`
+	GrantedByTags      []string       `json:"granted_by_tags,omitempty"`
+	PrerequisiteTechs  []string       `json:"prerequisite_techs,omitempty"`
+	ResearchTicks      int            `json:"research_ticks,omitempty"`
+	ResearchEnergyCost int            `json:"research_energy_cost,omitempty"`
+	ResearchInputs     map[string]int `json:"research_inputs,omitempty"`
+	FacilityName       string         `json:"facility_name,omitempty"`
+	AdoptInputs        map[string]int `json:"adopt_inputs,omitempty"`
+	AdoptTicks         int            `json:"adopt_ticks,omitempty"`
+	AdoptEnergyCost    int            `json:"adopt_energy_cost,omitempty"`
+	GrantsVenueFeature string         `json:"grants_venue_feature,omitempty"`
+	// Inputs are required operating resources; deltas are independent field effects
+	// such as pollution or cleanup and do not establish an operating requirement.
+	AmbientFieldInputsPerTick map[string]int `json:"ambient_field_inputs_per_tick,omitempty"`
+	AmbientFieldDeltaPerTick  map[string]int `json:"ambient_field_delta_per_tick,omitempty"`
+	ProductionBonusPct        int            `json:"production_bonus_pct,omitempty"`
+	ShareWithFaction          bool           `json:"share_with_faction,omitempty"`
 }
 
 // KnowledgeRecord tracks causal discovery, personal/archival diffusion, and physical site adoption
 // for a single TechSpec without ever broadcasting knowledge globally.
 type KnowledgeRecord struct {
-	TechID         string   `json:"tech_id"`
-	DiscovererID   string   `json:"discoverer_id,omitempty"`
-	DiscoveredTick int64    `json:"discovered_tick,omitempty"`
-	KnownActors    []string `json:"known_actors,omitempty"`
-	KnownFactions  []string `json:"known_factions,omitempty"`
-	AdoptedVenues  []string `json:"adopted_venues,omitempty"`
-	AdoptedHouses  []string `json:"adopted_houses,omitempty"`
+	TechID         string           `json:"tech_id"`
+	DiscovererID   string           `json:"discoverer_id,omitempty"`
+	DiscoveredTick int64            `json:"discovered_tick,omitempty"`
+	KnownActors    []string         `json:"known_actors,omitempty"`
+	KnownFactions  []string         `json:"known_factions,omitempty"`
+	AdoptedVenues  []string         `json:"adopted_venues,omitempty"`
+	AdoptedHouses  []string         `json:"adopted_houses,omitempty"`
+	OperatingTicks map[string]int64 `json:"operating_ticks,omitempty"`
 }
 
 // KnowledgeBook stores State A (Technical Knowledge & Local Facility Adoption) separately from
@@ -76,6 +80,7 @@ func CloneTechSpec(spec TechSpec) TechSpec {
 	out.ResearchInputs = cloneIntMapPreserveNil(spec.ResearchInputs)
 	out.AdoptInputs = cloneIntMapPreserveNil(spec.AdoptInputs)
 	out.AmbientFieldDeltaPerTick = cloneIntMapPreserveNil(spec.AmbientFieldDeltaPerTick)
+	out.AmbientFieldInputsPerTick = cloneIntMapPreserveNil(spec.AmbientFieldInputsPerTick)
 	return out
 }
 
@@ -97,6 +102,12 @@ func CloneKnowledgeBook(kb *KnowledgeBook) *KnowledgeBook {
 			rc.KnownFactions = cloneStringSlicePreserveNil(rec.KnownFactions)
 			rc.AdoptedVenues = cloneStringSlicePreserveNil(rec.AdoptedVenues)
 			rc.AdoptedHouses = cloneStringSlicePreserveNil(rec.AdoptedHouses)
+			if rec.OperatingTicks != nil {
+				rc.OperatingTicks = make(map[string]int64, len(rec.OperatingTicks))
+				for site, tick := range rec.OperatingTicks {
+					rc.OperatingTicks[site] = tick
+				}
+			}
 			out.Records[k] = &rc
 		}
 	}
@@ -215,10 +226,7 @@ func (w *World) applyResearchTech(a *Actor, x Action) []Event {
 	}
 	a.Energy -= tech.ResearchEnergyCost
 	for itemID, qty := range tech.ResearchInputs {
-		a.Items[itemID] -= qty
-		if a.Items[itemID] == 0 {
-			delete(a.Items, itemID)
-		}
+		w.adjustActorItem(a, itemID, -qty, true)
 	}
 	ticks := tech.ResearchTicks
 	if ticks < 1 {
@@ -242,6 +250,11 @@ func (w *World) finishResearchTech(a *Actor, t Task) []Event {
 	if !ok {
 		return nil
 	}
+	return w.unlockTechForActor(a, x, tech)
+}
+
+// unlockTechForActor records personal discovery/unlock of tech in KnowledgeBook and emits tech_discovered.
+func (w *World) unlockTechForActor(a *Actor, x Action, tech TechSpec) []Event {
 	kb := w.ensureKnowledge()
 	if kb.Records == nil {
 		kb.Records = make(map[string]*KnowledgeRecord)
@@ -355,14 +368,8 @@ func (w *World) applyTeachKnowledge(a *Actor, x Action, b *Actor) []Event {
 		if rcptShield > ch.PenetrationPower {
 			return fail("student enclosure shielding blocks transmission on " + ch.ID)
 		}
-		if ch.RangeKm > 0 {
-			srcCoord, hasSrc := w.Map.GeoCoordOfLocation(a.Location, a.VenueID)
-			dstCoord, hasDst := w.Map.GeoCoordOfLocation(b.Location, b.VenueID)
-			if hasSrc && hasDst && GeoDistanceKm(srcCoord, dstCoord) > ch.RangeKm {
-				return fail("student is outside channel range for " + ch.ID)
-			}
-		} else if b.Location != a.Location {
-			return fail("student is outside local channel range")
+		if !w.communicationRangeAllows(*a, *b, ch.RangeKm) {
+			return fail("student is outside channel range or distance is unavailable for " + ch.ID)
 		}
 		a.Energy -= ch.EnergyCost
 		usedChannel = ch.ID
@@ -489,6 +496,33 @@ func (w *World) applyTeachKnowledge(a *Actor, x Action, b *Actor) []Event {
 	return []Event{e}
 }
 
+func (w *World) facilityAdoptionSiteFailure(a Actor, x Action) string {
+	if x.HouseID != "" {
+		h := w.house(x.HouseID)
+		if h == nil || h.District != a.Location {
+			return "target house is not in current district"
+		}
+		if h.VenueID != "" && a.VenueID != h.VenueID {
+			return "must be at house venue " + h.VenueID + " to adopt facility there"
+		}
+		if a.InsideHouse != "" && a.InsideHouse != h.ID {
+			return "must leave current house or target current house"
+		}
+		if !h.CanAccess(a.ID) {
+			return "actor does not have access to house " + h.ID
+		}
+		return ""
+	}
+	v, ok := w.Map.VenueByID(x.Location)
+	if !ok {
+		return "unknown venue: " + x.Location
+	}
+	if a.InsideHouse != "" || a.VenueID != v.ID || (v.DistrictID != "" && v.DistrictID != a.Location) {
+		return "must be at venue " + v.ID + " to adopt facility there"
+	}
+	return ""
+}
+
 func (w *World) applyAdoptFacility(a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
 		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
@@ -512,16 +546,11 @@ func (w *World) applyAdoptFacility(a *Actor, x Action) []Event {
 
 	var targetVenueID string
 	if targetHouseID != "" {
+		x.HouseID = targetHouseID
+		if reason := w.facilityAdoptionSiteFailure(*a, x); reason != "" {
+			return fail(reason)
+		}
 		h := w.house(targetHouseID)
-		if h == nil || h.District != a.Location {
-			return fail("target house is not in current district")
-		}
-		if a.InsideHouse != "" && a.InsideHouse != targetHouseID {
-			return fail("must leave current house or target current house")
-		}
-		if !h.CanAccess(a.ID) {
-			return fail("actor does not have access to house " + h.ID)
-		}
 		if (tech.FacilityName != "" && h.HasFacility(tech.FacilityName)) || ActorHasTag(rec.AdoptedHouses, h.ID) {
 			return fail("facility already adopted at house " + h.ID)
 		}
@@ -541,15 +570,9 @@ func (w *World) applyAdoptFacility(a *Actor, x Action) []Event {
 		if targetVenueID == "" {
 			return fail("no target house or venue for facility adoption")
 		}
-		v, ok := w.Map.VenueByID(targetVenueID)
-		if !ok {
-			return fail("unknown venue: " + targetVenueID)
-		}
-		if v.DistrictID != "" && v.DistrictID != a.Location {
-			return fail("target venue is not in current district")
-		}
-		if a.VenueID != "" && a.VenueID != targetVenueID {
-			return fail("must be at venue " + targetVenueID + " to adopt facility there")
+		x.Location = targetVenueID
+		if reason := w.facilityAdoptionSiteFailure(*a, x); reason != "" {
+			return fail(reason)
 		}
 		if ActorHasTag(rec.AdoptedVenues, targetVenueID) {
 			return fail("facility already adopted at venue " + targetVenueID)
@@ -567,10 +590,7 @@ func (w *World) applyAdoptFacility(a *Actor, x Action) []Event {
 	}
 	a.Energy -= tech.AdoptEnergyCost
 	for itemID, qty := range tech.AdoptInputs {
-		a.Items[itemID] -= qty
-		if a.Items[itemID] == 0 {
-			delete(a.Items, itemID)
-		}
+		w.adjustActorItem(a, itemID, -qty, true)
 	}
 
 	ticks := tech.AdoptTicks
@@ -595,6 +615,9 @@ func (w *World) applyAdoptFacility(a *Actor, x Action) []Event {
 
 func (w *World) finishAdoptFacility(a *Actor, t Task) []Event {
 	x := t.Action
+	if reason := w.facilityAdoptionSiteFailure(*a, x); reason != "" {
+		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+	}
 	tech, ok := w.Catalog.Techs[x.TechID]
 	if !ok {
 		return nil
@@ -685,15 +708,21 @@ func (w *World) FacilityProductionBonusPct(a Actor) int {
 		if !ok || tech.ProductionBonusPct <= 0 {
 			continue
 		}
-		if a.InsideHouse != "" {
-			if ActorHasTag(rec.AdoptedHouses, a.InsideHouse) {
-				bonusPct += tech.ProductionBonusPct
-			}
-		} else if a.VenueID != "" {
-			if ActorHasTag(rec.AdoptedVenues, a.VenueID) {
-				bonusPct += tech.ProductionBonusPct
+		siteKey := ""
+		if a.InsideHouse != "" && ActorHasTag(rec.AdoptedHouses, a.InsideHouse) {
+			siteKey = "house:" + a.InsideHouse
+		} else if a.InsideHouse == "" && a.VenueID != "" && ActorHasTag(rec.AdoptedVenues, a.VenueID) {
+			siteKey = "venue:" + a.VenueID
+		}
+		if siteKey == "" || w.isVenuePowerBlocked(a.VenueID) {
+			continue
+		}
+		if len(tech.AmbientFieldInputsPerTick) > 0 {
+			if tick, ran := rec.OperatingTicks[siteKey]; !ran || tick != w.Tick {
+				continue
 			}
 		}
+		bonusPct += tech.ProductionBonusPct
 	}
 	return bonusPct
 }
@@ -727,17 +756,27 @@ func (w *World) stepAdoptedFacilities() []Event {
 			continue
 		}
 		tech, ok := w.Catalog.Techs[techID]
-		if !ok || len(tech.AmbientFieldDeltaPerTick) == 0 {
+		if !ok || (len(tech.AmbientFieldDeltaPerTick) == 0 && len(tech.AmbientFieldInputsPerTick) == 0) {
 			continue
 		}
-		fieldKeys := make([]string, 0, len(tech.AmbientFieldDeltaPerTick))
+		fieldSet := make(map[string]bool)
 		for fk := range tech.AmbientFieldDeltaPerTick {
+			fieldSet[fk] = true
+		}
+		for fk := range tech.AmbientFieldInputsPerTick {
+			fieldSet[fk] = true
+		}
+		fieldKeys := make([]string, 0, len(fieldSet))
+		for fk := range fieldSet {
 			fieldKeys = append(fieldKeys, fk)
 		}
 		sort.Strings(fieldKeys)
 
-		applyAtSite := func(siteID, regID string) {
-			if regID == "" {
+		applyAtSite := func(siteID, siteKey, venueID, regID string) {
+			if regID == "" || w.isVenuePowerBlocked(venueID) {
+				return
+			}
+			if tick, ran := rec.OperatingTicks[siteKey]; ran && tick == w.Tick {
 				return
 			}
 			var reg *GeoRegion
@@ -750,19 +789,30 @@ func (w *World) stepAdoptedFacilities() []Event {
 			if reg == nil {
 				return
 			}
+			// Check every operating input before consuming any field. A short
+			// supply leaves all resources intact and grants no operating bonus.
+			for fk, qty := range tech.AmbientFieldInputsPerTick {
+				if reg.AmbientFields[fk] < qty {
+					return
+				}
+			}
 			if reg.AmbientFields == nil {
 				reg.AmbientFields = make(map[string]int, len(fieldKeys))
 			}
+			if rec.OperatingTicks == nil {
+				rec.OperatingTicks = make(map[string]int64)
+			}
+			rec.OperatingTicks[siteKey] = w.Tick
 			for _, fk := range fieldKeys {
 				d := tech.AmbientFieldDeltaPerTick[fk]
-				if d == 0 {
+				if d == 0 && tech.AmbientFieldInputsPerTick[fk] == 0 {
 					continue
 				}
 				if fk == "spirit_qi" && d > 0 && w.HasWorldLaw("qi_tide_permille") {
 					d = (d * w.EffectiveWorldLaw("qi_tide_permille")) / 1000
 				}
 				oldVal := reg.AmbientFields[fk]
-				newVal := oldVal + d
+				newVal := oldVal - tech.AmbientFieldInputsPerTick[fk] + d
 				if newVal < 0 {
 					newVal = 0
 				}
@@ -783,12 +833,12 @@ func (w *World) stepAdoptedFacilities() []Event {
 
 		for _, venueID := range rec.AdoptedVenues {
 			regID := w.Map.GeoRegionIDForLocation("", venueID)
-			applyAtSite(venueID, regID)
+			applyAtSite(venueID, "venue:"+venueID, venueID, regID)
 		}
 		for _, houseID := range rec.AdoptedHouses {
 			if h := w.house(houseID); h != nil {
 				regID := w.Map.GeoRegionIDForLocation(h.District, h.VenueID)
-				applyAtSite(houseID, regID)
+				applyAtSite(houseID, "house:"+houseID, h.VenueID, regID)
 			}
 		}
 	}
@@ -1092,12 +1142,17 @@ func (w *World) IsActionBlockedByWorldLaw(a Actor, x Action) (bool, string) {
 		return false, ""
 	}
 	if w.EffectiveWorldLaw("firearms_disabled") > 0 {
-		switch x.Kind {
-		case "attack":
-			if strings.Contains(strings.ToLower(x.Item), "firearm") || strings.Contains(strings.ToLower(x.Channel), "firearm") {
-				return true, "firearms disabled by fundamental world law"
-			}
-		case "craft":
+		firearm := false
+		if x.Kind == "attack" {
+			firearm = strings.Contains(strings.ToLower(x.Channel), "firearm") || strings.Contains(strings.ToLower(x.Item), "firearm")
+		}
+		if spec, ok := w.Catalog.ActionSpecs[x.Kind]; ok && spec.Attack != nil {
+			firearm = firearm || ActorHasTag(spec.GrantedByTags, "firearm") || strings.Contains(strings.ToLower(x.Channel), "firearm")
+		}
+		if firearm {
+			return true, "firearms disabled by fundamental world law"
+		}
+		if x.Kind == "craft" {
 			if r, ok := w.Catalog.RecipeByID(x.RecipeID); ok {
 				return IsRecipeBlockedByWorldLaw(w.EffectiveWorldLaws(), r)
 			}

@@ -100,13 +100,7 @@ func (td *TieredDecider) Decide(ctx context.Context, p sim.Perception) (sim.Acti
 	if !td.acquireFocalSlot(p.Tick) {
 		return active.Decide(ctx, p)
 	}
-	act, err := td.Focal.Decide(ctx, p)
-	if err != nil && ctx.Err() == nil {
-		if act, err = td.Focal.Decide(ctx, p); err != nil && ctx.Err() == nil {
-			return active.Decide(ctx, p)
-		}
-	}
-	return act, err
+	return td.Focal.Decide(ctx, p)
 }
 
 func (td *TieredDecider) qualifiesForFocal(p sim.Perception) bool {

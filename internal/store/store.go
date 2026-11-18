@@ -75,11 +75,11 @@ func (s *Store) Load(ctx context.Context, id string) (*sim.World, error) {
 	if err := s.db.QueryRowContext(ctx, `SELECT state FROM worlds WHERE id=$1`, id).Scan(&data); err != nil {
 		return nil, err
 	}
-	var w sim.World
-	if err := json.Unmarshal(data, &w); err != nil {
+	w, err := sim.DecodeWorldSnapshot(data)
+	if err != nil {
 		return nil, fmt.Errorf("decode world %q: %w", id, err)
 	}
-	return &w, nil
+	return w, nil
 }
 
 // Save commits a settled batch and its resulting snapshot together. Callers
@@ -187,11 +187,11 @@ func (s *Store) LoadNearestCheckpoint(ctx context.Context, worldID string, maxTi
 	if err != nil {
 		return nil, nil, err
 	}
-	var w sim.World
-	if err := json.Unmarshal(raw, &w); err != nil {
+	w, err := sim.DecodeWorldSnapshot(raw)
+	if err != nil {
 		return nil, nil, fmt.Errorf("unmarshal checkpoint world=%q: %w", worldID, err)
 	}
-	return &w, raw, nil
+	return w, raw, nil
 }
 
 // SaveDecisionLog persists the settled actor decisions for a single tick.

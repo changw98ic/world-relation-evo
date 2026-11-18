@@ -1,0 +1,1388 @@
+{
+  "original_count": 73,
+  "overall_complete": true,
+  "records": [
+    {
+      "id": "ECO-01",
+      "title": "普通灾害和兽潮只伤群体，已展开人物免疫",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestEcologyAudit01ActorsAndMembersShareDisasterExposure",
+        "TestEcologyAudit01ChildrenHaveSameDisasterExposure",
+        "TestEcologyAudit01ThreatSurgeActorsAndMembers"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestEcologyAudit01ActorsAndMembersShareDisasterExposure",
+        "TestEcologyAudit01ChildrenHaveSameDisasterExposure",
+        "TestEcologyAudit01ThreatSurgeActorsAndMembers"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "ECO-02",
+      "title": "一份救济水保护整个千人群体",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestEcologyAudit02ReliefCoverageFollowsAmount"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestEcologyAudit02ReliefCoverageFollowsAmount"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "ECO-03",
+      "title": "猎人瞬间剿兽至不连通地区",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestEcologyAudit03PatrolExposureUsesActualLocation",
+        "TestEcologyAudit03PatrolTravelsWorksAndReturns"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestEcologyAudit03PatrolExposureUsesActualLocation",
+        "TestEcologyAudit03PatrolTravelsWorksAndReturns"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "ECO-04",
+      "title": "野外遭遇掉落不扣来源且漏记产出",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestEcologyAudit04EncounterConsumesFiniteSourceAndAccountsOutput",
+        "TestEcologyAudit04IndividualHuntUsesSourceAndLedger"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestEcologyAudit04EncounterConsumesFiniteSourceAndAccountsOutput",
+        "TestEcologyAudit04IndividualHuntUsesSourceAndLedger"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "ECO-05",
+      "title": "零掉落概率仍掉落",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestEcologyAudit05ZeroAndFractionalDrops"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestEcologyAudit05ZeroAndFractionalDrops"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "ECO-06",
+      "title": "停工休养仍遭受职业事故",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestEcologyAudit06AccidentsRequireActualAvailableWork"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestEcologyAudit06AccidentsRequireActualAvailableWork"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "ECO-07",
+      "title": "灾害到期后继续影响产量",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestEcologyAudit07DisasterExpiresAtItsExactTick"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestEcologyAudit07DisasterExpiresAtItsExactTick"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "ECO-08",
+      "title": "显式零天气产量被忽略",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestEcologyAudit08ExplicitZeroYieldStopsProduction",
+        "TestEcologyAudit08ZeroYieldBlocksIndividualAndCohortWork"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestEcologyAudit08ExplicitZeroYieldStopsProduction",
+        "TestEcologyAudit08ZeroYieldBlocksIndividualAndCohortWork"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "ECO-09",
+      "title": "计算受灾人数为零仍至少伤两人",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestEcologyAudit09ZeroExposureHasNoMinimumInjuries"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestEcologyAudit09ZeroExposureHasNoMinimumInjuries"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "ECO-10",
+      "title": "林地可采集标志没有对应资源",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestEcologyAudit10ForageFeatureHasSource"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestEcologyAudit10ForageFeatureHasSource"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "ECO-11",
+      "title": "生物补充不依赖繁殖来源及成熟期",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestEcologyAudit11ReproductionRequiresParentsAndMaturation"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestEcologyAudit11ReproductionRequiresParentsAndMaturation"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "ECO-12",
+      "title": "所有地区自动生成可饮用水源",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestEcologyAudit12WaterNeedsDeclaredSource"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestEcologyAudit12WaterNeedsDeclaredSource"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "ECO-13",
+      "title": "日常天气补水与洪水不连接真实水系",
+      "status": "current_independent_controls_passed",
+      "historical_tests": [
+        "TestEcologyAudit13FloodRequiresConnectedOverflow",
+        "TestEcologyAudit13UpstreamExtractionChangesDownstreamWater"
+      ],
+      "current_tests": [
+        "TestLawEcologyWithdrawalReducesNextDownstreamDelivery",
+        "TestLawEcologyFloodRequiresActualConnectedOverflow"
+      ],
+      "historical_probe_passed": [],
+      "historical_probe_not_passed": [
+        "TestEcologyAudit13FloodRequiresConnectedOverflow",
+        "TestEcologyAudit13UpstreamExtractionChangesDownstreamWater"
+      ],
+      "evidence": "historical-final-reserve-complete-probes.jsonl",
+      "qualification": "See docs/testing/full-repair-2026-11-17.md for retained historical failures and changed policies; not all historical assertions pass."
+    },
+    {
+      "id": "ECO-14",
+      "title": "所有资源保留5%不可开采",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestEcologyAudit14LastResourceUnitCanBeExtracted"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestEcologyAudit14LastResourceUnitCanBeExtracted"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "ECO-15",
+      "title": "默认仪式直接改变灾害持续时间和普通野兽活动",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestEcologyAudit15IndividualOrdinaryRitualCannotChangeNature",
+        "TestEcologyAudit15RitualObjectiveEffectsRequireExplicitCapability"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestEcologyAudit15IndividualOrdinaryRitualCannotChangeNature",
+        "TestEcologyAudit15RitualObjectiveEffectsRequireExplicitCapability"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "AG1",
+      "title": "异地所有者的作物成熟后没有收获出口",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestAgricultureProductionAbsentCaretakerShareStaysLocal",
+        "TestAgricultureProductionAutomaticRemoteDelivery",
+        "TestAgricultureProductionHarvestSharesFreightCapacity",
+        "TestAgricultureProductionRemoteHarvestAndDelivery",
+        "TestAgricultureProductionStoredOwnerUsesOwnLabor",
+        "TestFreightCapacitySharesEdgesAndSurvivesSnapshot",
+        "TestFreightMarketSharesCapacityAcrossCallsAndOtherDispatches"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestAgricultureProductionAbsentCaretakerShareStaysLocal",
+        "TestAgricultureProductionAutomaticRemoteDelivery",
+        "TestAgricultureProductionHarvestSharesFreightCapacity",
+        "TestAgricultureProductionRemoteHarvestAndDelivery",
+        "TestAgricultureProductionStoredOwnerUsesOwnLabor",
+        "TestFreightCapacitySharesEdgesAndSurvivesSnapshot",
+        "TestFreightMarketSharesCapacityAcrossCallsAndOtherDispatches"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "AG2",
+      "title": "展开群体最后一人会把在产作物留给零人口群体",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestAgricultureProductionTransferPreservesAssetsAndCare",
+        "TestAgricultureProductionTransferRetainsAnimalBatchDebt",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner",
+        "TestPopulationLastAnonymousHydrationTransfersGrowingAssets"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestAgricultureProductionTransferPreservesAssetsAndCare",
+        "TestAgricultureProductionTransferRetainsAnimalBatchDebt",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner",
+        "TestPopulationLastAnonymousHydrationTransfersGrowingAssets"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "AG3",
+      "title": "死亡继承遗漏在产作物与保留亲畜",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestAgricultureProductionTransferPreservesAssetsAndCare",
+        "TestAgricultureProductionTransferRetainsAnimalBatchDebt",
+        "TestPopulationFix02InheritancePrecedesEscheat",
+        "TestPopulationFix02StoredHeirAndUnclaimedEstate",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestAgricultureProductionTransferPreservesAssetsAndCare",
+        "TestAgricultureProductionTransferRetainsAnimalBatchDebt",
+        "TestPopulationFix02InheritancePrecedesEscheat",
+        "TestPopulationFix02StoredHeirAndUnclaimedEstate",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "AG4",
+      "title": "田产面积、占用与使用权没有进入农业结算",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestAgricultureProductionFieldAreaAndPersistence",
+        "TestAgricultureProductionZeroInitialLandBudget",
+        "TestPopulationLastAnonymousHydrationTransfersGrowingAssets"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestAgricultureProductionFieldAreaAndPersistence",
+        "TestAgricultureProductionZeroInitialLandBudget",
+        "TestPopulationLastAnonymousHydrationTransfersGrowingAssets"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "AG5",
+      "title": "被监禁或零劳动人口仍能照料和自动收获",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestAgricultureProductionCareUsesLaborAndExplicitConsent",
+        "TestAgricultureProductionEnergyExcludesStoredMembers",
+        "TestAgricultureProductionStoredOwnerUsesOwnLabor",
+        "TestPhysicalCohortWorkTakesConfiguredTime"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestAgricultureProductionCareUsesLaborAndExplicitConsent",
+        "TestAgricultureProductionEnergyExcludesStoredMembers",
+        "TestAgricultureProductionStoredOwnerUsesOwnLabor",
+        "TestPhysicalCohortWorkTakesConfiguredTime"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "AG6",
+      "title": "生物配方消耗肥料与工具却丢弃增产结果",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestAgricultureProductionFertilizerEnvironmentAndSnapshot",
+        "TestAgricultureProductionPartialFertilizerAndBatchParity",
+        "TestBiologicalOutputUsesConfiguredQuantity",
+        "TestFarmerDiversifiedTasksAndCompostYield"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestAgricultureProductionFertilizerEnvironmentAndSnapshot",
+        "TestAgricultureProductionPartialFertilizerAndBatchParity",
+        "TestBiologicalOutputUsesConfiguredQuantity"
+      ],
+      "historical_probe_not_passed": [
+        "TestFarmerDiversifiedTasksAndCompostYield"
+      ],
+      "evidence": "historical-final-reserve-complete-probes.jsonl",
+      "qualification": "See docs/testing/full-repair-2026-11-17.md for retained historical failures and changed policies; not all historical assertions pass."
+    },
+    {
+      "id": "AG7",
+      "title": "农业环境产量规则被固定产量覆盖",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestAgricultureProductionFertilizerEnvironmentAndSnapshot",
+        "TestAgricultureProductionPartialFertilizerAndBatchParity",
+        "TestEcologyAudit08ZeroYieldBlocksIndividualAndCohortWork"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestAgricultureProductionFertilizerEnvironmentAndSnapshot",
+        "TestAgricultureProductionPartialFertilizerAndBatchParity",
+        "TestEcologyAudit08ZeroYieldBlocksIndividualAndCohortWork"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "AG8",
+      "title": "家畜作为库存没有持续生存成本，缺料生物只暂停",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestAgricultureProductionAnimalClockSurvivesReservationAndReturn",
+        "TestAgricultureProductionEmptyLivingCareSnapshot",
+        "TestAgricultureProductionLivingStockCostsAndDeath",
+        "TestAgricultureProductionParentDeathPreservesMatureGoods",
+        "TestAgricultureProductionTransferRetainsAnimalBatchDebt",
+        "TestPhysicalGrowthCannotAdvanceWithoutSupplies"
+      ],
+      "current_tests": [
+        "TestPlantSurvivalClockContinuesDuringPowerLossAndSnapshotReload",
+        "TestPlantCanRecoverWhenServiceReturnsBeforeItsDeclaredDeadline",
+        "TestShippedPlantsAndGrowingAnimalsDeclareCareFailurePeriods",
+        "TestLawLivingStockConsumesSuppliesAndCannotSurviveUnfundedForever"
+      ],
+      "historical_probe_passed": [
+        "TestAgricultureProductionAnimalClockSurvivesReservationAndReturn",
+        "TestAgricultureProductionEmptyLivingCareSnapshot",
+        "TestAgricultureProductionLivingStockCostsAndDeath",
+        "TestAgricultureProductionParentDeathPreservesMatureGoods",
+        "TestAgricultureProductionTransferRetainsAnimalBatchDebt",
+        "TestPhysicalGrowthCannotAdvanceWithoutSupplies"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "AG9",
+      "title": "公会自动接管照料没有同意、报酬或补给归属协议",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestAgricultureProductionAbsentCaretakerShareStaysLocal",
+        "TestAgricultureProductionCareUsesLaborAndExplicitConsent",
+        "TestAgricultureProductionRemoteHarvestAndDelivery",
+        "TestPhysicalRemoteOwnerCannotSupplyAbsentLocalCaretaker",
+        "TestPhysicalRemoteOwnerUsesLocalCaretakerAfterDehydration",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestAgricultureProductionAbsentCaretakerShareStaysLocal",
+        "TestAgricultureProductionCareUsesLaborAndExplicitConsent",
+        "TestAgricultureProductionRemoteHarvestAndDelivery",
+        "TestPhysicalRemoteOwnerCannotSupplyAbsentLocalCaretaker",
+        "TestPhysicalRemoteOwnerUsesLocalCaretakerAfterDehydration",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "AG10",
+      "title": "第二个兼并债权人覆盖第一个债权人的收益权",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestEconomyAnnexationCapPreservesEarlierCreditors",
+        "TestEconomyMultipleCreditorsRetainSharesAndReceiveRent",
+        "TestEconomyRentRoundingDoesNotMultiplyMinimum"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestEconomyAnnexationCapPreservesEarlierCreditors",
+        "TestEconomyMultipleCreditorsRetainSharesAndReceiveRent",
+        "TestEconomyRentRoundingDoesNotMultiplyMinimum"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "POP-01",
+      "title": "群体恢复供水后仍持续脱水死亡",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestPopulationFix01WaterRestoresExistingThirst"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestPopulationFix01WaterRestoresExistingThirst"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "POP-02",
+      "title": "死亡处理抢先转走继承现金",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestPopulationFix02InheritancePrecedesEscheat",
+        "TestPopulationFix02StoredHeirAndUnclaimedEstate",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestPopulationFix02InheritancePrecedesEscheat",
+        "TestPopulationFix02StoredHeirAndUnclaimedEstate",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "POP-03",
+      "title": "自动降级使已婚配偶永久失联",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestPopulationFix03MarriageKeepsResolvableIdentity",
+        "TestPopulationStoredMembersSurviveCohortPromotion",
+        "TestPopulationStoredMembersSurviveReintegration"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestPopulationFix03MarriageKeepsResolvableIdentity",
+        "TestPopulationStoredMembersSurviveCohortPromotion",
+        "TestPopulationStoredMembersSurviveReintegration"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "POP-04",
+      "title": "LOD 把老人转成年轻人并清除口渴",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestPhysicalDigestedFoodSurvivesHydrationRoundTrip",
+        "TestPopulationAnonymousDeathsSettleEnergyRemainder",
+        "TestPopulationAnonymousEnergySurvivesPromotionAndUprising",
+        "TestPopulationAnonymousEnergySurvivesReintegration",
+        "TestPopulationAnonymousHydrationPreservesPaidEnergy",
+        "TestPopulationFix04AgeAndPhysiologySurviveLOD",
+        "TestPopulationNamedLODLeavesAnonymousEnergyUnchanged",
+        "TestPopulationStoredMembersSurviveCohortPromotion",
+        "TestPopulationUprisingOnlyMovesAnonymousAdults"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestPhysicalDigestedFoodSurvivesHydrationRoundTrip",
+        "TestPopulationAnonymousDeathsSettleEnergyRemainder",
+        "TestPopulationAnonymousEnergySurvivesPromotionAndUprising",
+        "TestPopulationAnonymousEnergySurvivesReintegration",
+        "TestPopulationAnonymousHydrationPreservesPaidEnergy",
+        "TestPopulationFix04AgeAndPhysiologySurviveLOD",
+        "TestPopulationNamedLODLeavesAnonymousEnergyUnchanged",
+        "TestPopulationStoredMembersSurviveCohortPromotion",
+        "TestPopulationUprisingOnlyMovesAnonymousAdults"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "POP-05",
+      "title": "病伤人口被排除在饥荒和老年死亡之外",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestPopulationFix05SickAndWoundedCanDie",
+        "TestPopulationMortalityReportsRemovedStatuses",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce",
+        "TestSpotlightRumorThreeDayMillionPopConservation"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestPopulationFix05SickAndWoundedCanDie",
+        "TestPopulationMortalityReportsRemovedStatuses",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce",
+        "TestSpotlightRumorThreeDayMillionPopConservation"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "POP-06",
+      "title": "新生儿进入异区同职业群体",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestPopulationFix06NewbornStaysInLocalDistrict"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestPopulationFix06NewbornStaysInLocalDistrict"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "POP-07",
+      "title": "直接合并病伤人物重复扣除同一个人",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestPopulationFix07WoundedSickOverlapCountsOnce",
+        "TestPopulationMortalityReportsRemovedStatuses",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestPopulationFix07WoundedSickOverlapCountsOnce",
+        "TestPopulationMortalityReportsRemovedStatuses",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "POP-08",
+      "title": "小群体年龄层永远停止成熟",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestPopulationFix08SmallCohortsKeepAgeRemainders",
+        "TestPopulationStoredMembersSurviveReintegration"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestPopulationFix08SmallCohortsKeepAgeRemainders",
+        "TestPopulationStoredMembersSurviveReintegration"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "POP-09",
+      "title": "监禁无需食物和水仍能恢复",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestPopulationFix09PrisonersConsumeRealRations",
+        "TestPopulationStoredSentenceExpiresExactlyOnce"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestPopulationFix09PrisonersConsumeRealRations",
+        "TestPopulationStoredSentenceExpiresExactlyOnce"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "POP-10",
+      "title": "冷伤在临死前停止",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestPopulationFix10ColdExposureCanKill",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestPopulationFix10ColdExposureCanKill",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "POP-11",
+      "title": "LOD 清除身体形态和资源槽，改变生理规则并凭空补充资源",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestPopulationEmptyMembersHaveCanonicalJSON",
+        "TestPopulationFix11FormAndResourceSlotsSurvivePersistentLOD",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner",
+        "TestPopulationLastAnonymousHydrationTransfersGrowingAssets",
+        "TestPopulationStoredActorMustHydrateBeforeIndividualExecution"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestPopulationEmptyMembersHaveCanonicalJSON",
+        "TestPopulationFix11FormAndResourceSlotsSurvivePersistentLOD",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner",
+        "TestPopulationLastAnonymousHydrationTransfersGrowingAssets",
+        "TestPopulationStoredActorMustHydrateBeforeIndividualExecution"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "POP-12",
+      "title": "LOD 丢失个人知识、附加职业与职业经验",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestPopulationFix12KnowledgeAndProfessionXPSurviveLOD",
+        "TestPopulationStoredMembersSurviveCohortPromotion",
+        "TestPopulationStoredMembersSurviveReintegration",
+        "TestPopulationUprisingOnlyMovesAnonymousAdults"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestPopulationFix12KnowledgeAndProfessionXPSurviveLOD",
+        "TestPopulationStoredMembersSurviveCohortPromotion",
+        "TestPopulationStoredMembersSurviveReintegration",
+        "TestPopulationUprisingOnlyMovesAnonymousAdults"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "PROD-01",
+      "title": "生长配方吃掉增产材料，但增产量被强制清零",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestAgricultureProductionFertilizerEnvironmentAndSnapshot",
+        "TestAgricultureProductionPartialFertilizerAndBatchParity",
+        "TestBiologicalOutputUsesConfiguredQuantity"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestAgricultureProductionFertilizerEnvironmentAndSnapshot",
+        "TestAgricultureProductionPartialFertilizerAndBatchParity",
+        "TestBiologicalOutputUsesConfiguredQuantity"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "PROD-02",
+      "title": "群体与个体的同等级同配方产量不同",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestAgricultureProductionMaterialAndNutritionBudgets",
+        "TestAgricultureProductionParityEnergyAndFacilityCapacity",
+        "TestAgricultureProductionPartialFertilizerAndBatchParity"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestAgricultureProductionMaterialAndNutritionBudgets",
+        "TestAgricultureProductionParityEnergyAndFacilityCapacity",
+        "TestAgricultureProductionPartialFertilizerAndBatchParity"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "PROD-03",
+      "title": "制作技能直接增加物品件数，缺少物质和营养约束",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestAgricultureProductionMaterialAndNutritionBudgets",
+        "TestCareerProgressionScholarToXiucaiAndBlacksmithRanks",
+        "TestCustomProfessionWorksWithoutCodeChanges",
+        "TestGenreDecoupledSciFiColonyPackWithoutCodeChanges"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestAgricultureProductionMaterialAndNutritionBudgets",
+        "TestCareerProgressionScholarToXiucaiAndBlacksmithRanks",
+        "TestCustomProfessionWorksWithoutCodeChanges",
+        "TestGenreDecoupledSciFiColonyPackWithoutCodeChanges"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "PROD-04",
+      "title": "电网遇到无效最短路径后放弃有效旁路",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestProductionPowerBypassesUndeliverablePaths"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestProductionPowerBypassesUndeliverablePaths"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "PROD-05",
+      "title": "设施停电只阻止开工，已开工生产照常完成",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestProductionCraftPausesThroughPowerCut"
+      ],
+      "current_tests": [
+        "TestPlantSurvivalClockContinuesDuringPowerLossAndSnapshotReload",
+        "TestPlantCanRecoverWhenServiceReturnsBeforeItsDeclaredDeadline",
+        "TestPowerLossPreservesNonlivingWorkWithoutBiologicalMortality"
+      ],
+      "historical_probe_passed": [
+        "TestProductionCraftPausesThroughPowerCut"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "PROD-06",
+      "title": "有射程但缺坐标时跳过范围限制",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestProductionFiniteAttackRangeNeedsKnownDistance",
+        "TestProductionKnowledgeTeachingNeedsKnownChannelDistance"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestProductionFiniteAttackRangeNeedsKnownDistance",
+        "TestProductionKnowledgeTeachingNeedsKnownChannelDistance"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "PROD-07",
+      "title": "多tick攻击只在开始检查距离，结算能命中已离开的目标",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestProductionDelayedAttackRevalidatesTarget",
+        "TestRootAuditFirearmLawCoversDeclarativeAndDelayedActions"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestProductionDelayedAttackRevalidatesTarget",
+        "TestRootAuditFirearmLawCoversDeclarativeAndDelayedActions"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "PROD-08",
+      "title": "群体生产不检查配方所需体力，合法高耗能配方会扣到负值",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestAgricultureProductionEnergyExcludesStoredMembers",
+        "TestAgricultureProductionParityEnergyAndFacilityCapacity",
+        "TestAgricultureProductionShiftUsesActualEnergyCost"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestAgricultureProductionEnergyExcludesStoredMembers",
+        "TestAgricultureProductionParityEnergyAndFacilityCapacity",
+        "TestAgricultureProductionShiftUsesActualEnergyCost"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "PROD-09",
+      "title": "设施没有并行容量，0耐久房屋设施仍可生产",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestAgricultureProductionCohortPowerPauseAndRestore",
+        "TestAgricultureProductionParityEnergyAndFacilityCapacity",
+        "TestPhysicalCohortWorkTakesConfiguredTime",
+        "TestPhysicalCompostIsProcessedAfterDeclaredCycle"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestAgricultureProductionCohortPowerPauseAndRestore",
+        "TestAgricultureProductionParityEnergyAndFacilityCapacity",
+        "TestPhysicalCohortWorkTakesConfiguredTime",
+        "TestPhysicalCompostIsProcessedAfterDeclaredCycle"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "PROD-10",
+      "title": "工具磨损按批次向上取整，规模越小工具消耗率越高",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestAgricultureProductionToolWearIndependentOfBatchSize",
+        "TestAgricultureProductionTransferPreservesAssetsAndCare"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestAgricultureProductionToolWearIndependentOfBatchSize",
+        "TestAgricultureProductionTransferPreservesAssetsAndCare"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "PROD-11",
+      "title": "研发与建设实际消耗材料，但完全漏记物品消耗账",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestProductionResearchAndBuildRecordMaterialConsumption"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestProductionResearchAndBuildRecordMaterialConsumption"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "PROD-12",
+      "title": "采用房屋设施只检查同地区，允许跨地点施工",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestProductionHouseConstructionRequiresActualSite"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestProductionHouseConstructionRequiresActualSite"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "PROD-13",
+      "title": "消耗环境资源的设施耗尽资源后仍保留全部增产效果",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestMultiGenre_SciFiTechDiffusion_AndImmutableWorldLaws",
+        "TestMultiGenre_XianxiaSpiritArray_DiscoveryTeachBuildAndAmbientDrain",
+        "TestProductionCraftAccelerationStopsWhenOperatingInputsRunOut",
+        "TestProductionFacilityConsumesOnlyFundedPoweredOperatingTicks",
+        "TestProductionFacilityInputDefinitionValidation",
+        "TestProductionFacilityInputsCompeteAndEffectsAreIndependent"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestMultiGenre_SciFiTechDiffusion_AndImmutableWorldLaws",
+        "TestMultiGenre_XianxiaSpiritArray_DiscoveryTeachBuildAndAmbientDrain",
+        "TestProductionCraftAccelerationStopsWhenOperatingInputsRunOut",
+        "TestProductionFacilityConsumesOnlyFundedPoweredOperatingTicks",
+        "TestProductionFacilityInputDefinitionValidation",
+        "TestProductionFacilityInputsCompeteAndEffectsAreIndependent"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "E1",
+      "title": "无抵押贷款可以没收未约定房屋",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestEconomyUnsecuredLoanCannotSeizeLaterHouse",
+        "TestMarketCreditDynamicPricingHoardingUsuryAndAnnexation"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestEconomyUnsecuredLoanCannotSeizeLaterHouse"
+      ],
+      "historical_probe_not_passed": [
+        "TestMarketCreditDynamicPricingHoardingUsuryAndAnnexation"
+      ],
+      "evidence": "historical-final-reserve-complete-probes.jsonl",
+      "qualification": "See docs/testing/full-repair-2026-11-17.md for retained historical failures and changed policies; not all historical assertions pass."
+    },
+    {
+      "id": "E2",
+      "title": "第二债权人覆盖第一债权人的产权",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestEconomyAnnexationCapPreservesEarlierCreditors",
+        "TestEconomyMultipleCreditorsRetainSharesAndReceiveRent",
+        "TestEconomyRentRoundingDoesNotMultiplyMinimum"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestEconomyAnnexationCapPreservesEarlierCreditors",
+        "TestEconomyMultipleCreditorsRetainSharesAndReceiveRent",
+        "TestEconomyRentRoundingDoesNotMultiplyMinimum"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "E3",
+      "title": "救济支付了余额但没有粮食交付",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestEconomyReliefFindsAffordableFoodWithExistingRation",
+        "TestEconomyReliefPaysOnlyForDeliveredBatch"
+      ],
+      "current_tests": [
+        "TestFoodReliefProcurementPaysOnlyForAnAffordableSurplusLot",
+        "TestCohortSubsistenceIsSharedByRetailReliefRentAndAdvancedFarmers"
+      ],
+      "historical_probe_passed": [
+        "TestEconomyReliefFindsAffordableFoodWithExistingRation"
+      ],
+      "historical_probe_not_passed": [
+        "TestEconomyReliefPaysOnlyForDeliveredBatch"
+      ],
+      "evidence": "historical-final-reserve-complete-probes.jsonl",
+      "qualification": "See docs/testing/full-repair-2026-11-17.md for retained historical failures and changed policies; not all historical assertions pass."
+    },
+    {
+      "id": "E4",
+      "title": "药品销售可使库存负数",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestEconomyAutomaticFoodSaleCannotExceedActorStock",
+        "TestEconomyMedicineSaleHonorsEntireAvailableInventory",
+        "TestEconomyReliefPaysOnlyForDeliveredBatch"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestEconomyAutomaticFoodSaleCannotExceedActorStock",
+        "TestEconomyMedicineSaleHonorsEntireAvailableInventory"
+      ],
+      "historical_probe_not_passed": [
+        "TestEconomyReliefPaysOnlyForDeliveredBatch"
+      ],
+      "evidence": "historical-final-reserve-complete-probes.jsonl",
+      "qualification": "See docs/testing/full-repair-2026-11-17.md for retained historical failures and changed policies; not all historical assertions pass."
+    },
+    {
+      "id": "E5",
+      "title": "人物工资忽略财政预算",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestEconomyActorOnlyWorldPaysCivicSalaryDaily",
+        "TestEconomyPayrollDiversionStaysInsideBudget",
+        "TestEconomyPayrollSharesOneBudget"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestEconomyActorOnlyWorldPaysCivicSalaryDaily",
+        "TestEconomyPayrollDiversionStaysInsideBudget",
+        "TestEconomyPayrollSharesOneBudget"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "E6",
+      "title": "群体购买人物商品没有更新生产销售计划",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestEconomyCohortPurchaseCompletesActorProductionPlan"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestEconomyCohortPurchaseCompletesActorProductionPlan"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "E7",
+      "title": "有群体时先转走死者金币导致子女继承为零",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestPopulationFix02InheritancePrecedesEscheat",
+        "TestPopulationFix02StoredHeirAndUnclaimedEstate",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestPopulationFix02InheritancePrecedesEscheat",
+        "TestPopulationFix02StoredHeirAndUnclaimedEstate",
+        "TestPopulationLODLeavesProductionRightsOnNamedOwner",
+        "TestPopulationStoredMemberHealthAndDeathCountOnce"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "SS-01",
+      "title": "同一地图的地区移动可绕过场所路线能力与耗时",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestMultiGenre_MortalWatershed_VenueIsolationAndCrossBorderFlood",
+        "TestMultiGenre_XianxiaSectDomain_DivineSenseSwordFlightAndEpistemicFirewall",
+        "TestSpaceSocietyDistrictMoveUsesVenueRoutes"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestMultiGenre_MortalWatershed_VenueIsolationAndCrossBorderFlood",
+        "TestMultiGenre_XianxiaSectDomain_DivineSenseSwordFlightAndEpistemicFirewall",
+        "TestSpaceSocietyDistrictMoveUsesVenueRoutes"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "SS-02",
+      "title": "暴动可以从没有道路连接的远区粮仓直接抢粮",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestSpaceSocietyRiotOnlySeizesLocalGranary"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestSpaceSocietyRiotOnlySeizesLocalGranary"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "SS-03",
+      "title": "宏观战斗、镇压、法院绕过空间和实际辖区",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestAgricultureProductionEmptyLivingCareSnapshot",
+        "TestIntegratedFourPillarsMillionPopConservation",
+        "TestJusticeRevoltWrongfulFramingAppealUprisingAndAmnesty",
+        "TestMillionPopulationSimulationAndHydration",
+        "TestRelationsKinshipMarriageVendettaTurfAndMonopoly",
+        "TestSpaceSocietyCourtAndSuppressionRequirePresentAuthority",
+        "TestSpaceSocietyMacroCombatRequiresPresence",
+        "TestSpaceSocietyMacroSparringRequiresPresence",
+        "TestSpaceSocietyPromotionKeepsGraduatesInTheirDistrict",
+        "TestSpaceSocietyScheduledConflictsRequirePresence",
+        "TestSpaceSocietyVendettaAndMacroMediationCannotReachRemoteParties"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestAgricultureProductionEmptyLivingCareSnapshot",
+        "TestIntegratedFourPillarsMillionPopConservation",
+        "TestJusticeRevoltWrongfulFramingAppealUprisingAndAmnesty",
+        "TestMillionPopulationSimulationAndHydration",
+        "TestRelationsKinshipMarriageVendettaTurfAndMonopoly",
+        "TestSpaceSocietyCourtAndSuppressionRequirePresentAuthority",
+        "TestSpaceSocietyMacroCombatRequiresPresence",
+        "TestSpaceSocietyMacroSparringRequiresPresence",
+        "TestSpaceSocietyPromotionKeepsGraduatesInTheirDistrict",
+        "TestSpaceSocietyScheduledConflictsRequirePresence",
+        "TestSpaceSocietyVendettaAndMacroMediationCannotReachRemoteParties"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "SS-04",
+      "title": "任何居民可对未知远处仇怨强制扣款结案",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestMediationOptionsReachBilateralSettlement",
+        "TestRelationsKinshipMarriageVendettaTurfAndMonopoly",
+        "TestSpaceSocietyMediationNeedsKnowledgePresenceAndBothAcceptances",
+        "TestSpaceSocietyVendettaAndMacroMediationCannotReachRemoteParties"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestMediationOptionsReachBilateralSettlement",
+        "TestRelationsKinshipMarriageVendettaTurfAndMonopoly",
+        "TestSpaceSocietyMediationNeedsKnowledgePresenceAndBothAcceptances",
+        "TestSpaceSocietyVendettaAndMacroMediationCannotReachRemoteParties"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "SS-05",
+      "title": "夺取主权后旧政权法律继续控制领地",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestSpaceSocietyTerritorialControlChangesLawAndPerception"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestSpaceSocietyTerritorialControlChangesLawAndPerception"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "SS-06",
+      "title": "有限距离通信在缺少坐标时变成无限距离",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestProductionKnowledgeTeachingNeedsKnownChannelDistance",
+        "TestSpaceSocietyCommunicationRequiresVerifiedRange"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestProductionKnowledgeTeachingNeedsKnownChannelDistance",
+        "TestSpaceSocietyCommunicationRequiresVerifiedRange"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "SS-07",
+      "title": "人物与两种模型都收到远处实时活动效果的完整状态",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestSpaceSocietyEffectAppearancePreservesPersonalCapabilities",
+        "TestSpaceSocietyEffectsExposeOnlyPerceivedAppearance"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestSpaceSocietyEffectAppearancePreservesPersonalCapabilities",
+        "TestSpaceSocietyEffectsExposeOnlyPerceivedAppearance"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "SS-08",
+      "title": "远距感知公共方法不检查观察者自身屏蔽",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestSpaceSocietyRemoteSenseChecksObserverEnclosureAtMaximumRange"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestSpaceSocietyRemoteSenseChecksObserverEnclosureAtMaximumRange"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "SS-09",
+      "title": "宏观贸易直接绕过属地禁运",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestFreightCapacitySharesEdgesAndSurvivesSnapshot",
+        "TestFreightMarketSharesCapacityAcrossCallsAndOtherDispatches",
+        "TestSnapshotJSONRoundTripPreservesAllFields",
+        "TestSpaceSocietyFreightHonorsEndpointAndTransitEmbargoes",
+        "TestSpaceSocietyFreightKeepsLegalBypassAroundEmbargo"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestFreightCapacitySharesEdgesAndSurvivesSnapshot",
+        "TestFreightMarketSharesCapacityAcrossCallsAndOtherDispatches",
+        "TestSnapshotJSONRoundTripPreservesAllFields",
+        "TestSpaceSocietyFreightHonorsEndpointAndTransitEmbargoes",
+        "TestSpaceSocietyFreightKeepsLegalBypassAroundEmbargo"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "SS-10",
+      "title": "宏观货运采用另一税率和收税主体",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestSpaceSocietyFreightUsesPolityMarketTax"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestSpaceSocietyFreightUsesPolityMarketTax"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "SS-11",
+      "title": "叛军并回平民群体后在途货物仍交给零人口旧群体",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestSpaceSocietyAmnestyTransfersIncomingCargo"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestSpaceSocietyAmnestyTransfersIncomingCargo"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "ROOT-01",
+      "title": "资源槽耗尽后按默认值自动补满，零再生也生效",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestRootAuditExhaustedSlotStaysZero",
+        "TestRootAuditSustainedEffectDoesNotRefillExhaustedSlot"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestRootAuditExhaustedSlotStaysZero",
+        "TestRootAuditSustainedEffectDoesNotRefillExhaustedSlot"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "ROOT-02",
+      "title": "自动阈值转换绕过同一转换声明的材料、条件与工时",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestRootAuditAutomaticTransitionDoesNotReplaceBusyTask",
+        "TestRootAuditAutomaticTransitionUsesPrerequisitesCostsAndTime",
+        "TestRootAuditDeclarativeTransitionUsesItsOwnCostsAndDuration"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestRootAuditAutomaticTransitionDoesNotReplaceBusyTask",
+        "TestRootAuditAutomaticTransitionUsesPrerequisitesCostsAndTime",
+        "TestRootAuditDeclarativeTransitionUsesItsOwnCostsAndDuration"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "ROOT-03",
+      "title": "同一动作的两份金币成本分开校验，合计可透支",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestRootAuditCombinedCoinCosts"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestRootAuditCombinedCoinCosts"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "ROOT-04",
+      "title": "总量账本不检查持有人负库存，也不证明交付或物理单位守恒",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestGrowthCareCandidatesRequireSeparateAssentAndPreserveLocalGoods",
+        "TestProductionExternalBudgetsPreserveExplicitZeroAndPositiveBoundaries",
+        "TestProductionExternalBudgetsRejectInvalidConsumptionDefinitions",
+        "TestProductionPackValidatesRightsMembersAndHoldings",
+        "TestRootAuditNegativeHoldingsCannotCancelAcrossOwners"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestGrowthCareCandidatesRequireSeparateAssentAndPreserveLocalGoods",
+        "TestProductionExternalBudgetsPreserveExplicitZeroAndPositiveBoundaries",
+        "TestProductionExternalBudgetsRejectInvalidConsumptionDefinitions",
+        "TestProductionPackValidatesRightsMembersAndHoldings",
+        "TestRootAuditNegativeHoldingsCannotCancelAcrossOwners"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    },
+    {
+      "id": "ROOT-05",
+      "title": "同一禁枪世界法则能被声明式射击动作绕过",
+      "status": "targeted_historical_probe_passed_current_runtime",
+      "historical_tests": [
+        "TestRootAuditFirearmLawCoversDeclarativeAndDelayedActions",
+        "TestWorldLawBlocksDeclarativeFirearmCandidate"
+      ],
+      "current_tests": [],
+      "historical_probe_passed": [
+        "TestRootAuditFirearmLawCoversDeclarativeAndDelayedActions",
+        "TestWorldLawBlocksDeclarativeFirearmCandidate"
+      ],
+      "historical_probe_not_passed": [],
+      "evidence": "historical-final-reserve-complete-probes.jsonl"
+    }
+  ],
+  "runtime_manifest": "historical-final-reserve-runtime-manifest.json",
+  "known_pending": [],
+  "additional_repairs": [
+    {
+      "area": "partial_cohort_meals",
+      "evidence": [
+        "partial-meal-red.log",
+        "hunger-accounting-final-green.log"
+      ],
+      "meaning": "Only actual portions reduce hunger; partial relief survives population and snapshot changes."
+    },
+    {
+      "area": "funded_cohort_relief",
+      "evidence": [
+        "unfunded-cohort-relief-old-red.log",
+        "unfunded-cohort-relief-current-green.log"
+      ],
+      "meaning": "Goods move only against funded quantity and delivery is separate from eating."
+    },
+    {
+      "area": "mixed_decision_trace",
+      "evidence": [
+        "tiered-trace-red.log",
+        "tiered-trace-green.log",
+        "million-model-traced-run.json"
+      ],
+      "meaning": "All 3197 active decisions retain their source and original inputs."
+    },
+    {
+      "area": "recorded_speech_review",
+      "evidence": [
+        "candidate-speech-recheck-red.log",
+        "candidate-speech-recheck-final-green.log",
+        "million-model-traced-current-candidate-review/candidate-recheck.json"
+      ],
+      "meaning": "Review matches choices separately from generated fields but settles the original complete action."
+    },
+    {
+      "area": "living_anonymous_food_reserve",
+      "evidence": [
+        "reserve-dead-record-red.log",
+        "reserve-dead-record-green.log"
+      ],
+      "meaning": "Retained dead member records do not reduce living anonymous population reserves; exactly one actual surplus portion remains sellable."
+    }
+  ],
+  "current_validation": {
+    "race_postgres": "final-reserve-race-postgres.jsonl",
+    "test_executions_passed": 264,
+    "packages_passed": 6,
+    "vet": "final-reserve-vet.log",
+    "actual_combined_model_run": "million-model-traced-run.json",
+    "current_runtime_replay": "million-model-traced-final-reserve-runtime-review.json",
+    "prior_year_causal_review": "prior-year-starvation-causal-review.json",
+    "historical_probes": "historical-final-reserve-summary.json",
+    "village_year_review": "long-food-13-village/village/year-causal-review.json",
+    "village_current_replay": "long-food-13-village-current-replay.log",
+    "watershed_year_review": "long-food-13-watershed/watershed/year-causal-review.json",
+    "watershed_resource_review": "long-food-13-watershed/watershed/year-resource-review.json",
+    "watershed_current_replay": "long-food-13-watershed-current-replay.log",
+    "complete_years": "final-year-validation-summary.json",
+    "all_73_evidence_crosscheck": "final-73-evidence-crosscheck.json",
+    "final_runtime_freeze": "runtime-freeze-final-reserve.json",
+    "final_change_archive": "changes-final-verified.json"
+  },
+  "simulation_correctness": "not_established",
+  "completion_scope": "Known 73 audit defects and additional independently reproduced repairs, with required observations and replays completed. This is not a reality calibration or approval of every individual decision.",
+  "completed_at": "2026-11-17T17:31:29.431043+00:00",
+  "remaining_model_assumptions": [
+    "Species survival thresholds remain scenario assumptions.",
+    "Energy, mass, water and nutrition units are not calibrated to real measurements.",
+    "Social policies and individual choices have not been validated as realistic.",
+    "Long-run evidence omits original per-decision perceptions and candidates; final dead holdings are post-estate settlement."
+  ]
+}

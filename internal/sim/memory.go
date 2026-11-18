@@ -1,10 +1,36 @@
 package sim
 
 import (
+	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 	"unicode"
 )
+
+// ValidateCitation checks what a cited memory can be used to report. Speakers
+// own their words, including mistaken quantities and uncited assertions.
+func ValidateCitation(memories []Memory, basis int64, statement *Statement) error {
+	if basis == 0 {
+		return nil
+	}
+	for _, m := range memories {
+		if m.EventID != basis {
+			continue
+		}
+		if statement == nil || statement.Topic != "item_produced" {
+			return nil
+		}
+		if m.Observation != nil && m.Observation.Kind == "item_produced" && m.Observation.Item == statement.Item {
+			return nil
+		}
+		if m.Statement != nil && m.Statement.Topic == "item_produced" && m.Statement.Item == statement.Item {
+			return nil
+		}
+		return fmt.Errorf("memory %d (%s) contains no production observation or reported production of %q", basis, m.Kind, statement.Item)
+	}
+	return fmt.Errorf("unavailable memory event %d", basis)
+}
 
 // MaxRecalledMemories bounds attention, not the persisted personal history.
 const MaxRecalledMemories = 32
@@ -17,6 +43,67 @@ type MemoryCues struct {
 }
 
 func appendMemory(list []Memory, m Memory) []Memory { return append(list, m) }
+
+// Rebuild derived search data once on load. Rebuilding it for every later
+// decision made long checkpoint replays repeatedly allocate the whole history.
+func (m *Memory) UnmarshalJSON(data []byte) error {
+	type storedMemory Memory
+	stored := storedMemory(*m)
+	if err := json.Unmarshal(data, &stored); err != nil {
+		return err
+	}
+	*m = Memory(stored)
+	m.search = newMemorySearchCache(*m)
+	return nil
+}
+
+// These immutable search strings are derived data, shared by witnesses of the
+// same event and excluded from persistence. A changed memory invalidates its
+// cached key; loaded histories rebuild the same immutable data once.
+type memorySearchKey struct {
+	kind, channel, text string
+	observation         Observation
+	statement           Statement
+	hasObservation      bool
+	hasStatement        bool
+}
+
+type memorySearchCache struct {
+	key        memorySearchKey
+	normalized string
+}
+
+func searchKey(m Memory) memorySearchKey {
+	key := memorySearchKey{kind: m.Kind, channel: m.Channel, text: m.Text}
+	if m.Observation != nil {
+		key.observation, key.hasObservation = *m.Observation, true
+	}
+	if m.Statement != nil {
+		key.statement, key.hasStatement = *m.Statement, true
+	}
+	return key
+}
+
+func newMemorySearchCache(m Memory) *memorySearchCache {
+	key := searchKey(m)
+	content := key.kind + " " + key.channel + " " + key.text
+	if key.hasObservation {
+		o := key.observation
+		content += " " + o.Kind + " " + o.Modality + " " + o.SubjectID + " " + o.Item + " " + o.Location
+	}
+	if key.hasStatement {
+		s := key.statement
+		content += " " + s.Topic + " " + s.SubjectID + " " + s.Item + " " + s.Location
+	}
+	return &memorySearchCache{key: key, normalized: strings.ToLower(content)}
+}
+
+func searchableMemory(m Memory) string {
+	if m.search != nil && m.search.key == searchKey(m) {
+		return m.search.normalized
+	}
+	return newMemorySearchCache(m).normalized
+}
 
 // RecallMemories selects only this actor's experiences. Recent context is kept
 // alongside older relevant and consequential experiences, in original order.
@@ -75,13 +162,7 @@ func RecallMemories(a Actor, cues MemoryCues, limit int) []Memory {
 				score += 5
 			}
 			if len(uniqueTerms) > 0 {
-				content := strings.ToLower(m.Kind + " " + m.Channel + " " + m.Text)
-				if m.Observation != nil {
-					content += " " + strings.ToLower(m.Observation.Kind+" "+m.Observation.Modality+" "+m.Observation.SubjectID+" "+m.Observation.Item+" "+m.Observation.Location)
-				}
-				if m.Statement != nil {
-					content += " " + strings.ToLower(m.Statement.Topic+" "+m.Statement.SubjectID+" "+m.Statement.Item+" "+m.Statement.Location)
-				}
+				content := searchableMemory(m)
 				for _, term := range uniqueTerms {
 					if strings.Contains(content, term) {
 						score += 3
