@@ -39,21 +39,41 @@ func (w *World) advanceActorHunger(a *Actor) {
 		return
 	}
 	form, _ := w.actorFormSpec(*a)
-	a.Hunger += hungerIncrement(w.Tick, w.Catalog.Lifecycle, form)
+	advanceNutrition(&a.Hunger, &a.NutritionReserve, hungerIncrement(w.Tick, w.Catalog.Lifecycle, form))
 }
 
-func hungerIncrement(tick int64, lc LifecycleSpec, form FormSpec) int {
-	interval := lc.HungerIntervalTicks
-	if interval <= 0 {
-		interval = int64(6 * TicksPerHour)
+// DailyNutritionUnits is the shared ordinary-person demand, not an inventory item.
+const DailyNutritionUnits int64 = 3
+
+func nutritionNeeded(ticks int64) int64 {
+	return ticks/TicksPerDay*DailyNutritionUnits + (ticks%TicksPerDay*DailyNutritionUnits+TicksPerDay-1)/TicksPerDay
+}
+
+func hungerIncrement(tick int64, _ LifecycleSpec, form FormSpec) int {
+	if tick <= 0 || form.DisableHunger {
+		return 0
 	}
+	multiplier := int64(100)
 	if form.HungerIntervalMulPct > 0 {
-		interval = max(int64(1), interval*int64(form.HungerIntervalMulPct)/100)
+		multiplier = int64(form.HungerIntervalMulPct)
 	}
-	if !form.DisableHunger && tick%interval == 0 {
-		return 1
+	period := int64(TicksPerDay) * multiplier
+	total := func(t int64) int64 {
+		return t/period*(DailyNutritionUnits*100) + t%period*(DailyNutritionUnits*100)/period
 	}
-	return 0
+	return int(total(tick) - total(tick-1))
+}
+
+func advanceNutrition(hunger *int, reserve *int64, units int) {
+	used := min(*reserve, int64(units))
+	*reserve -= used
+	*hunger += units - int(used)
+}
+
+func absorbNutrition(hunger *int, reserve *int64, units int64) {
+	used := min(int64(*hunger), units)
+	*hunger -= int(used)
+	*reserve += units - used
 }
 
 func starvationDamage(hunger int, lc LifecycleSpec, form FormSpec) int {
@@ -71,10 +91,6 @@ func starvationDamage(hunger int, lc LifecycleSpec, form FormSpec) int {
 	return 0
 }
 
-func hungerAfterRation(hunger, relief int) int {
-	return max(0, hunger-max(1, relief))
-}
-
 // consumeActorRation is the same finite food settlement for stored members and
 // prisoners, whose actions cannot otherwise supply their meals.
 func (w *World) consumeActorRation(a *Actor) []Event {
@@ -85,14 +101,15 @@ func (w *World) consumeActorRation(a *Actor) []Event {
 		return nil
 	}
 	before := a.Hunger
+	reserveBefore := a.NutritionReserve
 	meal := func(item, reason string, quantity int) []Event {
-		event := Event{ID: w.NextID, Tick: w.Tick, ActorID: a.ID, Kind: "personal_ration_settled", Action: Action{Kind: "eat", Item: item, Quantity: quantity}, Payload: map[string]any{"source_kind": "personal_inventory", "source_id": a.ID, "reason": reason, "hunger_before_meal": before, "hunger_after_meal": a.Hunger, "units_per_person": quantity}}
+		event := Event{ID: w.NextID, Tick: w.Tick, ActorID: a.ID, Kind: "personal_ration_settled", Action: Action{Kind: "eat", Item: item, Quantity: quantity}, Payload: map[string]any{"source_kind": "personal_inventory", "source_id": a.ID, "reason": reason, "hunger_before_meal": before, "hunger_after_meal": a.Hunger, "nutrition_reserve_before": reserveBefore, "nutrition_reserve_after": a.NutritionReserve, "units_per_person": quantity}}
 		w.NextID++
 		return []Event{event}
 	}
 	items := make([]string, 0, len(a.Items))
 	for item, qty := range a.Items {
-		if qty > 0 && w.Catalog.Items[item].Edible {
+		if qty > 0 && w.Catalog.Items[item].Edible && w.Catalog.Items[item].NutritionUnits > 0 {
 			items = append(items, item)
 		}
 	}
@@ -109,7 +126,7 @@ func (w *World) consumeActorRation(a *Actor) []Event {
 func (w *World) consumeHeldFood(a *Actor, item string) {
 	w.adjustActorItem(a, item, -1, true)
 	spec := w.Catalog.Items[item]
-	a.Hunger = hungerAfterRation(a.Hunger, spec.HungerRelief)
+	absorbNutrition(&a.Hunger, &a.NutritionReserve, spec.NutritionUnits)
 	a.DigestedFood++
 	a.Waste++
 	w.applyItemSlotAndEnergyEffects(a, spec)

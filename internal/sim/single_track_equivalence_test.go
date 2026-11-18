@@ -6,7 +6,7 @@ func TestResidentMealsAreOrderIndependentAndEquivalentToIndividualActors(t *test
 	runCohort := func(reversed bool) map[string]ResidentBand {
 		w := lawWorld()
 		grain := w.Catalog.Items["grain"]
-		grain.HungerRelief = 4
+		grain.NutritionUnits = 4
 		w.Catalog.Items["grain"] = grain
 
 		bands := []ResidentBand{
@@ -23,7 +23,7 @@ func TestResidentMealsAreOrderIndependentAndEquivalentToIndividualActors(t *test
 			Adults:      4,
 			ResidentSeq: 4,
 			Residents:   bands,
-			// Scarce pool (1 < 2 needy) must NOT favor whoever appears first in Residents.
+			// Scarce pool is allocated by stable identity, independently of slice order.
 			ItemPool: map[string]int64{"grain": 1},
 		}}
 		w.InitLedgerAudit()
@@ -44,7 +44,7 @@ func TestResidentMealsAreOrderIndependentAndEquivalentToIndividualActors(t *test
 	reversed := runCohort(true)
 	for id, fb := range forward {
 		rb, ok := reversed[id]
-		if !ok || fb.Hunger != rb.Hunger || fb.Health != rb.Health || fb.Items["grain"] != rb.Items["grain"] {
+		if !ok || fb.Hunger != rb.Hunger || fb.NutritionReserve != rb.NutritionReserve || fb.Health != rb.Health || fb.Items["grain"] != rb.Items["grain"] {
 			t.Fatalf("storage order changed outcome for %s: forward=%+v reversed=%+v", id, fb, rb)
 		}
 	}
@@ -52,12 +52,12 @@ func TestResidentMealsAreOrderIndependentAndEquivalentToIndividualActors(t *test
 	// Compare batched settlement against fully expanded individual Actors.
 	ind := lawWorld()
 	grain := ind.Catalog.Items["grain"]
-	grain.HungerRelief = 4
+	grain.NutritionUnits = 4
 	ind.Catalog.Items["grain"] = grain
 	actors := []Actor{
 		{ID: "v_a0001", Hunger: 3, Health: 30, Items: map[string]int{"grain": 1}},
 		{ID: "v_a0002", Hunger: 3, Health: 30, Items: map[string]int{"grain": 1}},
-		{ID: "v_a0003", Hunger: 3, Health: 30},
+		{ID: "v_a0003", Hunger: 3, Health: 30, Items: map[string]int{"grain": 1}},
 		{ID: "v_a0004", Hunger: 3, Health: 30},
 	}
 	ind.Tick = 24
@@ -68,7 +68,7 @@ func TestResidentMealsAreOrderIndependentAndEquivalentToIndividualActors(t *test
 	ind.stepActorPhysiologyAndLifecycleFor(actors, false)
 	for _, a := range actors {
 		b := forward[a.ID]
-		if a.Hunger != b.Hunger || a.Health != b.Health || a.Items["grain"] != b.Items["grain"] {
+		if a.Hunger != b.Hunger || a.NutritionReserve != b.NutritionReserve || a.Health != b.Health || a.Items["grain"] != b.Items["grain"] {
 			t.Fatalf("batch vs individual mismatch for %s: actor=%+v band=%+v", a.ID, a, b)
 		}
 	}

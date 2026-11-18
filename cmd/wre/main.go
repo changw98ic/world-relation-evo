@@ -75,8 +75,6 @@ func runSim(args []string, stdout, stderr io.Writer) (runErr error) {
 	steps := fs.Int("steps", 24, "quarter-hour ticks (15m each) to run; 0 runs continuously")
 	pace := fs.Duration("pace", time.Second, "real delay per simulation tick")
 	mode := fs.String("decider", "jev", "jev (production) or rules (offline test)")
-	focalLimit := fs.Int("focal-limit", 0, "max focal actors using Jev per tick (0 auto-caps at 8 when pop > 30)")
-	focalStride := fs.Int("focal-stride", 1, "run focal Jev/LLM calls every N ticks when tiered LOD is active")
 	compact := fs.Bool("compact-events", false, "persist only high-value causal/economic/progression events")
 	quiet := fs.Bool("quiet", false, "suppress per-event stdout NDJSON and log periodic day summaries to stderr")
 	packPath := fs.String("pack", "", "path to an external WorldPack JSON file to initialize a new world")
@@ -240,19 +238,7 @@ func runSim(args []string, stdout, stderr io.Writer) (runErr error) {
 		}
 	}
 
-	var td *agent.TieredDecider
-	if *mode == "jev" && (*focalLimit > 0 || *focalStride > 1 || w.TotalPopulation() > 30) {
-		td = agent.NewTieredDecider(d, *focalLimit)
-		active := agent.Offline()
-		active.Trace = evidence
-		td.Active = active
-		if *focalStride > 1 {
-			td.FocalStride = *focalStride
-		}
-		d = td
-	}
-
-	if err := evidence.Record("run_world", w.Tick, "", map[string]any{"world_id": w.ID, "population": w.TotalPopulation(), "tiered": td != nil}); err != nil {
+	if err := evidence.Record("run_world", w.Tick, "", map[string]any{"world_id": w.ID, "population": w.TotalPopulation(), "decider": *mode}); err != nil {
 		return err
 	}
 	enc := json.NewEncoder(stdout)
@@ -263,9 +249,6 @@ func runSim(args []string, stdout, stderr io.Writer) (runErr error) {
 	)
 
 	for n := 0; *steps == 0 || n < *steps; n++ {
-		if td != nil && w.SpotlightRumor != nil {
-			td.SetSpotlightPriority(w.Actors, w.SpotlightRumor.ActorSalience, w.Tick)
-		}
 		traceTick = w.Tick
 		if err := evidence.Record("tick_begin", traceTick, "", map[string]any{"world": w}); err != nil {
 			return err
@@ -321,24 +304,20 @@ func runSim(args []string, stdout, stderr io.Writer) (runErr error) {
 			}
 			fmt.Fprintf(stderr, "world=%s tick=%d clock=%q pop=%d actors=%d cohorts=%d events=%d decider=%s\n", w.ID, w.Tick, sim.ClockAt(w.Tick).Label, w.TotalPopulation(), len(w.Actors), len(w.Cohorts), len(persisted), *mode)
 		} else if w.Tick%sim.TicksPerDay == 0 || (*steps != 0 && n+1 == *steps) {
-			focalCalls := int64(0)
-			if td != nil {
-				focalCalls = td.TotalFocalCalls()
-			}
 			cal := sim.CalendarAt(w.Tick, w.Catalog.Calendar)
 			tl := w.TreasuryLedger
 			gini := 0
 			if w.MarketCredit != nil {
 				gini = w.WealthGiniPermille(w.MarketCredit)
 			}
-			fmt.Fprintf(stderr, "world=%s tick=%d clock=%q cal=Y%d-%s-D%d pop=%d(births=%d,sick=%d,wounded=%d,jailed=%d,dead=%d,successions=%d) total_coins=%d treasury=%d fiscal(init=%d,tax_gross=%d,tax_net=%d,tax_skim=%d,surcharge=%d,fees_in=%d,confiscated_in=%d,payroll_out=%d,relief_out=%d,bounty_out=%d,embezzled_out=%d) corruption(avg_idx=%d,illicit_held=%d,embezzled=%d,bribes=%d,bribe_coins=%d,bribe_released=%d,purges=%d,jailed=%d,confiscated=%d) racket(incidents=%d,batches=%d,clashes=%d,protection_coins=%d) deaths_by_cause=%v focal_calls=%d craft_batches=%d items_produced=%d trade_batches=%d items_traded=%d coins_traded=%d logistics(waterway_batches=%d,waterway_items=%d,land_batches=%d,freight_fees=%d,loss_items=%d,shipwrecks=%d) ecology(disasters=%d,infra_repairs=%d,accidents=%d,encounters=%d,surges=%d,threat_hunts=%d,rituals=%d,compost_recycled=%d) wounds(added=%d,healed=%d,wounded_deaths=%d,active=%d) epidemics(cases=%d,cured=%d,disease_deaths=%d,other_deaths=%d,active=%d) jail(jailed=%d,released=%d,jailed_deaths=%d,active=%d) incidents(raid=%d,turf_war=%d,theft=%d,arrest=%d,spar=%d) medicine_used=%d loot_coins=%d bounty_coins=%d social_interactions=%d promoted_people=%d market(gini=%d,hoards=%d,loans=%d,repaid=%d,foreclosed=%d,annexed=%d) relations(marriages=%d,bonds=%d,grudges=%d,feuds=%d,vendettas=%d,turf_shifts=%d,charters=%d) justice(trials=%d,wrongful=%d,overturned=%d,strikes=%d,riots=%d,revolts=%d,amnesties=%d,reintegrated=%d) spotlight(promoted=%d,demoted=%d,rumor_panics=%d,gossip=%d) produced_by_item=%v\n",
+			fmt.Fprintf(stderr, "world=%s tick=%d clock=%q cal=Y%d-%s-D%d pop=%d(births=%d,sick=%d,wounded=%d,jailed=%d,dead=%d,successions=%d) total_coins=%d treasury=%d fiscal(init=%d,tax_gross=%d,tax_net=%d,tax_skim=%d,surcharge=%d,fees_in=%d,confiscated_in=%d,payroll_out=%d,relief_out=%d,bounty_out=%d,embezzled_out=%d) corruption(avg_idx=%d,illicit_held=%d,embezzled=%d,bribes=%d,bribe_coins=%d,bribe_released=%d,purges=%d,jailed=%d,confiscated=%d) racket(incidents=%d,batches=%d,clashes=%d,protection_coins=%d) deaths_by_cause=%v craft_batches=%d items_produced=%d trade_batches=%d items_traded=%d coins_traded=%d logistics(waterway_batches=%d,waterway_items=%d,land_batches=%d,freight_fees=%d,loss_items=%d,shipwrecks=%d) ecology(disasters=%d,infra_repairs=%d,accidents=%d,encounters=%d,surges=%d,threat_hunts=%d,rituals=%d,compost_recycled=%d) wounds(added=%d,healed=%d,wounded_deaths=%d,active=%d) epidemics(cases=%d,cured=%d,disease_deaths=%d,other_deaths=%d,active=%d) jail(jailed=%d,released=%d,jailed_deaths=%d,active=%d) incidents(raid=%d,turf_war=%d,theft=%d,arrest=%d,spar=%d) medicine_used=%d loot_coins=%d bounty_coins=%d social_interactions=%d promoted_people=%d market(gini=%d,hoards=%d,loans=%d,repaid=%d,foreclosed=%d,annexed=%d) relations(marriages=%d,bonds=%d,grudges=%d,feuds=%d,vendettas=%d,turf_shifts=%d,charters=%d) justice(trials=%d,wrongful=%d,overturned=%d,strikes=%d,riots=%d,revolts=%d,amnesties=%d,reintegrated=%d) spotlight(promoted=%d,demoted=%d,rumor_panics=%d,gossip=%d) produced_by_item=%v\n",
 				w.ID, w.Tick, sim.ClockAt(w.Tick).Label, cal.Year, cal.SeasonID, cal.DayOfSeason,
 				w.TotalPopulation(), w.TotalBirths(), w.TotalSick(), w.TotalWounded(), w.TotalJailed(), w.TotalDeaths(), summary.Successions,
 				w.TotalCoins(), w.PublicTreasury,
 				tl.InitialTreasury, tl.TaxAssessedGross, tl.TaxToTreasury, tl.TaxSkimmed, summary.TaxSurcharge, tl.StateFeesIn, tl.ConfiscatedIn, tl.PayrollPaid, tl.ReliefAndInfraOut, tl.BountiesOut, tl.TreasuryEmbezzled,
 				w.AvgCorruption(), w.TotalIllicitWealth(), summary.EmbezzledCoins, summary.BribeIncidents, summary.BribeCoins, summary.BribeReleased, summary.AuditPurges, summary.CorruptionJailed, summary.ConfiscatedCoins,
 				summary.RacketIncidents, summary.RacketBatches, summary.RacketClashes, summary.ProtectionCoins,
-				w.DeathsByCause, focalCalls,
+				w.DeathsByCause,
 				summary.CraftBatches, summary.ItemsProduced, summary.TradeBatches, summary.ItemsTraded, summary.CoinsTraded,
 				summary.WaterwayBatches, summary.WaterwayItems, summary.LandFreightBatches, summary.FreightFees, summary.TransitLossItems, summary.Shipwrecks,
 				summary.Disasters, summary.InfraRepairs, summary.WorkplaceAccidents, summary.WildEncounters, summary.ThreatSurges, summary.ThreatHunts, summary.Rituals, summary.CompostRecycled,

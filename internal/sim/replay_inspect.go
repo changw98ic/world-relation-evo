@@ -242,6 +242,7 @@ type ActorInspection struct {
 	Guilds           []string           `json:"guilds,omitempty"`
 	Health           int                `json:"health"`
 	Energy           int                `json:"energy"`
+	NutritionReserve int64              `json:"nutrition_reserve,omitempty"`
 	Hunger           int                `json:"hunger"`
 	Thirst           int                `json:"thirst,omitempty"`
 	Money            int                `json:"money"`
@@ -349,6 +350,7 @@ func InspectActor(w *World, actorID string) (*ActorInspection, error) {
 		Health:           a.Health,
 		Energy:           a.Energy,
 		Hunger:           a.Hunger,
+		NutritionReserve: a.NutritionReserve,
 		Thirst:           a.Thirst,
 		Money:            a.Money,
 		Currencies:       cloneInt64Map(a.Currencies),

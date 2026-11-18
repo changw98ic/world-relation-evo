@@ -19,7 +19,6 @@ func withProductionMaterials(c Catalog) Catalog {
 	for id, item := range c.Items {
 		item.MassUnits = 1
 		if item.Edible {
-			item.NutritionUnits = int64(item.HungerRelief)
 			item.MassUnits = max(item.MassUnits, item.NutritionUnits)
 		}
 		if id == "calf" {
@@ -74,13 +73,17 @@ func (c Catalog) ValidateProductionConversion(r Recipe) error {
 	var mass, nutrition int64
 	for item, n := range r.Inputs {
 		mass += int64(n) * c.Items[item].MassUnits
-		nutrition += int64(n) * c.Items[item].NutritionUnits
+		if err := addNutrition(&nutrition, int64(n), c.Items[item].NutritionUnits); err != nil {
+			return fmt.Errorf("recipe %s input %s: %w", r.ID, item, err)
+		}
 	}
 	maximum := int64(r.OutputQty)
 	if c.ConsumablesYieldBonus(r) {
 		maximum += int64(r.BonusOutput)
 		mass += c.Items[r.BonusInput].MassUnits
-		nutrition += c.Items[r.BonusInput].NutritionUnits
+		if err := addNutrition(&nutrition, 1, c.Items[r.BonusInput].NutritionUnits); err != nil {
+			return fmt.Errorf("recipe %s bonus input: %w", r.ID, err)
+		}
 	}
 	output := c.Items[r.OutputItem]
 	if output.MassUnits <= 0 {
@@ -89,11 +92,15 @@ func (c Catalog) ValidateProductionConversion(r Recipe) error {
 	if maximum*output.MassUnits > mass+b.ExternalMassUnits {
 		return fmt.Errorf("recipe %s output exceeds declared material budget", r.ID)
 	}
-	if maximum*output.NutritionUnits > nutrition+b.ExternalNutritionUnits {
-		return fmt.Errorf("recipe %s output exceeds declared nutrition budget", r.ID)
+	if err := addNutrition(&nutrition, 1, b.ExternalNutritionUnits); err != nil {
+		return fmt.Errorf("recipe %s external nutrition: %w", r.ID, err)
 	}
-	if output.Edible && int64(output.HungerRelief) > output.NutritionUnits {
-		return fmt.Errorf("recipe %s hunger relief exceeds nutrition units", r.ID)
+	var outputNutrition int64
+	if err := addNutrition(&outputNutrition, maximum, output.NutritionUnits); err != nil {
+		return fmt.Errorf("recipe %s output: %w", r.ID, err)
+	}
+	if outputNutrition > nutrition {
+		return fmt.Errorf("recipe %s output exceeds declared nutrition budget", r.ID)
 	}
 	return nil
 }

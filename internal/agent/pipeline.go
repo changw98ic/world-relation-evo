@@ -14,9 +14,10 @@ import (
 )
 
 type Option struct {
-	ID     string     `json:"id"`
-	Label  string     `json:"label"`
-	Action sim.Action `json:"action"`
+	PrepareQuote bool       `json:"prepare_quote,omitempty"`
+	ID           string     `json:"id"`
+	Label        string     `json:"label"`
+	Action       sim.Action `json:"action"`
 }
 
 type Selector interface {
@@ -49,6 +50,9 @@ func (p Pipeline) Decide(ctx context.Context, view sim.Perception) (action sim.A
 		}
 	}()
 	options := Options(view)
+	if _, ok := p.Generator.(QuoteGenerator); ok {
+		options = withQuoteOptions(view, options)
+	}
 	selector := p.Selector
 	source := "selector"
 	switch p.Selector.(type) {
@@ -71,15 +75,25 @@ func (p Pipeline) Decide(ctx context.Context, view sim.Perception) (action sim.A
 		return sim.Action{}, err
 	}
 	var selected *sim.Action
+	prepareQuote := false
 	for _, o := range options {
 		if o.ID == id {
 			v := o.Action
 			selected = &v
+			prepareQuote = o.PrepareQuote
 			break
 		}
 	}
 	if selected == nil {
 		return sim.Action{}, fmt.Errorf("selector returned unavailable option %q", id)
+	}
+	if prepareQuote {
+		stage = "quote"
+		resolved, selectedID, quoteErr := p.resolveQuote(ctx, view, selector, id, *selected, options)
+		if quoteErr != nil {
+			return sim.Action{}, quoteErr
+		}
+		selected, id = &resolved, selectedID
 	}
 	stage = "selected"
 	if err = p.Trace.Record("decision_selected", view.Tick, view.Self.ID, map[string]any{"option_id": id, "action": *selected}); err != nil {
@@ -361,7 +375,7 @@ func Options(p sim.Perception) []Option {
 		for _, itemID := range itemKeys {
 			spec := p.Catalog.Items[itemID]
 			if spec.Edible && a.Items[itemID] >= 1 {
-				add(fmt.Sprintf("Eat 1 %s (-%d hunger)", itemID, spec.HungerRelief), sim.Action{Kind: "eat", Item: itemID})
+				add(fmt.Sprintf("Eat 1 %s (%d nutrition units; surplus is retained)", itemID, spec.NutritionUnits), sim.Action{Kind: "eat", Item: itemID})
 			}
 		}
 	}
@@ -627,32 +641,20 @@ func Options(p sim.Perception) []Option {
 	}
 	selfEffTags := p.EffectiveTags()
 	for _, o := range p.Offers {
-		if o.Buyer != a.ID {
+		if o.ResponderID() != a.ID {
 			continue
 		}
-		spec := p.Catalog.Items[o.Item]
-		cur := o.Currency
-		if cur == "" {
-			cur = "coins"
-		}
-		canAfford := false
-		if cur == "coins" {
-			canAfford = a.Money >= o.Price
-		} else {
-			canAfford = a.Currencies[cur] >= int64(o.Price)
-		}
-		tagOK := spec.BuyerRequiredTag == "" || sim.ActorHasTag(selfEffTags, spec.BuyerRequiredTag)
-		if canAfford && sim.ItemAcceptsCurrency(spec, cur) && tagOK && p.OfferBlockReasons[o.ID] == "" {
+		other := o.Counterparty(a.ID)
+		if p.OfferBlockReasons[o.ID] == "" {
 			for _, b := range p.Nearby {
-				if b.ID == o.Seller && !b.Jailed {
-					add(fmt.Sprintf("Buy %d %s from %s for %d %s (offer %d)", o.Quantity, o.Item, b.Name, o.Price, cur, o.ID), sim.Action{
-						Kind: "accept", TargetID: o.Seller, OfferID: o.ID,
-					})
+				if b.ID == other && !b.Jailed {
+					add(fmt.Sprintf("Accept offer %d: buyer %s pays %d %s to seller %s for %d %s", o.ID, o.Buyer, o.Price, o.Currency, o.Seller, o.Quantity, o.Item), sim.Action{Kind: "accept", TargetID: other, OfferID: o.ID})
 				}
 			}
 		}
-		add(fmt.Sprintf("Reject offer %d (%d %s)", o.ID, o.Quantity, o.Item), sim.Action{Kind: "reject", TargetID: o.Seller, OfferID: o.ID})
+		add(fmt.Sprintf("Reject offer %d (%d %s)", o.ID, o.Quantity, o.Item), sim.Action{Kind: "reject", TargetID: other, OfferID: o.ID})
 	}
+
 	for _, action := range sim.ContinuityActions(p) {
 		add(continuityOptionLabel(p, action, dir), action)
 	}
@@ -1103,13 +1105,7 @@ func cheapestMedicinalItem(cat sim.Catalog, a sim.Actor, itemKeys []string) stri
 }
 
 func totalEdibleItems(cat sim.Catalog, a sim.Actor) int {
-	total := 0
-	for id, qty := range a.Items {
-		if qty > 0 && cat.Items[id].Edible {
-			total += qty
-		}
-	}
-	return total
+	return int(cat.AvailableNutrition(a))
 }
 
 func defaultEdibleItem(cat sim.Catalog) string {
@@ -1150,6 +1146,9 @@ func (r RuleSelector) Select(_ context.Context, p sim.Perception, options []Opti
 
 func ruleOptionID(desired sim.Action, options []Option) string {
 	for _, o := range options {
+		if o.PrepareQuote {
+			continue
+		}
 		a := o.Action
 		if a.Kind == desired.Kind &&
 			(desired.Channel == "" || a.Channel == desired.Channel) &&

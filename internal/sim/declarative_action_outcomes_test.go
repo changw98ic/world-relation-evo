@@ -7,10 +7,10 @@ import (
 func newDeclarativeActionTestWorld(specs map[string]ActionSpec) *World {
 	cat := DefaultCatalog()
 	cat.Items["fishing_net"] = ItemSpec{ID: "fishing_net", Name: "Fishing Net", Tier: 1, DurabilityBatches: 2}
-	cat.Items["fish"] = ItemSpec{ID: "fish", Name: "Fish", Tier: 1, Edible: true, HungerRelief: 2}
+	cat.Items["fish"] = ItemSpec{ID: "fish", Name: "Fish", Tier: 1, Edible: true, NutritionUnits: 2}
 	cat.Items["silicon_wafer"] = ItemSpec{ID: "silicon_wafer", Name: "Silicon Wafer", Tier: 2}
 	cat.Items["ai_chip"] = ItemSpec{ID: "ai_chip", Name: "AI Chip", Tier: 3}
-	cat.Items["boar_meat"] = ItemSpec{ID: "boar_meat", Name: "Boar Meat", Tier: 1, Edible: true, HungerRelief: 3}
+	cat.Items["boar_meat"] = ItemSpec{ID: "boar_meat", Name: "Boar Meat", Tier: 1, Edible: true, NutritionUnits: 3}
 	cat.Professions = append(cat.Professions,
 		Profession{ID: "angler", Name: "Angler", Guild: "guild", MaxLevel: 5},
 		Profession{ID: "chip_architect", Name: "Chip Architect", Guild: "guild", MaxLevel: 5},

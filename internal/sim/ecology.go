@@ -196,7 +196,6 @@ type LifecycleSpec struct {
 	ElderAnnualDeathPermille  int    `json:"elder_annual_death_permille"`
 	CompostItem               string `json:"compost_item,omitempty"`
 	AutoHydrateSuccessor      bool   `json:"auto_hydrate_successor,omitempty"`
-	HungerIntervalTicks       int64  `json:"hunger_interval_ticks,omitempty"`
 	StarvationThreshold       int    `json:"starvation_threshold,omitempty"`
 	StarvationDamage          int    `json:"starvation_damage,omitempty"`
 	MaxEcologicalYieldPct     int    `json:"max_ecological_yield_pct,omitempty"`
@@ -219,21 +218,21 @@ type ActiveDisaster struct {
 
 // DistrictState holds live ecological, weather, sanitation, infrastructure, threat, and disaster state for one district.
 type DistrictState struct {
-	DistrictID       string                `json:"district_id"`
-	Weather          string                `json:"weather"`
-	Sanitation       int                   `json:"sanitation"`
-	NightsoilPool    int64                 `json:"nightsoil_pool,omitempty"`
-	MoraleBonus      int                   `json:"morale_bonus,omitempty"`
-	BountyPool       int                   `json:"bounty_pool,omitempty"`
-	Corruption       int                   `json:"corruption,omitempty"`
-	RacketPressure   int                   `json:"racket_pressure,omitempty"`
-	BribeShieldTicks int                   `json:"bribe_shield_ticks,omitempty"`
-	LastRitualSeason string                `json:"last_ritual_season,omitempty"`
-	Resources        map[string]int64      `json:"resources,omitempty"`
-	MaxResources     map[string]int64      `json:"max_resources,omitempty"`
-	Infrastructure   map[string]int        `json:"infrastructure,omitempty"`
-	ThreatActivity   map[string]int        `json:"threat_activity,omitempty"`
-	ActiveDisasters  []ActiveDisaster      `json:"active_disasters,omitempty"`
+	DistrictID          string                `json:"district_id"`
+	Weather             string                `json:"weather"`
+	Sanitation          int                   `json:"sanitation"`
+	NightsoilPool       int64                 `json:"nightsoil_pool,omitempty"`
+	MoraleBonus         int                   `json:"morale_bonus,omitempty"`
+	BountyPool          int                   `json:"bounty_pool,omitempty"`
+	Corruption          int                   `json:"corruption,omitempty"`
+	RacketPressure      int                   `json:"racket_pressure,omitempty"`
+	BribeShieldTicks    int                   `json:"bribe_shield_ticks,omitempty"`
+	LastRitualSeason    string                `json:"last_ritual_season,omitempty"`
+	Resources           map[string]int64      `json:"resources,omitempty"`
+	MaxResources        map[string]int64      `json:"max_resources,omitempty"`
+	Infrastructure      map[string]int        `json:"infrastructure,omitempty"`
+	ThreatActivity      map[string]int        `json:"threat_activity,omitempty"`
+	ActiveDisasters     []ActiveDisaster      `json:"active_disasters,omitempty"`
 	Recruitment         []ResourceRecruitment `json:"recruitment,omitempty"`
 	Patrols             []EcologyPatrol       `json:"patrols,omitempty"`
 	WaterOverflow       map[string]int64      `json:"water_overflow,omitempty"`

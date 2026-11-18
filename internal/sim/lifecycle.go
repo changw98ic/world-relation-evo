@@ -736,7 +736,7 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 								continue
 							}
 							availSurplus := w.cohortFoodSurplus(*donor, itemID)
-							grant := (reliefNeed + int64(maxInt(1, spec.HungerRelief)) - 1) / int64(maxInt(1, spec.HungerRelief))
+							grant := (reliefNeed + max(int64(1), spec.NutritionUnits) - 1) / max(int64(1), spec.NutritionUnits)
 							if grant > availSurplus {
 								grant = availSurplus
 							}
@@ -810,7 +810,7 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 							}
 							w.adjustCohortItem(donor, itemID, -grant, false)
 							w.adjustCohortItem(c, itemID, grant, false)
-							reliefNeed -= grant * int64(maxInt(1, spec.HungerRelief))
+							reliefNeed -= grant * max(int64(1), spec.NutritionUnits)
 							events = append(events, Event{ID: w.NextID, Tick: w.Tick, ActorID: c.ID, TargetID: donor.ID,
 								Kind: "cohort_food_relief_purchased", Action: Action{Kind: "accept", TargetID: donor.ID, Item: itemID, Quantity: int(grant), Price: int(reliefCost)},
 								Payload: map[string]any{"item": itemID, "quantity": grant, "household_paid": selfPaid, "state_paid": stateSubsidy}})

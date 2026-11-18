@@ -48,7 +48,7 @@ func TestFoodReliefProcurementPaysOnlyForAnAffordableSurplusLot(t *testing.T) {
 			if !funded {
 				w.PublicTreasury--
 			}
-			w.Catalog.Items["grain"] = ItemSpec{ID: "grain", Edible: true, HungerRelief: 1, Tradeable: true, BatchQty: 20, BatchPrice: price}
+			w.Catalog.Items["grain"] = ItemSpec{ID: "grain", Edible: true, NutritionUnits: 1, Tradeable: true, BatchQty: 20, BatchPrice: price}
 			// Four portions feed this seller for the next day. Exactly twenty
 			// additional portions are available for the declared trade lot.
 			w.Cohorts = []PopulationCohort{{ID: "seller", District: "home", Population: 1, Adults: 1, ItemPool: map[string]int64{"grain": 24}}}

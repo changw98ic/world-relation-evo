@@ -115,8 +115,8 @@ Jev selects a candidate ID for an idle character. Ongoing tasks advance without
 another decision. TypeSafe's [Choice protocol](https://docs.typesafe.ai/primitives/choice)
 allows at most 255 alternatives per question. Larger action sets use successive
 group and concrete-action choices. Every original action remains reachable; all
-stages are recorded. A focal character's decision can therefore make multiple Jev
-requests. `-focal-limit` counts focal characters per tick. The content model runs for `speak`, `transmit_message`, and
+stages are recorded. A character's decision can therefore make multiple Jev
+requests. The content model runs for `speak`, `transmit_message`, and
 `issue_decree`. It receives the selected action and the character's perception,
 including remembered experiences. It supplies words and, for communication,
 assertions and memory references. Decrees use only its text. The selected behavior,
@@ -144,13 +144,11 @@ the CPU count bounded to 4–32, further limited by the number of idle actors.
 Settlement advances ongoing tasks and non-movement actions first, then relocation
 actions, in actor order. A decision error stops the step before settlement.
 
-When population exceeds 30, `-focal-limit` is positive, or `-focal-stride` exceeds 1,
-`TieredDecider` routes a
-limited number of characters to Jev and the remaining active characters to rules.
-`-focal-limit` controls that budget (default 8 when tiering is active);
-`-focal-stride` controls how often focal decisions run. Population groups advance
-in bulk in the simulation engine. This is the configured execution policy; errors
-from a selected model call still propagate.
+Every idle independent character uses the selected decider, regardless of total
+population, salience, or tick number. Worker limits queue decisions; they do not
+replace model decisions with rules. Ongoing tasks advance without new decisions.
+Population groups still advance in bulk in the simulation engine. Choose
+`-decider rules` explicitly for an offline rule-driven run. Model failures propagate.
 
 ## World mechanics and semantics
 
@@ -162,7 +160,7 @@ from a selected model call still propagate.
   - **Base & advanced professions + rank progression**: `Catalog.Professions` defines both Tier-1 base professions (e.g., `scholar` 读书人, `blacksmith` 铁匠, `carpenter` 木匠, `farmer` 农夫) and Tier-2 advanced professions unlocked by parent profession mastery and attributes (e.g., `scholar` 读书人 → `xiucai` 秀才, `blacksmith` 铁匠 → `master_smith` 匠师, `carpenter` → `master_carpenter` 大木匠师, `farmer` → `agronomist` 农师, `herbalist` → `alchemist` 丹药师, `peddler` → `merchant_chief` 大掌柜, `guard` → `captain` 都头). Each profession also advances through stage titles as its level grows (e.g., `锻造学徒` → `初级铁匠` → `匠师`).
   - **Character level & scaling yields**: A character's `Level` equals the sum of all held profession levels (`Professions`). Skills and facilities can improve work speed; the declared material budget bounds output. Merchant sale margins (`Catalog.SalePrice`) and house repair restoration also depend on profession levels. Items carry grades (`Tier 1–5`) that scale crafting XP and guild influence.
 - **Epistemic separation & causal lineage**: Completed production records a first-hand `Observation`, while communication records attributed `Statement` memories. Perception and witness rules determine who can observe an event. `basis_event_id` must reference an actual `Memory.EventID` held by the actor; each settled event/memory propagates `root_event_id` without certifying truth or auto-attaching causes to movement options.
-- **Million-scale multi-resolution population (`LargeWorld` & `PopulationCohort`)**: Worlds scale from 30 villagers up to 1,000,000–3,000,000+ inhabitants via `sim.LargeWorld(id, pop)`, combining a spatially indexed active `Actor` core (with attention-capped `MaxNearbyView = 32` perception), `agent.TieredDecider` cognitive LOD budgeting (`-focal-limit`), vectorized `PopulationCohort` production/promotion/market clearing, bidirectional `HydrateActor` / `DehydrateActor` conservation, and multi-row batched PostgreSQL event persistence (`-compact-events`).
+- **Million-scale multi-resolution population (`LargeWorld` & `PopulationCohort`)**: Worlds scale from 30 villagers up to 1,000,000–3,000,000+ inhabitants via `sim.LargeWorld(id, pop)`, combining a spatially indexed active `Actor` core (with attention-capped `MaxNearbyView = 32` perception), vectorized `PopulationCohort` production/promotion/market clearing, bidirectional `HydrateActor` / `DehydrateActor` conservation, and multi-row batched PostgreSQL event persistence (`-compact-events`).
 
 Additional systems cover regional ecology, lifecycle, markets and personal credit,
 relationships, governance and justice, and rumor propagation. World packs can define
@@ -505,9 +503,58 @@ Workflow completion is not evidence that the simulated world is valid.
 
 - `cmd/wre`: simulation, inspection, and replay commands
 - `internal/sim`: world state, perception, action settlement, population groups, world systems, and replay
-- `internal/agent`: action candidates, Jev selection, content generation, rule decisions, and model-call budgeting
+- `internal/agent`: action candidates, Jev selection, content generation, and rule decisions
 - `internal/pack`: WorldPack loading, validation, and world creation
 - `internal/store`: PostgreSQL snapshots, events, decision logs, checkpoints, and world locks
 - `packs`: reference world definitions
 
 No license has been selected yet.
+
+### Food units
+
+Food remains concrete inventory: corn, potatoes and other items are never replaced
+by a universal tradable grain token. `nutrition_units` is the single per-item
+nutritional value used by production budgets, meals, purchasing and reserves.
+An ordinary person needs three units per day; integer tick settlement carries this
+rate without floating-point rounding. Eating consumes whole real items. Surplus
+nutrition is retained in `nutrition_reserve` and consumed by later needs, including
+across saves and materialization. `digested_food` continues to count consumed item
+units for the existing waste ledger, not nutritional units.
+
+Anonymous residents receive mixed and partial food allocations by unmet need and
+stable identity. Insufficient stock feeds those it can, instead of leaving the
+entire pool untouched. Equal people remain compact ranges at million scale.
+Automatic hunger relief ignores zero-nutrition items; explicit consumption remains
+available for their other declared effects. Food and money transfers still require
+the existing inventory, ownership and payment conditions.
+
+### Explicit negotiation and optional replies
+
+Perception exposes `interactions`: the latest optional dialogue reply, the party
+currently asked to answer an offer, and pending delivery agreements. These views
+are derived from persistent dialogue/offers/agreements, including expiry and
+local availability. They do not schedule a response, reveal an absent person's
+private location, force someone to stay, or treat spoken promises as settlement.
+
+Jev can keep a catalog quote or choose to draft other quantity, total price and
+currency. Only that explicit draft choice calls the content endpoint for
+structured trade terms. After validation, Jev makes a second choice between the
+concrete proposal and all its original ordinary actions, including declining or
+deferring. This adds one content request and one further selection cycle when
+negotiation is chosen, not on every tick. Errors propagate before settlement;
+there is no silent fallback. Speech generation still cannot edit any action.
+
+A counteroffer keeps the seller, buyer and item, receives a new ID, and replaces
+the prior offer only when the proposing character confirms it. Its predecessor
+and original expiry remain visible. Only the other party can accept it; acceptance
+checks current location, permissions, stock and funds, then transfers the exact
+accepted terms once. Named offers cannot be diverted to unrelated cohorts.
+Catalog prices are references, not price floors: an explicit zero-price proposal
+is valid. The offline baseline uses its existing demand/sale-intent, uncommitted
+inventory and trust preferences to answer counteroffers; this is not a calibrated
+bargaining model. Delivery-agreement price negotiation is not added by this path.
+
+Tests exercise controlled HTTP choices, cross-tick responses, optional deferral,
+rejection, failed/stale settlement, pending-offer snapshots and deterministic
+replay. They do not establish the quality of real-model negotiations or improved
+long-run survival.

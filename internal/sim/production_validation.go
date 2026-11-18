@@ -24,7 +24,7 @@ func (c Catalog) ValidateProductionRules() error {
 	}
 	for _, id := range sortedProductionKeys(c.Items) {
 		item := c.Items[id]
-		if item.MassUnits < 0 || item.NutritionUnits < 0 || item.HungerRelief < 0 || item.Edible && int64(item.HungerRelief) > item.NutritionUnits {
+		if item.MassUnits < 0 || item.NutritionUnits < 0 {
 			return fmt.Errorf("item %s has invalid material or nutrition units", id)
 		}
 		living := item.Living

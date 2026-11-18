@@ -47,7 +47,7 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 	if a.Hunger > 0 {
 		for _, id := range itemKeys {
 			spec := p.Catalog.Items[id]
-			if spec.Edible && a.Items[id] >= 1 && consider(sim.Action{Kind: "eat", Item: id}) {
+			if spec.Edible && spec.NutritionUnits > 0 && a.Items[id] >= 1 && consider(sim.Action{Kind: "eat", Item: id}) {
 				return
 			}
 		}
@@ -57,7 +57,7 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 	// returning to care work or resting because starvation has lowered health.
 	if a.Hunger > 0 && totalEdibleItems(p.Catalog, a) == 0 {
 		for _, o := range p.Offers {
-			if o.Buyer == a.ID && p.OfferBlockReasons[o.ID] == "" && p.Catalog.Items[o.Item].Edible && availableMoneyAfterAgreements(p) >= o.Price && a.Trust[o.Seller] >= 0 {
+			if o.Buyer == a.ID && o.ResponderID() == a.ID && p.OfferBlockReasons[o.ID] == "" && p.Catalog.Items[o.Item].Edible && availableMoneyAfterAgreements(p) >= o.Price && a.Trust[o.Seller] >= 0 {
 				for _, n := range p.Nearby {
 					if n.ID == o.Seller && !n.Jailed && consider(sim.Action{Kind: "accept", OfferID: o.ID, TargetID: o.Seller}) {
 						return
@@ -175,21 +175,30 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 	// 2. Settle incoming trade offers based on generic item demand, funds, and directed trust.
 	freeMoney := availableMoneyAfterAgreements(p)
 	for _, o := range p.Offers {
-		if o.Buyer != a.ID {
+		if o.ResponderID() != a.ID {
 			continue
 		}
-		sellerHere := false
+		other := o.Counterparty(a.ID)
+		here := false
 		for _, b := range p.Nearby {
-			if b.ID == o.Seller && !b.Jailed {
-				sellerHere = true
+			if b.ID == other && !b.Jailed {
+				here = true
 				break
 			}
 		}
-		want := desiredBuyerStock(p, o.Item)
-		if sellerHere && p.OfferBlockReasons[o.ID] == "" && a.Items[o.Item] < want && freeMoney >= o.Price && a.Trust[o.Seller] >= 0 && consider(sim.Action{Kind: "accept", OfferID: o.ID, TargetID: o.Seller}) {
+		willing := false
+		if o.Buyer == a.ID {
+			willing = a.Items[o.Item] < desiredBuyerStock(p, o.Item) && freeMoney >= o.Price
+		} else {
+			// Reuse the rule policy's existing sale intent and uncommitted inventory;
+			// there is no engine-wide price floor or forced assent.
+			available := availableItemAfterAgreements(p, o.Item)
+			willing = available >= o.Quantity && ((a.Plan != nil && a.Plan.Status == "active" && a.Plan.Item == o.Item) || p.Catalog.TagsProduce(a.IdentityTags(), o.Item) || available >= desiredBuyerStock(p, o.Item)+o.Quantity)
+		}
+		if here && p.OfferBlockReasons[o.ID] == "" && willing && a.Trust[other] >= 0 && consider(sim.Action{Kind: "accept", OfferID: o.ID, TargetID: other}) {
 			return
 		}
-		if consider(sim.Action{Kind: "reject", OfferID: o.ID, TargetID: o.Seller}) {
+		if consider(sim.Action{Kind: "reject", OfferID: o.ID, TargetID: other}) {
 			return
 		}
 	}
@@ -457,8 +466,9 @@ func desiredBuyerStock(p sim.Perception, item string) int {
 	a := p.Self
 	want := p.Catalog.DesiredStock(a.IdentityTags(), item)
 	spec := p.Catalog.Items[item]
-	if spec.Edible && want < 8 && !p.Catalog.TagsProduce(a.IdentityTags(), item) {
-		want = 8
+	if spec.Edible && spec.NutritionUnits > 0 {
+		need := max(int64(0), 2*sim.DailyNutritionUnits+int64(a.Hunger)-p.Catalog.AvailableNutrition(a))
+		return a.Items[item] + int((need+spec.NutritionUnits-1)/spec.NutritionUnits)
 	}
 	if item == "plank" {
 		if home := primaryHome(p); home != nil && home.Condition < 80 && want < 2 {

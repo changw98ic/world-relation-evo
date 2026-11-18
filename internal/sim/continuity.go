@@ -675,7 +675,7 @@ func (w *World) ApplyContinuity(a *Actor, x Action) []Event {
 // ObserveContinuity runs after a real event is recorded. It does not emit more
 // events, so the record hook cannot recurse.
 func (w *World) ObserveContinuity(e Event) {
-	if e.Kind == "speech" || e.Kind == "agreement_proposed" || e.Kind == "agreement_accepted" || e.Kind == "agreement_rejected" || e.Kind == "agreement_fulfilled" {
+	if e.Kind == "speech" || e.Kind == "trade_offered" || e.Kind == "trade_counteroffered" || e.Kind == "trade_completed" || e.Kind == "trade_rejected" || e.Kind == "trade_expired" || e.Kind == "agreement_proposed" || e.Kind == "agreement_accepted" || e.Kind == "agreement_rejected" || e.Kind == "agreement_fulfilled" {
 		s := w.continuity()
 		if s.DialogueByActor == nil {
 			s.DialogueByActor = map[string][]DialogueTurn{}

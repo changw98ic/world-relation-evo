@@ -51,7 +51,7 @@ func TestLiveModelWorkflowRecordsEvidenceAcrossDatabaseRestart(t *testing.T) {
 		summary := map[string]any{"world_id": worldID, "workflow_completed": finished, "replay_equal": replayed,
 			"test_failed": t.Failed(), "simulation_correctness": "not_established",
 			"review_required": "Review original model calls and actor timelines; successful workflow execution is not simulation validity.",
-			"scenario":        "Nine active characters from mortal_watershed; anonymous cohorts removed so every active decision uses Jev, without tiered offline decisions. Two real processes run 16 steps each, checkpoint interval 24."}
+			"scenario":        "Nine active characters from mortal_watershed; anonymous cohorts removed to keep this live fixture small. Every idle character uses Jev. Two real processes run 16 steps each, checkpoint interval 24."}
 		raw, err := json.MarshalIndent(summary, "", "  ")
 		if err != nil {
 			t.Error(err)

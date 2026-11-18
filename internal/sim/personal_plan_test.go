@@ -35,7 +35,7 @@ func TestPersonalPlanCouplesToHeldInventoryAndRevertsOnStockLoss(t *testing.T) {
 	// 2. Partial stock advances to "sell" once total held >= remaining, and reverts to "produce" if stock is consumed before sale.
 	w2 := lawWorld()
 	w2.Catalog.TagActions["person"] = append(w2.Catalog.TagActions["person"], "start_plan", "abandon_plan")
-	w2.Catalog.Items["ration"] = ItemSpec{ID: "ration", MassUnits: 2, NutritionUnits: 2, Tier: 1, Edible: true, HungerRelief: 2, Tradeable: true, BatchQty: 2, BatchPrice: 4, OfferThreshold: 6}
+	w2.Catalog.Items["ration"] = ItemSpec{ID: "ration", MassUnits: 2, NutritionUnits: 2, Tier: 1, Edible: true, Tradeable: true, BatchQty: 2, BatchPrice: 4, OfferThreshold: 6}
 	w2.Catalog.Recipes = []Recipe{{
 		ID: "bake_ration", Profession: "worker", Ticks: 1, EnergyCost: 2,
 		Inputs: map[string]int{"grain": 2}, OutputItem: "ration", OutputQty: 1,

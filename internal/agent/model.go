@@ -64,20 +64,35 @@ func (m ContentModel) Generate(ctx context.Context, p sim.Perception, action sim
 			"primary_topic_item":        topicItem,
 		},
 	}
+	response, e := m.request(ctx, p, prompt, payload, "content")
+	if e != nil {
+		return Content{}, e
+	}
+	a, e := modelreply.Decode(response)
+	if e != nil {
+		return a, e
+	}
+	if err := sim.ValidateCitation(p.Self.Memories, a.BasisEventID, a.Statement); err != nil {
+		return a, fmt.Errorf("content citation: %w", err)
+	}
+	return a, nil
+}
+
+func (m ContentModel) request(ctx context.Context, p sim.Perception, instructions string, payload any, kind string) (string, error) {
 	b, e := json.Marshal(payload)
 	if e != nil {
-		return Content{}, e
+		return "", e
 	}
-	body, e := json.Marshal(map[string]any{"model": m.Name, "messages": []map[string]string{{"role": "system", "content": prompt}, {"role": "user", "content": string(b)}}, "response_format": map[string]string{"type": "json_object"}})
+	body, e := json.Marshal(map[string]any{"model": m.Name, "messages": []map[string]string{{"role": "system", "content": instructions}, {"role": "user", "content": string(b)}}, "response_format": map[string]string{"type": "json_object"}})
 	if e != nil {
-		return Content{}, e
+		return "", e
 	}
-	if e = m.Trace.Record("content_request", p.Tick, p.Self.ID, map[string]any{"model": m.Name, "body": string(body)}); e != nil {
-		return Content{}, e
+	if e = m.Trace.Record(kind+"_request", p.Tick, p.Self.ID, map[string]any{"model": m.Name, "body": string(body)}); e != nil {
+		return "", e
 	}
 	req, e := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(m.Endpoint, "/")+"/chat/completions", bytes.NewReader(body))
 	if e != nil {
-		return Content{}, e
+		return "", e
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if m.APIKey != "" {
@@ -89,18 +104,18 @@ func (m ContentModel) Generate(ctx context.Context, p sim.Perception, action sim
 	}
 	resp, e := client.Do(req)
 	if e != nil {
-		return Content{}, e
+		return "", e
 	}
 	defer resp.Body.Close()
 	raw, readErr := io.ReadAll(resp.Body)
-	if e = m.Trace.Record("content_response", p.Tick, p.Self.ID, map[string]any{"status": resp.StatusCode, "body": string(raw)}); e != nil {
-		return Content{}, errors.Join(readErr, e)
+	if e = m.Trace.Record(kind+"_response", p.Tick, p.Self.ID, map[string]any{"status": resp.StatusCode, "body": string(raw)}); e != nil {
+		return "", errors.Join(readErr, e)
 	}
 	if readErr != nil {
-		return Content{}, readErr
+		return "", readErr
 	}
 	if resp.StatusCode != 200 {
-		return Content{}, fmt.Errorf("model HTTP %d: %s", resp.StatusCode, string(raw))
+		return "", fmt.Errorf("model HTTP %d: %s", resp.StatusCode, string(raw))
 	}
 	var out struct {
 		Choices []struct {
@@ -111,17 +126,39 @@ func (m ContentModel) Generate(ctx context.Context, p sim.Perception, action sim
 		} `json:"choices"`
 	}
 	if e = json.Unmarshal(raw, &out); e != nil {
-		return Content{}, e
+		return "", e
 	}
 	if len(out.Choices) == 0 {
-		return Content{}, fmt.Errorf("model returned no choices")
+		return "", fmt.Errorf("model returned no choices")
 	}
-	a, e := modelreply.Decode(out.Choices[0].Message.Content)
-	if e != nil {
-		return a, e
+	return out.Choices[0].Message.Content, nil
+}
+
+func (m ContentModel) Quote(ctx context.Context, p sim.Perception, draft sim.Action) (terms sim.TradeTerms, err error) {
+	defer func() { err = recordModelError(m.Trace, "quote_error", p, m.Endpoint, m.APIKey, err) }()
+	instructions := `Draft explicit trade terms for the character's selected proposal. Return exactly one JSON object containing quantity (positive integer), price (nonnegative integer total, not unit price) and currency (accepted item currency, coins if unspecified). Choose freely from the character's circumstances and remembered conversation; no fixed discount, markup or profession-based stance. This is a proposal, not speech and not settlement. Do not change parties, item or original offer ID. The same character will explicitly confirm or decline the concrete proposal afterwards. When this character is the seller, quantity cannot exceed their own held stock. When the character is the buyer making a counteroffer, quantity is a request and the seller's actual stock will be checked before acceptance. Zero total price is valid. Do not add other fields.`
+	response, err := m.request(ctx, p, instructions, map[string]any{"perception": contextForModel(p), "selected_draft": draft, "item_spec": p.Catalog.Items[draft.Item]}, "quote")
+	if err != nil {
+		return terms, err
 	}
-	if err := sim.ValidateCitation(p.Self.Memories, a.BasisEventID, a.Statement); err != nil {
-		return a, fmt.Errorf("content citation: %w", err)
+	var parsed *struct {
+		Quantity *int    `json:"quantity"`
+		Price    *int    `json:"price"`
+		Currency *string `json:"currency"`
 	}
-	return a, nil
+	decoder := json.NewDecoder(strings.NewReader(response))
+	decoder.DisallowUnknownFields()
+	if err = decoder.Decode(&parsed); err != nil {
+		return terms, fmt.Errorf("invalid quote JSON: %w", err)
+	}
+	var trailing any
+	if err = decoder.Decode(&trailing); err != io.EOF {
+		return terms, fmt.Errorf("quote must contain exactly one JSON object")
+	}
+	if parsed == nil || parsed.Quantity == nil || parsed.Price == nil || parsed.Currency == nil {
+		return terms, fmt.Errorf("quote requires explicit quantity, total price and currency")
+	}
+	terms = sim.TradeTerms{Quantity: *parsed.Quantity, Price: *parsed.Price, Currency: *parsed.Currency}
+	_, err = sim.QuoteAction(p, draft, terms)
+	return terms, err
 }

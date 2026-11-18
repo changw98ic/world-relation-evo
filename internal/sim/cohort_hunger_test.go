@@ -15,7 +15,7 @@ func TestFoodReserveCountsLivingAnonymousPeopleRatherThanStoredDeadRecords(t *te
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := lawWorld()
-			c := PopulationCohort{Population: 4, Adults: 4, Profession: "worker", Members: tc.members, ItemPool: map[string]int64{"grain": int64(tc.people * 4)}}
+			c := PopulationCohort{Population: 4, Adults: 4, Profession: "worker", Members: tc.members, ItemPool: map[string]int64{"grain": int64(tc.people * 3)}}
 			if got := w.cohortFoodSurplus(c, "grain"); got != 0 {
 				t.Fatalf("a stored dead record released %d portions from living people's one-day reserve", got)
 			}
@@ -32,11 +32,11 @@ func TestPartialCohortMealsPayOnlyTheirActualHungerRelief(t *testing.T) {
 	w.Actors = w.Actors[:1]
 	w.Actors[0].Items["grain"] = 1
 	w.Cohorts = []PopulationCohort{{
-		ID:         "households",
-		District:   "home",
-		Population: 4,
-		Adults:     4,
-		AvgHunger:  1,
+		ID:          "households",
+		District:    "home",
+		Population:  4,
+		Adults:      4,
+		AvgHunger:   1,
 		ResidentSeq: 4,
 		Residents: []ResidentBand{
 			{Origin: "households", First: 1, Count: 3, Hunger: 1, Health: MaxHealth, Items: map[string]int{"grain": 1}},
@@ -137,9 +137,9 @@ func TestCohortReliefBuysOnlyFundedFoodAndDoesNotEatOnDelivery(t *testing.T) {
 			}
 			w.Tick = 24
 			w.stepCohorts()
-			// Scarce public pool food (2 < 4 hungry residents) is never arbitrarily eaten by slice order.
-			if w.Cohorts[0].DigestedFood != 0 || w.Cohorts[0].ItemPool["grain"] != tc.food {
-				t.Fatalf("scarce pool stock should remain unconsumed until allocated to specific recipients: %+v", w.Cohorts[0])
+			// Partial stock is allocated to stable resident identities at the next meal, not on delivery.
+			if w.Cohorts[0].DigestedFood != tc.food || w.Cohorts[0].ItemPool["grain"] != 0 {
+				t.Fatalf("paid scarce food must feed exactly the funded number of residents: %+v", w.Cohorts[0])
 			}
 			if err := w.VerifyLedgerConservation(); err != nil {
 				t.Fatal(err)

@@ -6,14 +6,14 @@ func TestResidentDelayedRationsMatchIndividualStarvation(t *testing.T) {
 	for _, delayed := range []bool{false, true} {
 		w, individual := lawWorld(), lawWorld()
 		grain := w.Catalog.Items["grain"]
-		grain.HungerRelief = 8
+		grain.NutritionUnits = 8
 		w.Catalog.Items["grain"], individual.Catalog.Items["grain"] = grain, grain
-		band1 := ResidentBand{Origin: "households", First: 1, Count: 1, Hunger: 5, Health: 20, Items: map[string]int{"grain": 1}}
-		band2 := ResidentBand{Origin: "households", First: 2, Count: 1, Hunger: 5, Health: 20}
+		band1 := ResidentBand{Origin: "households", First: 1, Count: 1, Hunger: 6, Health: 20, Items: map[string]int{"grain": 1}}
+		band2 := ResidentBand{Origin: "households", First: 2, Count: 1, Hunger: 6, Health: 20}
 		stored := Actor{ID: "stored", AgeYears: 30, Hunger: 7, Health: MaxHealth, Items: map[string]int{"grain": 4}}
-		w.Cohorts = []PopulationCohort{{ID: "households", District: "home", Population: 3, Adults: 3, Wounded: 2, AvgHunger: 5, ResidentSeq: 2, Residents: []ResidentBand{band1, band2}, Members: []Actor{stored}}}
+		w.Cohorts = []PopulationCohort{{ID: "households", District: "home", Population: 3, Adults: 3, Wounded: 2, AvgHunger: 6, ResidentSeq: 2, Residents: []ResidentBand{band1, band2}, Members: []Actor{stored}}}
 		c := &w.Cohorts[0]
-		actors := []Actor{{ID: band1.ID(0), Hunger: 5, Health: 20, Items: map[string]int{"grain": 1}}, {ID: band2.ID(0), Hunger: 5, Health: 20, Items: map[string]int{}}}
+		actors := []Actor{{ID: band1.ID(0), Hunger: 6, Health: 20, Items: map[string]int{"grain": 1}}, {ID: band2.ID(0), Hunger: 6, Health: 20, Items: map[string]int{}}}
 		for tick := int64(24); tick <= 48; tick++ {
 			w.Tick, individual.Tick = tick-1, tick
 			if delayed && tick == 25 {
@@ -72,7 +72,7 @@ func TestResidentDelayedRationsMatchIndividualStarvation(t *testing.T) {
 func TestCohortStarvationWoundsResidentsOutsideWorkforce(t *testing.T) {
 	w := lawWorld()
 	w.Actors = nil
-	w.Cohorts = []PopulationCohort{{ID: "children", District: "home", Population: 2, Children: 2, AvgHunger: 5}}
+	w.Cohorts = []PopulationCohort{{ID: "children", District: "home", Population: 2, Children: 2, AvgHunger: 6}}
 	w.Tick = 23
 	events := w.stepCohorts()
 	summary := NewScaleSummary()

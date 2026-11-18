@@ -22,7 +22,7 @@ func lawWorld() *World {
 				"board": {ID: "board", MassUnits: 3},
 				"seed":  {ID: "seed", MassUnits: 1},
 				"water": {ID: "water", MassUnits: 1, Potable: true, ThirstRelief: 2},
-				"grain": {ID: "grain", MassUnits: 1, NutritionUnits: 1, Edible: true, HungerRelief: 1},
+				"grain": {ID: "grain", MassUnits: 1, NutritionUnits: 1, Edible: true},
 			},
 			Professions: []Profession{{ID: "worker", Name: "worker", MaxLevel: 1, Tier: 1, Grants: []string{"person"}}},
 			Resources:   map[string]ResourcePoolSpec{"trees": {ID: "trees"}, "freshwater": {ID: "freshwater", PotableWater: true}},

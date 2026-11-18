@@ -154,13 +154,13 @@ func TestItemGenericEnergyAndStateSlotEffects(t *testing.T) {
 		"radiation": {ID: "radiation", Name: "Radiation", Min: 0, Max: 100},
 	}
 	cat.Items["spirit_fruit"] = ItemSpec{
-		ID:           "spirit_fruit",
-		Name:         "Spirit Fruit",
-		Tier:         2,
-		Edible:       true,
-		HungerRelief: 1,
-		EnergyRelief: 15,
-		SlotChanges:  map[string]int{"mana": 25},
+		ID:             "spirit_fruit",
+		Name:           "Spirit Fruit",
+		Tier:           2,
+		Edible:         true,
+		NutritionUnits: 1,
+		EnergyRelief:   15,
+		SlotChanges:    map[string]int{"mana": 25},
 	}
 	cat.Items["rad_away"] = ItemSpec{
 		ID:            "rad_away",

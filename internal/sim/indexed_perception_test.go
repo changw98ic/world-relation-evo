@@ -22,12 +22,12 @@ func TestConcurrentActorPerceptionsCannotRewriteEachOthersCatalog(t *testing.T) 
 	_, err := w.Step(context.Background(), lawDecider(func(_ context.Context, p Perception) (Action, error) {
 		if p.Self.ID == "a" {
 			spec := p.Catalog.Items["grain"]
-			spec.HungerRelief = 999
+			spec.NutritionUnits = 999
 			p.Catalog.Items["grain"] = spec
 			close(changed)
 		} else {
 			<-changed
-			if p.Catalog.Items["grain"].HungerRelief != 1 {
+			if p.Catalog.Items["grain"].NutritionUnits != 1 {
 				t.Error("one actor's perception rewrote another actor's input")
 			}
 		}
@@ -36,7 +36,7 @@ func TestConcurrentActorPerceptionsCannotRewriteEachOthersCatalog(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w.Catalog.Items["grain"].HungerRelief != 1 {
+	if w.Catalog.Items["grain"].NutritionUnits != 1 {
 		t.Fatal("actor perception rewrote the physical catalog")
 	}
 }

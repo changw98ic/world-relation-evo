@@ -5,7 +5,7 @@ func (w *World) cohortFoodRelief(c PopulationCohort) int64 {
 	for item, quantity := range c.ItemPool {
 		spec := w.Catalog.Items[item]
 		if spec.Edible {
-			relief += quantity * int64(max(1, spec.HungerRelief))
+			relief += quantity * spec.NutritionUnits
 		}
 	}
 	return relief
@@ -46,7 +46,39 @@ func (w *World) cohortFoodHorizon(c PopulationCohort) int64 {
 }
 
 func (w *World) cohortFoodSurplus(c PopulationCohort, item string) int64 {
-	needed := int64(w.anonymousCohort(c).Population) * ((w.cohortFoodHorizon(c) + 23) / 24)
+	needed := int64(w.anonymousCohort(c).Population) * nutritionNeeded(w.cohortFoodHorizon(c))
+	for _, b := range c.Residents {
+		held := b.NutritionReserve
+		for id, qty := range b.Items {
+			if w.Catalog.Items[id].Edible {
+				held += int64(qty) * w.Catalog.Items[id].NutritionUnits
+			}
+		}
+		needed += int64(b.Count) * (int64(b.Hunger) - held)
+	}
+	needed = max(int64(0), needed)
 	excess := max(int64(0), w.cohortFoodRelief(c)-needed)
-	return min(c.ItemPool[item], excess/int64(max(1, w.Catalog.Items[item].HungerRelief)))
+	return min(c.ItemPool[item], excess/max(int64(1), w.Catalog.Items[item].NutritionUnits))
+}
+
+// AvailableNutrition counts held edible items plus already absorbed surplus.
+// Item quantities and prices remain in their original units.
+func (c Catalog) AvailableNutrition(a Actor) int64 {
+	total := a.NutritionReserve
+	for item, q := range a.Items {
+		if c.Items[item].Edible {
+			total += int64(q) * c.Items[item].NutritionUnits
+		}
+	}
+	return total
+}
+
+func (w *World) incomingNutrition(cohortID string) int64 {
+	var total int64
+	for item, spec := range w.Catalog.Items {
+		if spec.Edible {
+			total += w.incomingStock(cohortID, item) * spec.NutritionUnits
+		}
+	}
+	return total
 }

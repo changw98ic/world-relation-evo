@@ -24,7 +24,7 @@ func TestCLIRejectsUnexpectedArgumentsBeforeOpeningAnyWorld(t *testing.T) {
 	}
 }
 
-func TestCLITieredRunRecordsOriginalInputsForRuleDecisionsAsWell(t *testing.T) {
+func TestCLILargePopulationUsesJevForEveryIdleDecision(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		var request struct {
 			Questions map[string]struct{ Criteria map[string]string }
@@ -47,21 +47,21 @@ func TestCLITieredRunRecordsOriginalInputsForRuleDecisionsAsWell(t *testing.T) {
 	for key, value := range map[string]string{"WRE_JEV_URL": server.URL, "WRE_JEV_KEY": "fixture", "WRE_JEV_MODEL": "fixture", "WRE_MODEL_URL": server.URL, "WRE_MODEL_KEY": "fixture", "WRE_MODEL": "fixture"} {
 		t.Setenv(key, value)
 	}
-	dir := filepath.Join(t.TempDir(), "tiered-trace")
+	dir := filepath.Join(t.TempDir(), "all-jev-trace")
 	var out, stderr bytes.Buffer
-	if err := runArgs([]string{"-offline-run", "-decider", "jev", "-pop", "31", "-focal-limit", "1", "-steps", "1", "-pace", "0", "-quiet", "-trace-dir", dir}, &out, &stderr); err != nil {
+	if err := runArgs([]string{"-offline-run", "-decider", "jev", "-pop", "31", "-steps", "1", "-pace", "0", "-quiet", "-trace-dir", dir}, &out, &stderr); err != nil {
 		t.Fatal(err)
 	}
 	report, err := runtrace.Analyze(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.JevResponses != 1 || report.Decisions <= report.JevResponses {
-		t.Fatalf("non-model actors lost their original decision inputs: choices=%d recorded_decisions=%d", report.JevResponses, report.Decisions)
+	if report.Decisions <= 8 || report.JevResponses != report.Decisions {
+		t.Fatalf("idle actors bypassed model decisions: choices=%d recorded_decisions=%d", report.JevResponses, report.Decisions)
 	}
 	for _, finding := range report.Findings {
 		if finding.Rule == "decision_coverage" || finding.Rule == "model_evidence" || finding.Rule == "settled_decision" {
-			t.Fatalf("mixed routing was not fully evidenced: %+v", finding)
+			t.Fatalf("model routing was not fully evidenced: %+v", finding)
 		}
 	}
 }
@@ -149,5 +149,16 @@ func TestCLIProviderFailureLeavesOriginalTraceAndFailedRun(t *testing.T) {
 	}
 	if bytes.Contains(raw, []byte("local-contract-key")) || bytes.Contains(raw, []byte("local-content-key")) {
 		t.Fatal("trace exposed credentials")
+	}
+}
+
+func TestCLIRemovedModelRoutingFlagsFailBeforeWorldIO(t *testing.T) {
+	t.Setenv("DATABASE_URL", "invalid-database-url-for-argument-test")
+	for _, flag := range []string{"-focal-limit", "-focal-stride"} {
+		var out, stderr bytes.Buffer
+		err := runArgs([]string{flag, "1"}, &out, &stderr)
+		if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") || out.Len() != 0 {
+			t.Fatalf("obsolete routing flag %s was silently accepted: %v", flag, err)
+		}
 	}
 }

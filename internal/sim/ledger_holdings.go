@@ -29,12 +29,18 @@ func (w *World) VerifyHoldingBounds() error {
 	}
 	checkActor := func(a Actor) error {
 		owner := "actor:" + a.ID
+		if a.NutritionReserve < 0 {
+			return fmt.Errorf("%s has negative nutrition reserve", owner)
+		}
 		if err := checkAmount(owner, "coins", int64(a.Money)); err != nil {
 			return err
 		}
 		items := make(map[string]int64, len(a.Items))
 		for id, quantity := range a.Items {
 			items[id] = int64(quantity)
+		}
+		if err := w.Catalog.validateHeldNutrition(items, a.NutritionReserve); err != nil {
+			return fmt.Errorf("%s: %w", owner, err)
 		}
 		if err := checkBag(owner, items); err != nil {
 			return err
@@ -69,6 +75,13 @@ func (w *World) VerifyHoldingBounds() error {
 		if err := checkAmount(owner, "coins", c.MoneyPool); err != nil {
 			return err
 		}
+		if err := w.Catalog.validateHeldNutrition(c.ItemPool, 0); err != nil {
+			return fmt.Errorf("%s: %w", owner, err)
+		}
+		var requiredNutrition int64
+		if err := addNutrition(&requiredNutrition, int64(w.anonymousCohort(c).Population), nutritionNeeded(w.cohortFoodHorizon(c))); err != nil {
+			return fmt.Errorf("%s food horizon: %w", owner, err)
+		}
 		if err := checkBag(owner, c.ItemPool); err != nil {
 			return err
 		}
@@ -79,12 +92,26 @@ func (w *World) VerifyHoldingBounds() error {
 			anon := w.anonymousCohort(c)
 			var bandPop int
 			var bandHunger int64
+			var nutritionBalance int64
 			for idx, b := range c.Residents {
 				if (c.ID != "" && b.Origin == "") || b.First < 1 || b.Count <= 0 {
 					return fmt.Errorf("cohort %s resident band[%d] has invalid identity or count", c.ID, idx)
 				}
-				if b.Hunger < 0 || b.Health < 0 {
+				if b.Hunger < 0 || b.Health < 0 || b.NutritionReserve < 0 {
 					return fmt.Errorf("cohort %s resident band[%d] has negative hunger or health", c.ID, idx)
+				}
+				held := map[string]int64{}
+				for item, qty := range b.Items {
+					held[item] = int64(qty)
+				}
+				if err := w.Catalog.validateHeldNutrition(held, b.NutritionReserve); err != nil {
+					return fmt.Errorf("%s resident %s: %w", owner, b.ID(0), err)
+				}
+				if err := addNutrition(&nutritionBalance, int64(b.Count), b.NutritionReserve); err != nil {
+					return fmt.Errorf("%s resident band: %w", owner, err)
+				}
+				if err := addNutrition(&nutritionBalance, int64(b.Count), int64(b.Hunger)); err != nil {
+					return fmt.Errorf("%s resident band: %w", owner, err)
 				}
 				for itemID, qty := range b.Items {
 					if qty < 0 {

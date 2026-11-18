@@ -51,14 +51,16 @@ type Memory struct {
 }
 
 type Offer struct {
-	ID       int64  `json:"id"`
-	Seller   string `json:"seller"`
-	Buyer    string `json:"buyer"`
-	Item     string `json:"item"`
-	Quantity int    `json:"quantity"`
-	Price    int    `json:"price"`
-	Currency string `json:"currency,omitempty"`
-	Expires  int64  `json:"expires"`
+	ProposedBy string `json:"proposed_by,omitempty"`
+	PreviousID int64  `json:"previous_id,omitempty"`
+	ID         int64  `json:"id"`
+	Seller     string `json:"seller"`
+	Buyer      string `json:"buyer"`
+	Item       string `json:"item"`
+	Quantity   int    `json:"quantity"`
+	Price      int    `json:"price"`
+	Currency   string `json:"currency,omitempty"`
+	Expires    int64  `json:"expires"`
 }
 
 // Task tracks a multi-tick action currently in progress so busy actors advance deterministically across quarter-hours.
@@ -77,50 +79,51 @@ type Task struct {
 }
 
 type Actor struct {
-	Resting         bool              `json:"resting,omitempty"`
-	DigestedFood    int64             `json:"digested_food,omitempty"`
-	Plan            *PersonalPlan     `json:"plan,omitempty"`
-	ID              string            `json:"id"`
-	Name            string            `json:"name"`
-	Role            string            `json:"role"`
-	Tags            []string          `json:"tags"`
-	Attributes      Attributes        `json:"attributes"`
-	Professions     map[string]int    `json:"professions"`
-	ProfessionRanks map[string]string `json:"profession_ranks,omitempty"`
-	ProfessionXP    map[string]int    `json:"profession_xp,omitempty"`
-	Level           int               `json:"level"`
-	Guilds          []string          `json:"guilds,omitempty"`
-	GuildLevels     map[string]int    `json:"guild_levels,omitempty"`
-	Location        string            `json:"location"`
-	VenueID         string            `json:"venue_id,omitempty"`
-	InsideHouse     string            `json:"inside_house,omitempty"`
-	HomeID          string            `json:"home_id,omitempty"`
-	AgeYears        int               `json:"age_years,omitempty"`
-	Health          int               `json:"health"`
-	Energy          int               `json:"energy"`
-	Hunger          int               `json:"hunger"`
-	Thirst          int               `json:"thirst,omitempty"`
-	Waste           int               `json:"waste,omitempty"`
-	DiseaseID       string            `json:"disease_id,omitempty"`
-	DiseaseTicks    int               `json:"disease_ticks,omitempty"`
-	Dead            bool              `json:"dead,omitempty"`
-	WoundedTracked  bool              `json:"wounded_tracked,omitempty"`
-	JailedUntil     int64             `json:"jailed_until,omitempty"`
-	RestUntil       int64             `json:"rest_until,omitempty"`
-	SleepTrait      string            `json:"sleep_trait"`
-	Money           int               `json:"money"`
-	Currencies      map[string]int64  `json:"currencies,omitempty"`
-	IllicitGain     int               `json:"illicit_gain,omitempty"`
-	Items           map[string]int    `json:"items"`
-	Equipped        map[string]string `json:"equipped,omitempty"`
-	PinFocal        bool              `json:"pin_focal,omitempty"`
-	FormID          string            `json:"form_id,omitempty"`
-	StateSlots      map[string]int    `json:"state_slots,omitempty"`
-	Goal            string            `json:"goal"`
-	Personality     string            `json:"personality"`
-	Trust           map[string]int    `json:"trust"`
-	Task            *Task             `json:"task,omitempty"`
-	Memories        []Memory          `json:"memories,omitempty"`
+	Resting          bool              `json:"resting,omitempty"`
+	DigestedFood     int64             `json:"digested_food,omitempty"`
+	Plan             *PersonalPlan     `json:"plan,omitempty"`
+	ID               string            `json:"id"`
+	Name             string            `json:"name"`
+	Role             string            `json:"role"`
+	Tags             []string          `json:"tags"`
+	Attributes       Attributes        `json:"attributes"`
+	Professions      map[string]int    `json:"professions"`
+	ProfessionRanks  map[string]string `json:"profession_ranks,omitempty"`
+	ProfessionXP     map[string]int    `json:"profession_xp,omitempty"`
+	Level            int               `json:"level"`
+	Guilds           []string          `json:"guilds,omitempty"`
+	GuildLevels      map[string]int    `json:"guild_levels,omitempty"`
+	Location         string            `json:"location"`
+	VenueID          string            `json:"venue_id,omitempty"`
+	InsideHouse      string            `json:"inside_house,omitempty"`
+	HomeID           string            `json:"home_id,omitempty"`
+	AgeYears         int               `json:"age_years,omitempty"`
+	Health           int               `json:"health"`
+	Energy           int               `json:"energy"`
+	NutritionReserve int64             `json:"nutrition_reserve,omitempty"`
+	Hunger           int               `json:"hunger"`
+	Thirst           int               `json:"thirst,omitempty"`
+	Waste            int               `json:"waste,omitempty"`
+	DiseaseID        string            `json:"disease_id,omitempty"`
+	DiseaseTicks     int               `json:"disease_ticks,omitempty"`
+	Dead             bool              `json:"dead,omitempty"`
+	WoundedTracked   bool              `json:"wounded_tracked,omitempty"`
+	JailedUntil      int64             `json:"jailed_until,omitempty"`
+	RestUntil        int64             `json:"rest_until,omitempty"`
+	SleepTrait       string            `json:"sleep_trait"`
+	Money            int               `json:"money"`
+	Currencies       map[string]int64  `json:"currencies,omitempty"`
+	IllicitGain      int               `json:"illicit_gain,omitempty"`
+	Items            map[string]int    `json:"items"`
+	Equipped         map[string]string `json:"equipped,omitempty"`
+	PinFocal         bool              `json:"pin_focal,omitempty"`
+	FormID           string            `json:"form_id,omitempty"`
+	StateSlots       map[string]int    `json:"state_slots,omitempty"`
+	Goal             string            `json:"goal"`
+	Personality      string            `json:"personality"`
+	Trust            map[string]int    `json:"trust"`
+	Task             *Task             `json:"task,omitempty"`
+	Memories         []Memory          `json:"memories,omitempty"`
 }
 
 // IdentityTags returns the actor's social tags plus held profession IDs for economic profile lookups.
@@ -282,6 +285,7 @@ type Perception struct {
 	LocalCohorts           []CohortView          `json:"local_cohorts,omitempty"`
 	ActiveEffects          []ActiveEffect        `json:"active_effects,omitempty"`
 	Offers                 []Offer               `json:"offers,omitempty"`
+	Interactions           []InteractionView     `json:"interactions,omitempty"`
 	OfferBlockReasons      map[int64]string      `json:"offer_block_reasons,omitempty"`
 	SpotlightSalience      int                   `json:"spotlight_salience,omitempty"`
 	HasActiveLoan          bool                  `json:"has_active_loan,omitempty"`
@@ -1006,9 +1010,11 @@ func (w *World) applyPerceptionEvoHintsWithAgreements(p *Perception, agreements 
 	}
 	p.OfferBlockReasons = make(map[int64]string)
 	for _, offer := range p.Offers {
-		if offer.Buyer == p.Self.ID {
-			if reason := w.offerSettlementBlockReason(p.Self, offer); reason != "" {
-				p.OfferBlockReasons[offer.ID] = reason
+		if offer.ResponderID() == p.Self.ID {
+			if buyer := w.actor(offer.Buyer); buyer != nil {
+				if reason := w.offerSettlementBlockReason(*buyer, offer); reason != "" {
+					p.OfferBlockReasons[offer.ID] = reason
+				}
 			}
 		}
 	}
@@ -1018,6 +1024,7 @@ func (w *World) applyPerceptionEvoHintsWithAgreements(p *Perception, agreements 
 	p.Self.Plan = ClonePersonalPlan(p.Self.Plan)
 	SyncActorPlan(&p.Self, w.Tick, w.Catalog)
 	p.Continuity = w.continuityForAgreements(p.Self.ID, agreements)
+	p.Interactions = BuildInteractionViews(*p)
 	a := p.Self
 	for _, g := range p.Growth {
 		if terms := w.careAgreement(g); terms != nil {
@@ -1465,6 +1472,9 @@ func (w *World) Step(ctx context.Context, d Decider) ([]Event, error) {
 	for _, o := range w.Offers {
 		if o.Expires >= w.Tick {
 			activeOffers = append(activeOffers, o)
+		} else if proposer := w.actor(o.ProposerID()); proposer != nil {
+			action := Action{Kind: "offer_expired", OfferID: o.ID, TargetID: o.ResponderID(), Item: o.Item, Quantity: o.Quantity, Price: o.Price, Currency: o.Currency}
+			events = append(events, w.record(proposer, action, "trade_expired", map[string]any{"text": fmt.Sprintf("offer %d expired without assent", o.ID)}, w.actor(o.ResponderID())))
 		}
 	}
 	w.Offers = activeOffers
@@ -2323,7 +2333,7 @@ func (w *World) Apply(id string, x Action) []Event {
 		if itemID == "" {
 			for k, spec := range w.Catalog.Items {
 				if spec.Edible && a.Items[k] > 0 {
-					if itemID == "" || spec.HungerRelief > w.Catalog.Items[itemID].HungerRelief {
+					if itemID == "" || spec.NutritionUnits > w.Catalog.Items[itemID].NutritionUnits || spec.NutritionUnits == w.Catalog.Items[itemID].NutritionUnits && k < itemID {
 						itemID = k
 					}
 				}
@@ -3342,6 +3352,9 @@ func (w *World) Apply(id string, x Action) []Event {
 		return emit("speech", x.Text, b)
 
 	case "offer":
+		if x.OfferID != 0 {
+			return w.counterOffer(a, x)
+		}
 		if b == nil || b.ID == id || !SamePlace(*a, *b) || w.Tick < b.JailedUntil {
 			return fail("buyer is not nearby")
 		}
@@ -3384,37 +3397,35 @@ func (w *World) Apply(id string, x Action) []Event {
 
 	case "accept", "reject":
 		for i, o := range w.Offers {
-			if o.ID != x.OfferID || o.Buyer != id {
+			if o.ID != x.OfferID || o.ResponderID() != id {
 				continue
 			}
 			seller := w.actor(o.Seller)
-			x.TargetID = o.Seller
+			buyer := w.actor(o.Buyer)
+			x.TargetID = o.ProposerID()
 			if x.Kind == "reject" {
 				w.Offers = append(w.Offers[:i], w.Offers[i+1:]...)
 				if len(w.Offers) == 0 {
 					w.Offers = nil
 				}
-				return emit("trade_rejected", a.Name+" rejected offer", seller)
+				return emit("trade_rejected", a.Name+" rejected offer", w.actor(o.ProposerID()))
 			}
 			cur := o.Currency
 			if cur == "" {
 				cur = "coins"
 			}
-			if reason := w.offerSettlementBlockReason(*a, o); reason != "" {
+			if buyer == nil {
+				return fail("buyer is no longer available")
+			}
+			if reason := w.offerSettlementBlockReason(*buyer, o); reason != "" {
 				return fail(reason)
 			}
 			w.adjustActorItem(seller, o.Item, -o.Quantity, false)
-			w.adjustActorItem(a, o.Item, o.Quantity, false)
-			taxCoins := 0
-			if taxPermille := w.EffectiveMarketTaxPermille(a.Location, a.VenueID); taxPermille > 0 && o.Price > 0 {
-				taxCoins = (o.Price * taxPermille) / 1000
-				if taxCoins > o.Price {
-					taxCoins = o.Price
-				}
-			}
-			pol := w.EffectiveGoverningPolity(a.Location, a.VenueID)
+			w.adjustActorItem(buyer, o.Item, o.Quantity, false)
+			taxCoins := w.offerTax(*buyer, o)
+			pol := w.EffectiveGoverningPolity(buyer.Location, buyer.VenueID)
 			if cur == "coins" {
-				a.Money -= o.Price
+				buyer.Money -= o.Price
 				seller.Money += (o.Price - taxCoins)
 				if taxCoins > 0 {
 					if pol != nil {
@@ -3429,32 +3440,40 @@ func (w *World) Apply(id string, x Action) []Event {
 				if pol == nil {
 					taxCoins = 0
 				}
-				w.addActorCurrency(a, cur, -int64(o.Price))
+				w.addActorCurrency(buyer, cur, -int64(o.Price))
 				w.addActorCurrency(seller, cur, int64(o.Price-taxCoins))
 				if taxCoins > 0 && pol != nil {
 					w.addPolityCurrency(pol, cur, int64(taxCoins))
 				}
 			}
-			a.Trust[seller.ID]++
-			seller.Trust[a.ID]++
+			if buyer.Trust == nil {
+				buyer.Trust = map[string]int{}
+			}
+			if seller.Trust == nil {
+				seller.Trust = map[string]int{}
+			}
+			buyer.Trust[seller.ID]++
+			seller.Trust[buyer.ID]++
 			w.Offers = append(w.Offers[:i], w.Offers[i+1:]...)
 			if len(w.Offers) == 0 {
 				w.Offers = nil
 			}
+			x.Item, x.Quantity, x.Price, x.Currency = o.Item, o.Quantity, o.Price, o.Currency
 			events := []Event{w.record(a, x, "trade_completed", map[string]any{
-				"text":       fmt.Sprintf("%s bought %d %s from %s for %d %s", a.Name, o.Quantity, o.Item, seller.Name, o.Price, cur),
+				"text":       fmt.Sprintf("%s bought %d %s from %s for %d %s", buyer.Name, o.Quantity, o.Item, seller.Name, o.Price, cur),
 				"item":       o.Item,
 				"quantity":   o.Quantity,
 				"seller_id":  seller.ID,
+				"price":      o.Price,
 				"currency":   cur,
 				"market_tax": taxCoins,
-			}, seller)}
+			}, w.actor(o.ProposerID()))}
 			tier := w.Catalog.Items[o.Item].Tier
 			if tier < 1 {
 				tier = 1
 			}
 			events = append(events, w.grantProfessionXP(seller, x, "peddler", tier*o.Quantity, tier)...)
-			return append(events, w.grantProfessionXP(a, x, "peddler", tier*o.Quantity, tier)...)
+			return append(events, w.grantProfessionXP(buyer, x, "peddler", tier*o.Quantity, tier)...)
 		}
 		return fail("offer not found")
 

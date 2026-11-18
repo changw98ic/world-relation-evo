@@ -12,14 +12,15 @@ import (
 // per-person inventory, and availability state.
 // Origin and ordinal follow the resident across cohort boundaries.
 type ResidentBand struct {
-	Origin string         `json:"origin"`
-	First  int            `json:"first"`
-	Count  int            `json:"count"`
-	Hunger int            `json:"hunger"`
-	Health int            `json:"health"`
-	Items  map[string]int `json:"items,omitempty"`
-	Sick   bool           `json:"sick,omitempty"`
-	Jailed bool           `json:"jailed,omitempty"`
+	Origin           string         `json:"origin"`
+	First            int            `json:"first"`
+	Count            int            `json:"count"`
+	NutritionReserve int64          `json:"nutrition_reserve,omitempty"`
+	Hunger           int            `json:"hunger"`
+	Health           int            `json:"health"`
+	Items            map[string]int `json:"items,omitempty"`
+	Sick             bool           `json:"sick,omitempty"`
+	Jailed           bool           `json:"jailed,omitempty"`
 }
 
 func (b ResidentBand) ID(offset int) string {
@@ -51,7 +52,7 @@ func appendResidentBand(dst []ResidentBand, b ResidentBand) []ResidentBand {
 	if len(dst) > 0 {
 		last := &dst[len(dst)-1]
 		if last.Origin == b.Origin && last.First+last.Count == b.First &&
-			last.Hunger == b.Hunger && last.Health == b.Health &&
+			last.Hunger == b.Hunger && last.NutritionReserve == b.NutritionReserve && last.Health == b.Health &&
 			last.Sick == b.Sick && last.Jailed == b.Jailed &&
 			equalIntMaps(last.Items, b.Items) {
 			last.Count += b.Count
@@ -110,7 +111,7 @@ func (w *World) InitCohortResidents() error {
 			reserveActor(a.ID)
 		}
 		for _, b := range c.Residents {
-			if b.Origin == "" || b.First < 1 || b.Count < 1 || b.Count-1 > math.MaxInt-b.First || b.Health < 1 || b.Health > MaxHealth || b.Hunger < 0 {
+			if b.Origin == "" || b.First < 1 || b.Count < 1 || b.Count-1 > math.MaxInt-b.First || b.Health < 1 || b.Health > MaxHealth || b.Hunger < 0 || b.NutritionReserve < 0 {
 				return fmt.Errorf("cohort %s has invalid resident band %+v", c.ID, b)
 			}
 			occupied = append(occupied, b)

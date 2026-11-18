@@ -1074,7 +1074,7 @@ func (w *World) HydrateActor(cohortID string) (*Actor, error) {
 		}
 	}
 
-	a := Actor{DigestedFood: digestedShare,
+	a := Actor{DigestedFood: digestedShare, NutritionReserve: resident.NutritionReserve,
 		ID:           actorID,
 		Name:         fmt.Sprintf("%s·%d", c.Name, c.HydratedSeq),
 		Role:         baseRole,
@@ -1378,9 +1378,9 @@ func (w *World) selectCohortRecipe(c *PopulationCohort, prof Profession, guildLe
 		} else if outSpec.Edible {
 			foodTarget := int64(c.Population) * 18
 			if r.Growth != nil {
-				// Hunger rises every 24 ticks. Planting must precede exhaustion by
+				// Planting must precede exhaustion by
 				// the whole configured growth period, not an arbitrary few meals.
-				foodTarget = max(foodTarget, int64(c.Population)*((r.Growth.DurationTicks+int64(r.Ticks)+23)/24))
+				foodTarget = max(foodTarget, int64(c.Population)*nutritionNeeded(r.Growth.DurationTicks+int64(r.Ticks)))
 			}
 			if w.cohortFoodRelief(*c) > foodTarget {
 				continue
@@ -1582,7 +1582,7 @@ func (w *World) clearRegionalCohortMarket() []Event {
 	for _, o := range w.Offers {
 		seller := w.actor(o.Seller)
 		spec := w.Catalog.Items[o.Item]
-		if (o.Currency != "" && o.Currency != "coins") || !itemAcceptsCurrency(spec, "coins") || spec.BuyerRequiredTag != "" {
+		if o.Buyer != "" || o.ProposerID() != o.Seller || (o.Currency != "" && o.Currency != "coins") || !itemAcceptsCurrency(spec, "coins") || spec.BuyerRequiredTag != "" {
 			remainingOffers = append(remainingOffers, o)
 			continue
 		}
@@ -1705,8 +1705,12 @@ func (w *World) clearRegionalCohortMarket() []Event {
 						continue
 					}
 					want := int64(buyer.Population) * 2
-					if spec.Edible && spec.HungerRelief <= 1 {
-						want = int64(buyer.Population) * 6
+					if spec.Edible {
+						if spec.NutritionUnits == 0 {
+							continue
+						}
+						units := max(int64(0), int64(w.anonymousCohort(*buyer).Population)*DailyNutritionUnits*2-w.cohortFoodRelief(*buyer)-w.incomingNutrition(buyer.ID))
+						want = buyer.ItemPool[itemID] + w.incomingStock(buyer.ID, itemID) + (units+spec.NutritionUnits-1)/spec.NutritionUnits
 					}
 					if w.SpotlightRumor != nil {
 						if panicPermille := w.DistrictPanicDemandPermille(w.SpotlightRumor, buyer.District, itemID); panicPermille > 1000 {
@@ -1962,7 +1966,7 @@ func (w *World) clearFocalActorCohortTrades() []Event {
 		}
 
 		// A. Buy essential edible rations from local/surplus cohort if low on food
-		edibleQty := 0
+		edibleQty := a.NutritionReserve
 		medQty := 0
 		for _, k := range itemKeys {
 			q := a.Items[k]
@@ -1971,13 +1975,13 @@ func (w *World) clearFocalActorCohortTrades() []Event {
 			}
 			sp := w.Catalog.Items[k]
 			if sp.Edible {
-				edibleQty += q
+				edibleQty += int64(q) * sp.NutritionUnits
 			}
 			if sp.MedicinalHeal > 0 || sp.DiseaseCure > 0 {
 				medQty += q
 			}
 		}
-		if edibleQty < 4 {
+		if edibleQty < DailyNutritionUnits+int64(a.Hunger) {
 			if sale, ok := w.buyLocalCohortRation(a, itemKeys, false); ok {
 				events = append(events, sale)
 			} else if a.Hunger >= 3 && w.PublicTreasury > 0 {
@@ -3106,7 +3110,9 @@ func (s *ScaleSummary) RecordEvents(events []Event) {
 				qty = 1
 			}
 			s.ItemsTraded += qty
-			s.CoinsTraded += int64(e.Action.Price)
+			if e.Action.Currency == "" || e.Action.Currency == "coins" {
+				s.CoinsTraded += int64(e.Action.Price)
+			}
 		case "cohort_traded":
 			b := payloadInt64(e.Payload, "batches")
 			q := payloadInt64(e.Payload, "quantity")

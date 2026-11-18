@@ -9,7 +9,7 @@ func TestRationAccessAtLowHealthRequiresPresentBuyerSurplusAndPayment(t *testing
 		buyerDistrict, task     string
 		want                    int
 	}{
-		{"low_health_paid", 1, 0, 6, "home", "", 2}, {"low_health_relief", 0, 1, 6, "home", "", 2}, {"unfunded", 0, 0, 6, "home", "", 0}, {"protected_stock", 1, 1, 5, "home", "", 0}, {"other_district", 1, 1, 6, "away", "", 0}, {"on_road", 1, 1, 6, "home", "move", 0}, {"between_venues", 0, 1, 6, "home", "move_venue", 0},
+		{"low_health_paid", 1, 0, 6, "home", "", 2}, {"low_health_relief", 0, 1, 6, "home", "", 2}, {"unfunded", 0, 0, 6, "home", "", 0}, {"protected_stock", 1, 1, 4, "home", "", 0}, {"other_district", 1, 1, 6, "away", "", 0}, {"on_road", 1, 1, 6, "home", "move", 0}, {"between_venues", 0, 1, 6, "home", "move_venue", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := lawWorld()
@@ -23,7 +23,7 @@ func TestRationAccessAtLowHealthRequiresPresentBuyerSurplusAndPayment(t *testing
 				a.Task = &Task{Action: Action{Kind: tc.task}, Remaining: 1}
 			}
 			w.PublicTreasury = int64(tc.treasury)
-			w.Catalog.Items["grain"] = ItemSpec{ID: "grain", Edible: true, HungerRelief: 1, Tradeable: true, BatchQty: 2, BatchPrice: 1}
+			w.Catalog.Items["grain"] = ItemSpec{ID: "grain", Edible: true, NutritionUnits: 1, Tradeable: true, BatchQty: 2, BatchPrice: 1}
 			w.Cohorts = []PopulationCohort{{ID: "seller", District: "home", Population: 1, Adults: 1, ItemPool: map[string]int64{"grain": int64(tc.stock)}}}
 			w.InitLedgerAudit()
 			w.clearFocalActorCohortTrades()
@@ -69,7 +69,7 @@ func TestFoodSaleRulesAlsoApplyWhenTreasuryPays(t *testing.T) {
 				} else {
 					a.Money = 1
 				}
-				item := ItemSpec{ID: "grain", Edible: true, Tradeable: true, BatchQty: 2, BatchPrice: 1, HungerRelief: 1}
+				item := ItemSpec{ID: "grain", Edible: true, Tradeable: true, BatchQty: 2, BatchPrice: 1, NutritionUnits: 1}
 				tc.configure(w, &item)
 				w.Catalog.Items["grain"] = item
 				w.Cohorts = []PopulationCohort{{ID: "supplier", District: "home", Population: 1, Adults: 1, ItemPool: map[string]int64{"grain": 6}}}

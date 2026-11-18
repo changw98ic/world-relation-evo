@@ -58,15 +58,14 @@ type EquipSlotSpec struct {
 
 // ItemSpec defines generic item properties. Tier is the goods grade (1–5).
 type ItemSpec struct {
-	MassUnits          int64       `json:"mass_units,omitempty"`
-	NutritionUnits     int64       `json:"nutrition_units,omitempty"`
-	Living             *LivingRule `json:"living,omitempty"`
-	DurabilityBatches  int64       `json:"durability_batches,omitempty"`
-	ID                 string      `json:"id"`
-	Name               string      `json:"name"`
-	Tier               int         `json:"tier"`
+	MassUnits          int64                  `json:"mass_units,omitempty"`
+	NutritionUnits     int64                  `json:"nutrition_units,omitempty"`
+	Living             *LivingRule            `json:"living,omitempty"`
+	DurabilityBatches  int64                  `json:"durability_batches,omitempty"`
+	ID                 string                 `json:"id"`
+	Name               string                 `json:"name"`
+	Tier               int                    `json:"tier"`
 	Edible             bool                   `json:"edible,omitempty"`
-	HungerRelief       int                    `json:"hunger_relief,omitempty"`
 	Potable            bool                   `json:"potable,omitempty"`
 	ThirstRelief       int                    `json:"thirst_relief,omitempty"`
 	EnergyRelief       int                    `json:"energy_relief,omitempty"`
@@ -84,15 +83,15 @@ type ItemSpec struct {
 	EquipSpeedBonusPct int                    `json:"equip_speed_bonus_pct,omitempty"`
 	EquipYieldBonusPct int                    `json:"equip_yield_bonus_pct,omitempty"`
 	Tradeable          bool                   `json:"tradeable,omitempty"`
-	BatchQty           int         `json:"batch_qty,omitempty"`
-	BatchPrice         int         `json:"batch_price,omitempty"`
-	OfferThreshold     int         `json:"offer_threshold,omitempty"`
-	SurplusThreshold   int         `json:"surplus_threshold,omitempty"`
-	ShortageThreshold  int         `json:"shortage_threshold,omitempty"`
-	AcceptedCurrencies []string    `json:"accepted_currencies,omitempty"`
-	BuyerRequiredTag   string      `json:"buyer_required_tag,omitempty"`
-	DualUseCurrency    string      `json:"dual_use_currency,omitempty"`
-	DualUseRate        int         `json:"dual_use_rate,omitempty"`
+	BatchQty           int                    `json:"batch_qty,omitempty"`
+	BatchPrice         int                    `json:"batch_price,omitempty"`
+	OfferThreshold     int                    `json:"offer_threshold,omitempty"`
+	SurplusThreshold   int                    `json:"surplus_threshold,omitempty"`
+	ShortageThreshold  int                    `json:"shortage_threshold,omitempty"`
+	AcceptedCurrencies []string               `json:"accepted_currencies,omitempty"`
+	BuyerRequiredTag   string                 `json:"buyer_required_tag,omitempty"`
+	DualUseCurrency    string                 `json:"dual_use_currency,omitempty"`
+	DualUseRate        int                    `json:"dual_use_rate,omitempty"`
 }
 
 // Profession is a leveled trade (Tier 1 base or Tier 2+ advanced) with attribute entry requirements,
@@ -259,7 +258,7 @@ func DefaultCatalog() Catalog {
 			"ink":       {ID: "ink", Name: "writing ink", Tier: 1, Tradeable: true, BatchQty: 1, BatchPrice: 1},
 			"calf":      {ID: "calf", Name: "cattle calf", Tier: 1, Tradeable: true, BatchQty: 1, BatchPrice: 2, Living: DefaultCattleLivingRule()},
 
-			"food": {ID: "food", Name: "grain rations", Tier: 1, Edible: true, HungerRelief: 1,
+			"food": {ID: "food", Name: "grain rations", Tier: 1, Edible: true, NutritionUnits: 1,
 				Tradeable: true, BatchQty: 2, BatchPrice: 2, OfferThreshold: 6, SurplusThreshold: 8, ShortageThreshold: 4},
 			"seeds": {ID: "seeds", Name: "wheat seeds", Tier: 1,
 				Tradeable: true, BatchQty: 3, BatchPrice: 1, OfferThreshold: 6, SurplusThreshold: 6, ShortageThreshold: 1},
@@ -279,7 +278,7 @@ func DefaultCatalog() Catalog {
 				Tradeable: true, BatchQty: 2, BatchPrice: 2, OfferThreshold: 4, SurplusThreshold: 4, ShortageThreshold: 2},
 			"medicine": {ID: "medicine", Name: "herbal medicine", Tier: 3, MedicinalHeal: 20, DiseaseCure: 1,
 				Tradeable: true, BatchQty: 1, BatchPrice: 3, OfferThreshold: 3, SurplusThreshold: 3, ShortageThreshold: 1},
-			"choice_grain": {ID: "choice_grain", Name: "choice grain", Tier: 2, Edible: true, HungerRelief: 1,
+			"choice_grain": {ID: "choice_grain", Name: "choice grain", Tier: 2, Edible: true, NutritionUnits: 1,
 				Tradeable: true, BatchQty: 2, BatchPrice: 4, OfferThreshold: 4, SurplusThreshold: 5, ShortageThreshold: 2},
 			"fine_tools": {ID: "fine_tools", Name: "fine tool sets", Tier: 4, SafetyBonusPct: 40, CombatBonus: 2, DurabilityBatches: 24,
 				Tradeable: true, BatchQty: 1, BatchPrice: 8, OfferThreshold: 2, SurplusThreshold: 2, ShortageThreshold: 1},
@@ -297,9 +296,9 @@ func DefaultCatalog() Catalog {
 				Tradeable: true, BatchQty: 1, BatchPrice: 5, OfferThreshold: 2, SurplusThreshold: 2, ShortageThreshold: 1},
 			"livestock": {ID: "livestock", Name: "adult cattle", Tier: 2, Living: DefaultCattleLivingRule(),
 				Tradeable: true, BatchQty: 1, BatchPrice: 5, OfferThreshold: 3, SurplusThreshold: 4, ShortageThreshold: 1},
-			"meat": {ID: "meat", Name: "cured meat", Tier: 2, Edible: true, HungerRelief: 2,
+			"meat": {ID: "meat", Name: "cured meat", Tier: 2, Edible: true, NutritionUnits: 2,
 				Tradeable: true, BatchQty: 2, BatchPrice: 4, OfferThreshold: 4, SurplusThreshold: 5, ShortageThreshold: 2},
-			"fish": {ID: "fish", Name: "river fish", Tier: 1, Edible: true, HungerRelief: 1,
+			"fish": {ID: "fish", Name: "river fish", Tier: 1, Edible: true, NutritionUnits: 1,
 				Tradeable: true, BatchQty: 2, BatchPrice: 2, OfferThreshold: 5, SurplusThreshold: 6, ShortageThreshold: 2},
 			"hide": {ID: "hide", Name: "cured beast hide", Tier: 2,
 				Tradeable: true, BatchQty: 2, BatchPrice: 3, OfferThreshold: 3, SurplusThreshold: 4, ShortageThreshold: 1},
