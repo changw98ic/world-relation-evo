@@ -1522,6 +1522,396 @@ func (w *World) stepCohortEncountersAndAccidents() []Event {
 			}
 		}
 	}
+	events = append(events, w.stepActorOutdoorEncounters()...)
+	return events
+}
+
+type actorRiskProfile struct {
+	itemSafetyPct int
+	skillMitPct   int
+	evasionMitPct int
+	combatDefPct  int
+	tierDefPct    int
+}
+
+func (w *World) actorRiskMitigations(a Actor, skillID, profID string) actorRiskProfile {
+	var p actorRiskProfile
+	for itemID, spec := range w.Catalog.Items {
+		if spec.SafetyBonusPct > p.itemSafetyPct && a.Items[itemID] > 0 {
+			p.itemSafetyPct = spec.SafetyBonusPct
+		}
+	}
+	if p.itemSafetyPct > 60 {
+		p.itemSafetyPct = 60
+	}
+	masteryLv := 0
+	if skillID != "" {
+		masteryLv = a.Skills[skillID]
+	}
+	if masteryLv <= 0 && profID != "" {
+		masteryLv = a.Professions[profID]
+	}
+	p.skillMitPct = minInt(54, maxInt(0, masteryLv*9))
+	stealthBonus, _ := w.Catalog.StealthBonus(a)
+	p.evasionMitPct = minInt(30, maxInt(0, stealthBonus))
+	cp := CombatPowerWithCatalog(w.Catalog, a)
+	p.combatDefPct = minInt(50, maxInt(0, (cp-15)/2))
+	tier := w.Catalog.ActorPowerTier(a)
+	if tier > 1 {
+		p.tierDefPct = minInt(60, (tier-1)*15)
+	}
+	return p
+}
+
+func (w *World) actorHadRecentHazard(a Actor, window int64) bool {
+	for i := len(a.Memories) - 1; i >= 0; i-- {
+		m := a.Memories[i]
+		if w.Tick-m.Tick > window {
+			break
+		}
+		if m.Source == a.ID {
+			switch m.Kind {
+			case "workplace_accident", "transit_hazard", "wild_encounter":
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// checkActorCraftAccident evaluates declarative workplace/crafting AccidentSpecs for an individual spotlight Actor.
+// Skill mastery, protective items (SafetyBonusPct), district safety infrastructure, and PowerTier mitigate risk.
+func (w *World) checkActorCraftAccident(a *Actor, x Action, r Recipe) []Event {
+	if a == nil || a.Dead || w.DistrictStates == nil || len(w.Catalog.Accidents) == 0 {
+		return nil
+	}
+	ds, hasDS := w.DistrictStates[a.Location]
+	if !hasDS {
+		return nil
+	}
+	ws := w.Catalog.Weathers[ds.Weather]
+	weatherMult := ws.AccidentMultiplierPct
+	if weatherMult <= 0 {
+		weatherMult = 100
+	}
+	mit := w.actorRiskMitigations(*a, r.SkillID, r.Profession)
+	for _, acc := range w.Catalog.Accidents {
+		// Skip pure transit-only accidents during stationary crafting.
+		if len(acc.RouteMediums) > 0 && len(acc.Recipes) == 0 && len(acc.NodeFeatures) == 0 {
+			continue
+		}
+		matched := false
+		if len(acc.Recipes) > 0 {
+			matched = ActorHasTag(acc.Recipes, r.ID)
+		} else if len(acc.NodeFeatures) > 0 && r.NodeFeature != "" {
+			matched = ActorHasTag(acc.NodeFeatures, r.NodeFeature)
+		}
+		if !matched {
+			continue
+		}
+		prob := (acc.BasePermille * weatherMult) / 100
+		if mit.itemSafetyPct > 0 {
+			prob = (prob * (100 - mit.itemSafetyPct)) / 100
+		}
+		if acc.SafetyInfra != "" && ds.Infrastructure != nil {
+			cond := ds.Infrastructure[acc.SafetyInfra]
+			prob = (prob * (100 - cond/2)) / 100
+		}
+		if mit.skillMitPct > 0 {
+			prob = (prob * (100 - mit.skillMitPct)) / 100
+		}
+		if mit.tierDefPct > 0 {
+			prob = (prob * (100 - mit.tierDefPct/2)) / 100
+		}
+		if prob <= 0 {
+			continue
+		}
+		roll := int(worldHash(w.ID, w.Tick, "actor_acc:"+a.ID+":"+acc.ID+":"+r.ID) % 1000)
+		if roll >= prob {
+			continue
+		}
+		leth := (acc.LethalityPermille * (100 - mit.skillMitPct/2) * (100 - mit.tierDefPct)) / 10000
+		dmg := maxInt(4, (maxInt(8, acc.Damage)*(100-mit.tierDefPct))/100)
+		dRoll := int(worldHash(w.ID, w.Tick, "actor_accd:"+a.ID+":"+acc.ID+":"+r.ID) % 1000)
+		prevHealth := a.Health
+		if dRoll < leth {
+			a.Health = 0
+		} else {
+			a.Health = maxInt(0, a.Health-dmg)
+		}
+		fatal := a.Health <= 0
+		if !fatal {
+			a.RestUntil = maxInt64(a.RestUntil, w.Tick+16)
+		}
+		ev := w.record(a, x, "workplace_accident", map[string]any{
+			"text":            fmt.Sprintf("%s suffered %s while performing %s in %s (health %d -> %d)", a.Name, acc.Name, r.ID, a.Location, prevHealth, a.Health),
+			"district":        a.Location,
+			"accident_id":     acc.ID,
+			"accident_name":   acc.Name,
+			"recipe_id":       r.ID,
+			"weather":         ds.Weather,
+			"damage":          prevHealth - a.Health,
+			"previous_health": prevHealth,
+			"health":          a.Health,
+			"fatal":           fatal,
+			"cause":           "accident",
+		})
+		events := []Event{ev}
+		if fatal {
+			events = append(events, w.markDeadIfZero(a, nil, x, "accident")...)
+		}
+		return events
+	}
+	return nil
+}
+
+// checkActorTransitHazard evaluates cross-district route accidents and roadside wild encounters
+// when an individual spotlight Actor completes inter-district travel.
+func (w *World) checkActorTransitHazard(a *Actor, x Action, fromDistrict, toDistrict, medium, modeID string) []Event {
+	if a == nil || a.Dead || w.DistrictStates == nil || fromDistrict == "" || toDistrict == "" || fromDistrict == toDistrict {
+		return nil
+	}
+	if w.actorHadRecentHazard(*a, TicksPerDay/2) {
+		return nil
+	}
+	if medium == "" {
+		medium = "road"
+	}
+	ds, hasDS := w.DistrictStates[toDistrict]
+	if !hasDS {
+		ds, hasDS = w.DistrictStates[fromDistrict]
+		if !hasDS {
+			return nil
+		}
+	}
+	bypassWeather := false
+	if modeID != "" {
+		if loc, ok := w.Catalog.LocomotionModes[modeID]; ok && loc.BypassWeather {
+			bypassWeather = true
+		}
+	}
+	ws := w.Catalog.Weathers[ds.Weather]
+	weatherMult := ws.AccidentMultiplierPct
+	if weatherMult <= 0 || bypassWeather {
+		weatherMult = 100
+	}
+	weatherRouteBonus := 0
+	if !bypassWeather && ws.RouteHazardPermille != nil {
+		weatherRouteBonus = ws.RouteHazardPermille[medium]
+	}
+	mit := w.actorRiskMitigations(*a, "", "")
+
+	// 1. Declarative route/transit AccidentSpecs
+	for _, acc := range w.Catalog.Accidents {
+		if len(acc.RouteMediums) == 0 || !ActorHasTag(acc.RouteMediums, medium) {
+			continue
+		}
+		prob := (acc.BasePermille*weatherMult)/100 + weatherRouteBonus/2
+		if mit.itemSafetyPct > 0 {
+			prob = (prob * (100 - mit.itemSafetyPct)) / 100
+		}
+		if acc.SafetyInfra != "" && ds.Infrastructure != nil {
+			cond := ds.Infrastructure[acc.SafetyInfra]
+			prob = (prob * (100 - cond/2)) / 100
+		}
+		if mit.evasionMitPct > 0 {
+			prob = (prob * (100 - mit.evasionMitPct)) / 100
+		}
+		if mit.combatDefPct > 0 {
+			prob = (prob * (100 - mit.combatDefPct/2)) / 100
+		}
+		if mit.tierDefPct > 0 {
+			prob = (prob * (100 - mit.tierDefPct/2)) / 100
+		}
+		if prob <= 0 {
+			continue
+		}
+		roll := int(worldHash(w.ID, w.Tick, "actor_transit:"+a.ID+":"+acc.ID+":"+toDistrict) % 1000)
+		if roll >= prob {
+			continue
+		}
+		leth := (acc.LethalityPermille * (100 - mit.tierDefPct) * (100 - mit.evasionMitPct/2)) / 10000
+		dmg := maxInt(4, (maxInt(8, acc.Damage)*(100-mit.tierDefPct))/100)
+		dRoll := int(worldHash(w.ID, w.Tick, "actor_transitd:"+a.ID+":"+acc.ID+":"+toDistrict) % 1000)
+		prevHealth := a.Health
+		if dRoll < leth {
+			a.Health = 0
+		} else {
+			a.Health = maxInt(0, a.Health-dmg)
+		}
+		fatal := a.Health <= 0
+		if !fatal {
+			a.RestUntil = maxInt64(a.RestUntil, w.Tick+16)
+		}
+		ev := w.record(a, x, "transit_hazard", map[string]any{
+			"text":            fmt.Sprintf("%s encountered %s traveling from %s to %s via %s (health %d -> %d)", a.Name, acc.Name, fromDistrict, toDistrict, medium, prevHealth, a.Health),
+			"from_district":   fromDistrict,
+			"to_district":     toDistrict,
+			"district":        toDistrict,
+			"medium":          medium,
+			"accident_id":     acc.ID,
+			"accident_name":   acc.Name,
+			"weather":         ds.Weather,
+			"damage":          prevHealth - a.Health,
+			"previous_health": prevHealth,
+			"health":          a.Health,
+			"fatal":           fatal,
+			"cause":           "accident",
+		})
+		events := []Event{ev}
+		if fatal {
+			events = append(events, w.markDeadIfZero(a, nil, x, "accident")...)
+		}
+		return events
+	}
+
+	// 2. Roadside wild beast / anomaly encounter along active-threat districts
+	for _, enc := range w.Catalog.Encounters {
+		act := ds.ThreatActivity[enc.ID]
+		if act <= 0 {
+			if fds, ok := w.DistrictStates[fromDistrict]; ok {
+				act = fds.ThreatActivity[enc.ID]
+			}
+		}
+		if act <= 0 {
+			continue
+		}
+		prob := (enc.HazardPermille * act) / 70
+		if mit.itemSafetyPct > 0 {
+			prob = (prob * (100 - mit.itemSafetyPct)) / 100
+		}
+		if mit.evasionMitPct > 0 {
+			prob = (prob * (100 - mit.evasionMitPct)) / 100
+		}
+		if mit.combatDefPct > 0 {
+			prob = (prob * (100 - mit.combatDefPct)) / 100
+		}
+		if mit.tierDefPct > 0 {
+			prob = (prob * (100 - mit.tierDefPct/2)) / 100
+		}
+		if prob <= 0 {
+			continue
+		}
+		roll := int(worldHash(w.ID, w.Tick, "actor_tenc:"+a.ID+":"+enc.ID+":"+toDistrict) % 1000)
+		if roll >= prob {
+			continue
+		}
+		leth := (enc.LethalityPermille * (100 - mit.tierDefPct) * (100 - mit.combatDefPct/2)) / 10000
+		dmg := maxInt(4, (maxInt(8, enc.Damage)*(100-mit.tierDefPct))/100)
+		dRoll := int(worldHash(w.ID, w.Tick, "actor_tencd:"+a.ID+":"+enc.ID+":"+toDistrict) % 1000)
+		prevHealth := a.Health
+		if dRoll < leth {
+			a.Health = 0
+		} else {
+			a.Health = maxInt(0, a.Health-dmg)
+		}
+		fatal := a.Health <= 0
+		if !fatal {
+			a.RestUntil = maxInt64(a.RestUntil, w.Tick+16)
+		}
+		ev := w.record(a, x, "wild_encounter", map[string]any{
+			"text":            fmt.Sprintf("%s was ambushed by %s on the road from %s to %s (health %d -> %d)", a.Name, enc.Name, fromDistrict, toDistrict, prevHealth, a.Health),
+			"in_transit":      true,
+			"from_district":   fromDistrict,
+			"to_district":     toDistrict,
+			"district":        toDistrict,
+			"threat_id":       enc.ID,
+			"threat_name":     enc.Name,
+			"damage":          prevHealth - a.Health,
+			"previous_health": prevHealth,
+			"health":          a.Health,
+			"fatal":           fatal,
+			"cause":           "beast",
+		})
+		events := []Event{ev}
+		if fatal {
+			events = append(events, w.markDeadIfZero(a, nil, x, "beast")...)
+		}
+		return events
+	}
+	return nil
+}
+
+// stepActorOutdoorEncounters resolves daytime wild encounters for outdoor spotlight Actors
+// in districts with active ThreatActivity.
+func (w *World) stepActorOutdoorEncounters() []Event {
+	if w.DistrictStates == nil || len(w.Catalog.Encounters) == 0 {
+		return nil
+	}
+	var events []Event
+	for i := range w.Actors {
+		a := &w.Actors[i]
+		if a.Dead || a.InTransit() || a.InsideHouse != "" || w.Tick < a.JailedUntil {
+			continue
+		}
+		if a.Task != nil && a.Task.Action.Kind == "sleep" {
+			continue
+		}
+		if w.actorHadRecentHazard(*a, TicksPerDay/2) {
+			continue
+		}
+		ds, hasDS := w.DistrictStates[a.Location]
+		if !hasDS || len(ds.ThreatActivity) == 0 {
+			continue
+		}
+		mit := w.actorRiskMitigations(*a, "", "")
+		for _, enc := range w.Catalog.Encounters {
+			act := ds.ThreatActivity[enc.ID]
+			if act <= 0 {
+				continue
+			}
+			prob := (enc.HazardPermille * act) / 45
+			if mit.itemSafetyPct > 0 {
+				prob = (prob * (100 - mit.itemSafetyPct)) / 100
+			}
+			if mit.evasionMitPct > 0 {
+				prob = (prob * (100 - mit.evasionMitPct)) / 100
+			}
+			if mit.combatDefPct > 0 {
+				prob = (prob * (100 - mit.combatDefPct)) / 100
+			}
+			if mit.tierDefPct > 0 {
+				prob = (prob * (100 - mit.tierDefPct/2)) / 100
+			}
+			if prob <= 0 {
+				continue
+			}
+			roll := int(worldHash(w.ID, w.Tick, "actor_enc:"+a.ID+":"+enc.ID) % 1000)
+			if roll >= prob {
+				continue
+			}
+			leth := (enc.LethalityPermille * (100 - mit.tierDefPct) * (100 - mit.combatDefPct/2)) / 10000
+			dmg := maxInt(4, (maxInt(8, enc.Damage)*(100-mit.tierDefPct))/100)
+			dRoll := int(worldHash(w.ID, w.Tick, "actor_encd:"+a.ID+":"+enc.ID) % 1000)
+			prevHealth := a.Health
+			if dRoll < leth {
+				a.Health = 0
+			} else {
+				a.Health = maxInt(0, a.Health-dmg)
+			}
+			fatal := a.Health <= 0
+			actObj := Action{Kind: "wait", Location: a.Location}
+			ev := w.record(a, actObj, "wild_encounter", map[string]any{
+				"text":            fmt.Sprintf("%s encountered %s outdoors in %s (health %d -> %d)", a.Name, enc.Name, a.Location, prevHealth, a.Health),
+				"district":        a.Location,
+				"threat_id":       enc.ID,
+				"threat_name":     enc.Name,
+				"damage":          prevHealth - a.Health,
+				"previous_health": prevHealth,
+				"health":          a.Health,
+				"fatal":           fatal,
+				"cause":           "beast",
+			})
+			events = append(events, ev)
+			if fatal {
+				events = append(events, w.markDeadIfZero(a, nil, actObj, "beast")...)
+			} else {
+				a.RestUntil = maxInt64(a.RestUntil, w.Tick+16)
+				events = append(events, w.interruptTaskOnDamage(a, "beast")...)
+			}
+			break
+		}
+	}
 	return events
 }
 

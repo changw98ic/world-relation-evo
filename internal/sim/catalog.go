@@ -105,13 +105,16 @@ type Profession struct {
 	MinParentLevel      int            `json:"min_parent_level,omitempty"`
 	MinFactionLevel     int            `json:"min_faction_level,omitempty"`
 	Requirements        map[string]int `json:"requirements,omitempty"`
-	MaxLevel            int            `json:"max_level"`
-	YieldEvery          int            `json:"yield_every,omitempty"`
-	BaseYieldBonus      int            `json:"base_yield_bonus,omitempty"`
-	CombatBonusPerLevel int            `json:"combat_bonus_per_level,omitempty"`
-	TradeMargin         bool           `json:"trade_margin,omitempty"`
-	Grants              []string       `json:"grants,omitempty"`
-	Ranks               []string       `json:"ranks,omitempty"`
+	MaxLevel               int            `json:"max_level"`
+	YieldEvery             int            `json:"yield_every,omitempty"`
+	BaseYieldBonus         int            `json:"base_yield_bonus,omitempty"`
+	CombatBonusPerLevel    int            `json:"combat_bonus_per_level,omitempty"`
+	StealthBonusPerLevel   int            `json:"stealth_bonus_per_level,omitempty"`
+	VigilanceBonusPerLevel int            `json:"vigilance_bonus_per_level,omitempty"`
+	ExtortionBonusPerLevel int            `json:"extortion_bonus_per_level,omitempty"`
+	TradeMargin            bool           `json:"trade_margin,omitempty"`
+	Grants                 []string       `json:"grants,omitempty"`
+	Ranks                  []string       `json:"ranks,omitempty"`
 }
 
 // RankTitle returns the stage title for a given profession level (e.g., 锻造学徒 -> 初级铁匠 -> 匠师).
@@ -150,13 +153,55 @@ func (f *Faction) HasMember(id string) bool {
 	return false
 }
 
-// Recipe defines a production action with profession, guild, and location requirements.
+// SkillSpec declaratively defines an actor craft/technique skill completely decoupled from Profession.
+// Actors may hold and practice multiple skills across professions and transmit them through mentorship.
+type SkillSpec struct {
+	ID                     string   `json:"id"`
+	Name                   string   `json:"name"`
+	Category               string   `json:"category,omitempty"`
+	MaxLevel               int      `json:"max_level,omitempty"`
+	Ranks                  []string `json:"ranks,omitempty"`
+	CombatBonusPerLevel    int      `json:"combat_bonus_per_level,omitempty"`
+	StealthBonusPerLevel   int      `json:"stealth_bonus_per_level,omitempty"`
+	VigilanceBonusPerLevel int      `json:"vigilance_bonus_per_level,omitempty"`
+	HealBonusPerLevel      int      `json:"heal_bonus_per_level,omitempty"`
+	RepairBonusPerLevel    int      `json:"repair_bonus_per_level,omitempty"`
+	TradeMarginPerLevel    int      `json:"trade_margin_per_level,omitempty"`
+	ActionAffinities       []string `json:"action_affinities,omitempty"`
+}
+
+// RankTitle returns the stage title for a given skill level (e.g., 初窥门径 -> 登堂入室 -> 炉火纯青 -> 一代宗师).
+func (s SkillSpec) RankTitle(level int) string {
+	if len(s.Ranks) == 0 {
+		return s.Name
+	}
+	if level <= 1 {
+		return s.Ranks[0]
+	}
+	idx := (level - 1) * len(s.Ranks) / max(1, s.EffectiveMaxLevel())
+	if idx >= len(s.Ranks) {
+		idx = len(s.Ranks) - 1
+	}
+	return s.Ranks[idx]
+}
+
+// EffectiveMaxLevel returns the skill's configured max level or default 6.
+func (s SkillSpec) EffectiveMaxLevel() int {
+	if s.MaxLevel > 0 {
+		return s.MaxLevel
+	}
+	return 6
+}
+
+// Recipe defines a production action with profession, skill, guild, and location requirements.
 type Recipe struct {
 	Conversion         *MaterialConversion `json:"conversion,omitempty"`
 	Growth             *GrowthRule         `json:"growth,omitempty"`
 	ID                 string              `json:"id"`
 	Label              string              `json:"label"`
 	Profession         string              `json:"profession,omitempty"`
+	SkillID            string              `json:"skill_id,omitempty"`
+	MinSkillLevel      int                 `json:"min_skill_level,omitempty"`
 	RequiredTag        string              `json:"required_tag,omitempty"`
 	MinProfessionLevel int                 `json:"min_profession_level,omitempty"`
 	MinFactionLevel    int                 `json:"min_faction_level,omitempty"`
@@ -191,6 +236,7 @@ type Catalog struct {
 	TagActions             map[string][]string           `json:"tag_actions"`
 	Items                  map[string]ItemSpec           `json:"items"`
 	Professions            []Profession                  `json:"professions"`
+	Skills                 map[string]SkillSpec          `json:"skills,omitempty"`
 	Recipes                []Recipe                      `json:"recipes"`
 	TagProfiles            map[string]TagProfile         `json:"tag_profiles"`
 	LevelThresholds        []int                         `json:"level_thresholds"`
@@ -201,6 +247,7 @@ type Catalog struct {
 	Encounters             []EncounterSpec               `json:"encounters,omitempty"`
 	Disasters              []DisasterSpec                `json:"disasters,omitempty"`
 	Accidents              []AccidentSpec                `json:"accidents,omitempty"`
+	WorldEvents            []WorldEventSpec              `json:"world_events,omitempty"`
 	Infrastructures        map[string]InfrastructureSpec `json:"infrastructures,omitempty"`
 	Rituals                []RitualSpec                  `json:"rituals,omitempty"`
 	Diseases               []DiseaseSpec                 `json:"diseases,omitempty"`
@@ -218,6 +265,7 @@ type Catalog struct {
 	Currencies             map[string]CurrencySpec       `json:"currencies,omitempty"`
 	Techs                  map[string]TechSpec           `json:"techs,omitempty"`
 	DefaultWorldLaws       map[string]int                `json:"default_world_laws,omitempty"`
+	Environment            *EnvironmentProfile           `json:"environment,omitempty"`
 }
 
 func DefaultCatalog() Catalog {
@@ -225,7 +273,7 @@ func DefaultCatalog() Catalog {
 		HouseWear:  func() *HouseWearRule { rule := DefaultHouseWearRule(); return &rule }(),
 		Production: DefaultProductionSpec(),
 		TagActions: map[string][]string{
-			"resident": {"equip", "unequip", "refuel", "harvest", "propose_growth_care", "accept_growth_care", "dispatch_harvest", "start_plan", "abandon_plan", "wait", "move", "move_venue", "enter_house", "leave_house", "sleep", "begin_rest", "end_rest", "eat", "drink", "relieve", "medicate", "speak", "repair_house", "transfer_house", "upgrade_house", "maintain_infra", "join_faction", "join_profession", "marry", "swear_bond", "mediate_feud"},
+			"resident": {"equip", "unequip", "refuel", "harvest", "claim_world_event", "propose_growth_care", "accept_growth_care", "dispatch_harvest", "start_plan", "abandon_plan", "wait", "move", "move_venue", "enter_house", "leave_house", "sleep", "begin_rest", "end_rest", "eat", "drink", "relieve", "medicate", "speak", "repair_house", "transfer_house", "upgrade_house", "maintain_infra", "join_faction", "join_profession", "marry", "swear_bond", "mediate_feud"},
 			"trader":   {"propose_agreement", "accept_agreement", "reject_agreement", "fulfill_agreement", "accept_loan", "reject_loan", "cancel_loan", "offer", "accept", "reject", "borrow_loan", "repay_loan", "foreclose_collateral"},
 			"fighter":  {"attack", "avenge_feud", "claim_turf"},
 			"healer":   {"heal"},
@@ -962,6 +1010,9 @@ func (c Catalog) Capabilities(a Actor) map[string]bool {
 		result["sever_flow_edge"] = true
 		result["repair_flow_edge"] = true
 	}
+	if len(c.Skills) > 0 {
+		result["teach_knowledge"] = true
+	}
 	if len(c.Techs) > 0 {
 		result["teach_knowledge"] = true
 		result["adopt_facility"] = true
@@ -1013,31 +1064,107 @@ func (c Catalog) CanLearnProfession(a Actor, prof Profession) (bool, string) {
 	return true, ""
 }
 
-// ProfessionGating reports whether the actor's profession levels and guild standing qualify for the recipe.
+// ProfessionGating reports whether the actor's profession levels, independent skill levels, and guild standing qualify for the recipe.
 func (c Catalog) ProfessionGating(a Actor, r Recipe) (bool, string) {
+	hasSkillAccess := false
+	if r.SkillID != "" {
+		reqSkill := r.MinSkillLevel
+		if reqSkill < 1 {
+			reqSkill = 1
+		}
+		if a.Skills[r.SkillID] >= reqSkill {
+			hasSkillAccess = true
+		}
+	}
 	if r.Profession != "" {
 		level, held := a.Professions[r.Profession]
-		if !held {
-			return false, "actor does not practice profession: " + r.Profession
-		}
 		required := r.MinProfessionLevel
 		if required < 1 {
 			required = 1
 		}
-		if level < required {
-			return false, fmt.Sprintf("recipe %s requires %s level %d", r.ID, r.Profession, required)
-		}
-		if r.MinFactionLevel > 0 {
+		profOK := held && level >= required
+		if profOK && r.MinFactionLevel > 0 {
 			prof, _ := c.ProfessionByID(r.Profession)
 			if a.GuildLevels[prof.Guild] < r.MinFactionLevel {
-				return false, fmt.Sprintf("recipe %s requires guild %s level %d", r.ID, prof.Guild, r.MinFactionLevel)
+				profOK = false
 			}
 		}
+		if !profOK && !hasSkillAccess {
+			if !held {
+				return false, "actor does not practice profession: " + r.Profession
+			}
+			if level < required {
+				return false, fmt.Sprintf("recipe %s requires %s level %d", r.ID, r.Profession, required)
+			}
+			prof, _ := c.ProfessionByID(r.Profession)
+			return false, fmt.Sprintf("recipe %s requires guild %s level %d", r.ID, prof.Guild, r.MinFactionLevel)
+		}
+	} else if r.SkillID != "" && !hasSkillAccess {
+		reqSkill := r.MinSkillLevel
+		if reqSkill < 1 {
+			reqSkill = 1
+		}
+		return false, fmt.Sprintf("recipe %s requires skill %s level %d", r.ID, r.SkillID, reqSkill)
 	}
 	if r.RequiredTag != "" && !ActorHasTag(c.ActorEffectiveTags(a), r.RequiredTag) {
 		return false, "recipe " + r.ID + " requires tag: " + r.RequiredTag
 	}
 	return true, ""
+}
+
+// ActorPowerTier returns the ordered strength/realm tier of an actor's current FormID (0 if unset).
+func (c Catalog) ActorPowerTier(a Actor) int {
+	if a.FormID == "" || len(c.Forms) == 0 {
+		return 0
+	}
+	if form, ok := c.Forms[a.FormID]; ok {
+		return form.PowerTier
+	}
+	return 0
+}
+
+// ActorFormName returns the display name of an actor's current FormID.
+func (c Catalog) ActorFormName(a Actor) string {
+	if a.FormID == "" {
+		return ""
+	}
+	if form, ok := c.Forms[a.FormID]; ok && form.Name != "" {
+		return form.Name
+	}
+	return a.FormID
+}
+
+// SkillHealBonus returns the total extra health restored by an actor's healing skills.
+func (c Catalog) SkillHealBonus(a Actor) int {
+	bonus := 0
+	for sid, lv := range a.Skills {
+		if lv <= 0 {
+			continue
+		}
+		if sk, ok := c.Skills[sid]; ok && sk.HealBonusPerLevel > 0 {
+			bonus += lv * sk.HealBonusPerLevel
+		}
+	}
+	return bonus
+}
+
+// SkillRepairBonus returns the total extra infrastructure/house condition restored by an actor's repair/array skills.
+func (c Catalog) SkillRepairBonus(a Actor) int {
+	bonus := 0
+	for sid, lv := range a.Skills {
+		if lv <= 0 {
+			continue
+		}
+		if sk, ok := c.Skills[sid]; ok && sk.RepairBonusPerLevel > 0 {
+			bonus += lv * sk.RepairBonusPerLevel
+		}
+	}
+	return bonus
+}
+
+// SkillLevel maps accumulated skill XP onto the catalog's level thresholds.
+func (c Catalog) SkillLevel(xp int) int {
+	return c.ProfessionLevel(xp)
 }
 
 // RecipeYield is the declared material conversion per batch. Skill and guild
@@ -1084,6 +1211,14 @@ func (c Catalog) SalePrice(a Actor, itemID string) int {
 			if level > 1 {
 				price += (level - 1) / 2
 			}
+		}
+	}
+	for sid, lv := range a.Skills {
+		if lv <= 0 {
+			continue
+		}
+		if sk, ok := c.Skills[sid]; ok && sk.TradeMarginPerLevel > 0 {
+			price += (lv * sk.TradeMarginPerLevel) / 3
 		}
 	}
 	return price
@@ -1152,6 +1287,7 @@ func CloneCatalog(c Catalog) Catalog {
 		Calendar:               CalendarSpec{},
 		Lifecycle:              c.Lifecycle,
 		Governance:             c.Governance,
+		Environment:            CloneEnvironmentProfile(c.Environment),
 	}
 	if c.HouseWear != nil {
 		rule := *c.HouseWear
@@ -1309,6 +1445,12 @@ func CloneCatalog(c Catalog) Catalog {
 	if c.Diseases != nil {
 		out.Diseases = append([]DiseaseSpec(nil), c.Diseases...)
 	}
+	if c.WorldEvents != nil {
+		out.WorldEvents = make([]WorldEventSpec, len(c.WorldEvents))
+		for i, we := range c.WorldEvents {
+			out.WorldEvents[i] = cloneWorldEventSpec(we)
+		}
+	}
 	if c.LocomotionModes != nil {
 		out.LocomotionModes = make(map[string]LocomotionSpec, len(c.LocomotionModes))
 		for k, lm := range c.LocomotionModes {
@@ -1377,6 +1519,14 @@ func CloneCatalog(c Catalog) Catalog {
 		out.Forms = make(map[string]FormSpec, len(c.Forms))
 		for k, f := range c.Forms {
 			fc := f
+			if f.DailyIntakePct != nil {
+				v := *f.DailyIntakePct
+				fc.DailyIntakePct = &v
+			}
+			if f.StarvationDamage != nil {
+				v := *f.StarvationDamage
+				fc.StarvationDamage = &v
+			}
 			if f.SlotMetabolism != nil {
 				fc.SlotMetabolism = cloneIntMap(f.SlotMetabolism)
 			}
@@ -1386,12 +1536,28 @@ func CloneCatalog(c Catalog) Catalog {
 			out.Forms[k] = fc
 		}
 	}
+	if c.Skills != nil {
+		out.Skills = make(map[string]SkillSpec, len(c.Skills))
+		for k, sk := range c.Skills {
+			sc := sk
+			if sk.Ranks != nil {
+				sc.Ranks = append([]string(nil), sk.Ranks...)
+			}
+			if sk.ActionAffinities != nil {
+				sc.ActionAffinities = append([]string(nil), sk.ActionAffinities...)
+			}
+			out.Skills[k] = sc
+		}
+	}
 	if c.Transitions != nil {
 		out.Transitions = make(map[string]TransitionSpec, len(c.Transitions))
 		for k, t := range c.Transitions {
 			tc := t
 			if t.RequiredSlots != nil {
 				tc.RequiredSlots = cloneIntMap(t.RequiredSlots)
+			}
+			if t.RequiredSkills != nil {
+				tc.RequiredSkills = cloneIntMap(t.RequiredSkills)
 			}
 			if t.ItemCosts != nil {
 				tc.ItemCosts = cloneIntMap(t.ItemCosts)
@@ -1401,6 +1567,9 @@ func CloneCatalog(c Catalog) Catalog {
 			}
 			if t.SuccessGrantTags != nil {
 				tc.SuccessGrantTags = append([]string(nil), t.SuccessGrantTags...)
+			}
+			if t.RewardAttributes != nil {
+				tc.RewardAttributes = cloneIntMap(t.RewardAttributes)
 			}
 			out.Transitions[k] = tc
 		}

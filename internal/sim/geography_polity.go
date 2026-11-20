@@ -1394,6 +1394,9 @@ func (w *World) applyMoveVenue(a *Actor, x Action) []Event {
 	if !passable {
 		return emitFail(fmt.Sprintf("cannot traverse %s route from %s to %s without required locomotion capability", route.Medium, fromVenue, destVenue.ID))
 	}
+	if severed, reason := w.isRouteSevered(a.Location, destVenue.DistrictID, route.Medium, modeID); severed {
+		return emitFail(reason)
+	}
 	if a.Energy < effEnergy {
 		return emitFail("insufficient energy to travel to " + destVenue.ID)
 	}
@@ -1418,6 +1421,12 @@ func (w *World) finishMoveVenue(a *Actor, t Task) []Event {
 	if !ok {
 		return nil
 	}
+	fromVenue := a.VenueID
+	fromDistrict := a.Location
+	medium := "road"
+	if route, connected := w.Map.VenueRouteBetween(fromVenue, destVenue.ID); connected && route.Medium != "" {
+		medium = route.Medium
+	}
 	a.VenueID = destVenue.ID
 	if destVenue.DistrictID != "" {
 		a.Location = destVenue.DistrictID
@@ -1426,12 +1435,13 @@ func (w *World) finishMoveVenue(a *Actor, t Task) []Event {
 	if modeID == "" {
 		modeID = "walk"
 	}
-	return []Event{w.record(a, x, "moved_venue", map[string]any{
+	events := []Event{w.record(a, x, "moved_venue", map[string]any{
 		"text":            fmt.Sprintf("%s traveled via %s to %s", a.Name, modeID, destVenue.ID),
 		"venue_id":        destVenue.ID,
 		"district":        a.Location,
 		"locomotion_mode": modeID,
 	})}
+	return append(events, w.checkActorTransitHazard(a, x, fromDistrict, a.Location, medium, modeID)...)
 }
 
 func (w *World) applyIssueDecree(a *Actor, x Action) []Event {

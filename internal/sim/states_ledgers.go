@@ -11,6 +11,7 @@ import (
 type StateSlotSpec struct {
 	ID                   string `json:"id"`
 	Name                 string `json:"name,omitempty"`
+	RequiredTag          string `json:"required_tag,omitempty"`
 	Min                  int    `json:"min,omitempty"`
 	Max                  int    `json:"max,omitempty"`
 	Default              int    `json:"default,omitempty"`
@@ -21,17 +22,60 @@ type StateSlotSpec struct {
 	OverflowTransitionID string `json:"overflow_transition_id,omitempty"`
 }
 
-// FormSpec declaratively defines an actor's physiological/ontological form (e.g. mortal,
-// foundation_cultivator, core_cultivator, cyborg, mutant) with lifespan, hunger rules,
-// per-tick slot metabolism, and innate identity tags.
+// FormSpec declaratively defines an actor's physiological/ontological form or power realm
+// (e.g. mortal, qi_refining, foundation, golden_core, nascent_soul, body_refiner, cyborg) with lifespan,
+// power tier, combat/vigilance scaling, bidirectional intake scaling (fasting or high-consumption),
+// per-form starvation overrides, minimum food tier, per-tick slot metabolism, and innate tags.
 type FormSpec struct {
 	ID                   string         `json:"id"`
 	Name                 string         `json:"name,omitempty"`
+	PowerTier            int            `json:"power_tier,omitempty"`
+	CombatBonus          int            `json:"combat_bonus,omitempty"`
+	VigilanceBonus       int            `json:"vigilance_bonus,omitempty"`
 	LifeExpectancyYears  int            `json:"life_expectancy_years,omitempty"`
 	HungerIntervalMulPct int            `json:"hunger_interval_mul_pct,omitempty"`
+	DailyIntakePct       *int           `json:"daily_intake_pct,omitempty"`
 	DisableHunger        bool           `json:"disable_hunger,omitempty"`
+	StarvationThreshold  int            `json:"starvation_threshold,omitempty"`
+	StarvationDamage     *int           `json:"starvation_damage,omitempty"`
+	MinFoodTier          int            `json:"min_food_tier,omitempty"`
 	SlotMetabolism       map[string]int `json:"slot_metabolism,omitempty"`
 	InnateTags           []string       `json:"innate_tags,omitempty"`
+}
+
+// IsHungerDisabled reports whether this form requires zero physiological food intake
+// (e.g. fasting cultivators, pure energy beings, or synthetic bodies).
+func (f FormSpec) IsHungerDisabled() bool {
+	return f.DisableHunger || (f.DailyIntakePct != nil && *f.DailyIntakePct <= 0)
+}
+
+// EffectiveDailyIntakePct returns the forward daily food intake percentage relative to a
+// standard mortal (100 = 1.0x, 300 = 3.0x higher intake, 35 = 0.35x lower intake, 0 = disabled).
+func (f FormSpec) EffectiveDailyIntakePct() int {
+	if f.IsHungerDisabled() {
+		return 0
+	}
+	if f.DailyIntakePct != nil {
+		return *f.DailyIntakePct
+	}
+	if f.HungerIntervalMulPct > 0 {
+		pct := (10000 + f.HungerIntervalMulPct/2) / f.HungerIntervalMulPct
+		if pct < 1 {
+			pct = 1
+		}
+		return pct
+	}
+	return 100
+}
+
+// MeetsMinFoodTier reports whether spec meets this form's minimum food tier (if any).
+func (f FormSpec) MeetsMinFoodTier(spec ItemSpec) bool {
+	return f.MinFoodTier <= 0 || spec.Tier >= f.MinFoodTier
+}
+
+// AcceptsFoodItem reports whether an edible item provides nutrition and satisfies this form's minimum food tier.
+func (f FormSpec) AcceptsFoodItem(spec ItemSpec) bool {
+	return spec.Edible && spec.NutritionUnits > 0 && f.MeetsMinFoodTier(spec)
 }
 
 // TransitionSpec declaratively defines a form/state transition (e.g. realm breakthrough,
@@ -42,6 +86,7 @@ type TransitionSpec struct {
 	Name                string         `json:"name,omitempty"`
 	RequiredFormID      string         `json:"required_form_id,omitempty"`
 	RequiredSlots       map[string]int `json:"required_slots,omitempty"`
+	RequiredSkills      map[string]int `json:"required_skills,omitempty"`
 	ItemCosts           map[string]int `json:"item_costs,omitempty"`
 	SlotCosts           map[string]int `json:"slot_costs,omitempty"`
 	Ticks               int            `json:"ticks,omitempty"`
@@ -49,6 +94,7 @@ type TransitionSpec struct {
 	SpiritBonusPermille int            `json:"spirit_bonus_permille,omitempty"`
 	SuccessFormID       string         `json:"success_form_id,omitempty"`
 	SuccessGrantTags    []string       `json:"success_grant_tags,omitempty"`
+	RewardAttributes    map[string]int `json:"reward_attributes,omitempty"`
 	FailureFormID       string         `json:"failure_form_id,omitempty"`
 	FailureHealthLoss   int            `json:"failure_health_loss,omitempty"`
 	FailureWipeMemories bool           `json:"failure_wipe_memories,omitempty"`
@@ -180,9 +226,12 @@ func cloneInt64Map(m map[string]int64) map[string]int64 {
 func CloneActor(a Actor) Actor {
 	a.Tags = append([]string(nil), a.Tags...)
 	a.Guilds = append([]string(nil), a.Guilds...)
+	a.Hobbies = append([]string(nil), a.Hobbies...)
 	a.Professions = cloneIntMap(a.Professions)
 	a.ProfessionRanks = cloneStringMap(a.ProfessionRanks)
 	a.ProfessionXP = cloneIntMap(a.ProfessionXP)
+	a.Skills = cloneIntMap(a.Skills)
+	a.SkillXP = cloneIntMap(a.SkillXP)
 	a.GuildLevels = cloneIntMap(a.GuildLevels)
 	a.Items = cloneIntMap(a.Items)
 	a.Equipped = cloneStringMap(a.Equipped)
@@ -424,12 +473,16 @@ func (w *World) stepActorStateSlotsAndForm(a *Actor, slotKeys []string) []Event 
 	// Update every slot before evaluating transitions, so prerequisites never depend on key order.
 	handled := make(map[string]bool, len(slotKeys))
 	var overflowTransitions []string
+	actorTags := w.actorWithEffectTags(*a).Tags
 	for _, slotID := range slotKeys {
 		if a.Dead {
 			break
 		}
 		handled[slotID] = true
 		spec := w.Catalog.StateSlots[slotID]
+		if spec.RequiredTag != "" && !ActorHasTag(actorTags, spec.RequiredTag) {
+			continue
+		}
 		cur, existed := a.StateSlots[slotID]
 		if !existed && spec.Default != 0 {
 			cur = spec.Default
@@ -591,12 +644,29 @@ func (w *World) executeTransition(a *Actor, x Action, transID string) []Event {
 		for _, tag := range trans.SuccessGrantTags {
 			a.Tags = appendUnique(a.Tags, tag)
 		}
+		for attr, delta := range trans.RewardAttributes {
+			if delta == 0 {
+				continue
+			}
+			switch attr {
+			case "strength":
+				a.Attributes.Strength += delta
+			case "dexterity":
+				a.Attributes.Dexterity += delta
+			case "insight":
+				a.Attributes.Insight += delta
+			case "spirit":
+				a.Attributes.Spirit += delta
+			}
+		}
 		w.refreshActor(a)
 		return []Event{w.record(a, x, "transition_succeeded", map[string]any{
 			"text":          fmt.Sprintf("%s succeeded transition %s -> form %s", a.Name, trans.ID, a.FormID),
 			"transition_id": trans.ID,
 			"previous_form": prevForm,
 			"form_id":       a.FormID,
+			"form_name":     w.Catalog.ActorFormName(*a),
+			"power_tier":    w.Catalog.ActorPowerTier(*a),
 			"granted_tags":  append([]string(nil), trans.SuccessGrantTags...),
 		})}
 	}

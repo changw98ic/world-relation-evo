@@ -90,6 +90,8 @@ type Actor struct {
 	Professions      map[string]int    `json:"professions"`
 	ProfessionRanks  map[string]string `json:"profession_ranks,omitempty"`
 	ProfessionXP     map[string]int    `json:"profession_xp,omitempty"`
+	Skills           map[string]int    `json:"skills,omitempty"`
+	SkillXP          map[string]int    `json:"skill_xp,omitempty"`
 	Level            int               `json:"level"`
 	Guilds           []string          `json:"guilds,omitempty"`
 	GuildLevels      map[string]int    `json:"guild_levels,omitempty"`
@@ -107,6 +109,8 @@ type Actor struct {
 	DiseaseID        string            `json:"disease_id,omitempty"`
 	DiseaseTicks     int               `json:"disease_ticks,omitempty"`
 	Dead             bool              `json:"dead,omitempty"`
+	DeathCause       string            `json:"death_cause,omitempty"`
+	DeathTick        int64             `json:"death_tick,omitempty"`
 	WoundedTracked   bool              `json:"wounded_tracked,omitempty"`
 	JailedUntil      int64             `json:"jailed_until,omitempty"`
 	RestUntil        int64             `json:"rest_until,omitempty"`
@@ -121,6 +125,7 @@ type Actor struct {
 	StateSlots       map[string]int    `json:"state_slots,omitempty"`
 	Goal             string            `json:"goal"`
 	Personality      string            `json:"personality"`
+	Hobbies          []string          `json:"hobbies,omitempty"`
 	Trust            map[string]int    `json:"trust"`
 	Task             *Task             `json:"task,omitempty"`
 	Memories         []Memory          `json:"memories,omitempty"`
@@ -179,9 +184,10 @@ type World struct {
 	MarketCredit     *MarketCreditState       `json:"market_credit,omitempty"`
 	Relations        *RelationEvoState        `json:"relations,omitempty"`
 	JusticeRevolt    *JusticeRevoltState      `json:"justice_revolt,omitempty"`
-	SpotlightRumor   *SpotlightRumorState     `json:"spotlight_rumor,omitempty"`
-	ActiveEffects    []ActiveEffect           `json:"active_effects,omitempty"`
-	FlowGrid         *FlowGridState           `json:"flow_grid,omitempty"`
+	SpotlightRumor    *SpotlightRumorState     `json:"spotlight_rumor,omitempty"`
+	ActiveEffects     []ActiveEffect           `json:"active_effects,omitempty"`
+	ActiveWorldEvents []ActiveWorldEvent       `json:"active_world_events,omitempty"`
+	FlowGrid          *FlowGridState           `json:"flow_grid,omitempty"`
 	LedgerAudit      *LedgerAuditState        `json:"ledger_audit,omitempty"`
 	Knowledge        *KnowledgeBook           `json:"knowledge,omitempty"`
 	WorldLaws        map[string]int           `json:"world_laws,omitempty"`
@@ -202,6 +208,7 @@ type Action struct {
 	ProfessionID string               `json:"profession_id,omitempty"`
 	RecipeID     string               `json:"recipe_id,omitempty"`
 	TechID       string               `json:"tech_id,omitempty"`
+	SkillID      string               `json:"skill_id,omitempty"`
 	Item         string               `json:"item,omitempty"`
 	Quantity     int                  `json:"quantity,omitempty"`
 	Price        int                  `json:"price,omitempty"`
@@ -222,14 +229,20 @@ type Event struct {
 }
 
 type Neighbor struct {
-	ID       string   `json:"id"`
-	Name     string   `json:"name"`
-	Role     string   `json:"role"`
-	Tags     []string `json:"tags"`
-	Level    int      `json:"level"`
-	Health   int      `json:"health"`
-	Sleeping bool     `json:"sleeping,omitempty"`
-	Jailed   bool     `json:"jailed,omitempty"`
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Role        string         `json:"role"`
+	FormID      string         `json:"form_id,omitempty"`
+	PowerTier   int            `json:"power_tier,omitempty"`
+	CombatPower int            `json:"combat_power,omitempty"`
+	Skills      map[string]int `json:"skills,omitempty"`
+	Tags        []string       `json:"tags"`
+	Personality string         `json:"personality,omitempty"`
+	Hobbies     []string       `json:"hobbies,omitempty"`
+	Level       int            `json:"level"`
+	Health      int            `json:"health"`
+	Sleeping    bool           `json:"sleeping,omitempty"`
+	Jailed      bool           `json:"jailed,omitempty"`
 }
 
 type RoadView struct {
@@ -284,6 +297,7 @@ type Perception struct {
 	Nearby                 []Neighbor            `json:"nearby,omitempty"`
 	LocalCohorts           []CohortView          `json:"local_cohorts,omitempty"`
 	ActiveEffects          []ActiveEffect        `json:"active_effects,omitempty"`
+	ActiveWorldEvents      []ActiveWorldEvent    `json:"active_world_events,omitempty"`
 	Offers                 []Offer               `json:"offers,omitempty"`
 	Interactions           []InteractionView     `json:"interactions,omitempty"`
 	OfferBlockReasons      map[int64]string      `json:"offer_block_reasons,omitempty"`
@@ -359,9 +373,23 @@ func seedAttributes(role string, i int) Attributes {
 }
 
 // CombatPowerWithCatalog computes an actor's combat effectiveness declaratively from physical attributes,
+// FormSpec CombatBonus (cultivation/power realm), independent SkillSpec CombatBonusPerLevel,
 // Catalog profession CombatBonusPerLevel, and Catalog item CombatBonus.
 func CombatPowerWithCatalog(cat Catalog, a Actor) int {
 	power := a.Attributes.Strength + a.Attributes.Dexterity/2
+	if a.FormID != "" {
+		if form, ok := cat.Forms[a.FormID]; ok && form.CombatBonus > 0 {
+			power += form.CombatBonus
+		}
+	}
+	for sid, lv := range a.Skills {
+		if lv <= 0 {
+			continue
+		}
+		if sk, ok := cat.Skills[sid]; ok && sk.CombatBonusPerLevel > 0 {
+			power += lv * sk.CombatBonusPerLevel
+		}
+	}
 	for pid, lv := range a.Professions {
 		if lv <= 0 {
 			continue
@@ -393,17 +421,26 @@ func CombatPower(a Actor) int {
 }
 
 func (w *World) grantCombatXP(a *Actor, x Action, xp, influence int) []Event {
+	var events []Event
+	for _, sid := range sortedProductionKeys(a.Skills) {
+		if a.Skills[sid] <= 0 {
+			continue
+		}
+		if sk, ok := w.Catalog.Skills[sid]; ok && sk.CombatBonusPerLevel > 0 {
+			events = append(events, w.grantSkillXP(a, x, sid, xp)...)
+		}
+	}
 	for _, prof := range w.Catalog.Professions {
 		if prof.Tier == 1 && prof.CombatBonusPerLevel > 0 && a.Professions[prof.ID] > 0 {
-			return w.grantProfessionXP(a, x, prof.ID, xp, influence)
+			return append(events, w.grantProfessionXP(a, x, prof.ID, xp, influence)...)
 		}
 	}
 	for _, prof := range w.Catalog.Professions {
 		if prof.CombatBonusPerLevel > 0 && a.Professions[prof.ID] > 0 {
-			return w.grantProfessionXP(a, x, prof.ID, xp, influence)
+			return append(events, w.grantProfessionXP(a, x, prof.ID, xp, influence)...)
 		}
 	}
-	return nil
+	return events
 }
 
 func (w *World) effectiveRoadCost(r Road) (int, int) {
@@ -849,6 +886,7 @@ func (w *World) View(id string) Perception {
 		Catalog:         CloneCatalog(w.Catalog),
 	}
 	p.ActiveEffects = w.perceivedActiveEffects(a, w.ActiveEffects)
+	p.ActiveWorldEvents = w.perceivedActiveWorldEvents(a)
 	for _, c := range w.Cohorts {
 		if c.Population > 0 && c.District == a.Location {
 			p.LocalCohorts = append(p.LocalCohorts, CohortView{
@@ -922,14 +960,20 @@ func (w *World) View(id string) Perception {
 	for _, b := range w.Actors {
 		if b.ID != id && SamePlace(a, b) {
 			p.Nearby = append(p.Nearby, Neighbor{
-				ID:       b.ID,
-				Name:     b.Name,
-				Role:     b.Role,
-				Tags:     append([]string(nil), w.neighborEffectiveTags(b)...),
-				Level:    b.Level,
-				Health:   b.Health,
-				Sleeping: b.Task != nil && b.Task.Action.Kind == "sleep",
-				Jailed:   b.JailedUntil > w.Tick,
+				ID:          b.ID,
+				Name:        b.Name,
+				Role:        b.Role,
+				FormID:      b.FormID,
+				PowerTier:   w.Catalog.ActorPowerTier(b),
+				CombatPower: CombatPowerWithCatalog(w.Catalog, b),
+				Skills:      cloneIntMap(b.Skills),
+				Tags:        append([]string(nil), w.neighborEffectiveTags(b)...),
+				Personality: b.Personality,
+				Hobbies:     append([]string(nil), b.Hobbies...),
+				Level:       b.Level,
+				Health:      b.Health,
+				Sleeping:    b.Task != nil && b.Task.Action.Kind == "sleep",
+				Jailed:      b.JailedUntil > w.Tick,
 			})
 		}
 	}
@@ -1451,6 +1495,7 @@ func (w *World) Step(ctx context.Context, d Decider) ([]Event, error) {
 	}
 	// Advance regional ecology/weather/disasters/encounters/rituals and actor lifecycle/physiology.
 	events = append(events, w.stepWorldEnvironment()...)
+	events = append(events, w.stepWorldEvents()...)
 	events = append(events, w.stepAdoptedFacilities()...)
 	events = append(events, w.stepStateSlotsAndForms()...)
 	events = append(events, w.stepActorPhysiologyAndLifecycle()...)
@@ -1570,6 +1615,61 @@ func (w *World) record(a *Actor, x Action, kind string, data map[string]any, obs
 	}
 	w.ObserveContinuity(e)
 	return e
+}
+
+// grantSkillXP advances an actor's independent craft/technique skill XP, unlocking level 1 if needed
+// and emitting a skill_leveled event whenever a threshold is crossed.
+func (w *World) grantSkillXP(a *Actor, x Action, skillID string, xp int) []Event {
+	if a == nil || skillID == "" || xp <= 0 {
+		return nil
+	}
+	spec, ok := w.Catalog.Skills[skillID]
+	if !ok {
+		return nil
+	}
+	if a.Skills == nil {
+		a.Skills = map[string]int{}
+	}
+	if a.SkillXP == nil {
+		a.SkillXP = map[string]int{}
+	}
+	oldLevel := a.Skills[skillID]
+	if oldLevel == 0 {
+		a.Skills[skillID] = 1
+		a.SkillXP[skillID] += xp
+		return []Event{w.record(a, x, "skill_leveled", map[string]any{
+			"text":       fmt.Sprintf("%s learned skill %s level 1 (%s)", a.Name, spec.Name, spec.RankTitle(1)),
+			"skill_id":   skillID,
+			"skill_name": spec.Name,
+			"level":      1,
+			"rank":       spec.RankTitle(1),
+			"xp":         a.SkillXP[skillID],
+		})}
+	}
+	a.SkillXP[skillID] += xp
+	maxLv := spec.EffectiveMaxLevel()
+	level := w.Catalog.SkillLevel(a.SkillXP[skillID])
+	if level < oldLevel {
+		level = oldLevel
+	}
+	if level > maxLv {
+		level = maxLv
+	}
+	if level > oldLevel {
+		oldRank := spec.RankTitle(oldLevel)
+		newRank := spec.RankTitle(level)
+		a.Skills[skillID] = level
+		return []Event{w.record(a, x, "skill_leveled", map[string]any{
+			"text":          fmt.Sprintf("%s reached skill %s level %d (%s)", a.Name, spec.Name, level, newRank),
+			"skill_id":      skillID,
+			"skill_name":    spec.Name,
+			"level":         level,
+			"rank":          newRank,
+			"previous_rank": oldRank,
+			"xp":            a.SkillXP[skillID],
+		})}
+	}
+	return nil
 }
 
 // grantProfessionXP advances profession experience (and optional guild influence) with level-up and rank-advancement events.
@@ -1700,6 +1800,8 @@ func (w *World) markDeadIfZero(target *Actor, killer *Actor, x Action, cause str
 		w.Offers = nil
 	}
 	canon := canonicalDeathCause(cause)
+	target.DeathCause = canon
+	target.DeathTick = w.Tick
 	w.recordDeathCause(canon, 1)
 	killerID := ""
 	killerName := "natural or environmental causes"
@@ -1707,14 +1809,79 @@ func (w *World) markDeadIfZero(target *Actor, killer *Actor, x Action, cause str
 		killerID = killer.ID
 		killerName = killer.Name
 	}
+	// Collect epistemic eyewitnesses (same place) and remote sensory observers before marking Dead.
+	var observers []*Actor
+	var witnessIDs []string
+	if killer != nil && killer.ID != target.ID {
+		observers = append(observers, killer)
+	}
+	targetSnapshot := *target
+	targetSnapshot.Dead = false
+	for i := range w.Actors {
+		o := &w.Actors[i]
+		if o.ID == target.ID || o.Dead || w.Tick < o.JailedUntil {
+			continue
+		}
+		if o.Task != nil && (o.Task.Action.Kind == "sleep" || o.Task.Dormant) {
+			continue
+		}
+		if SamePlace(targetSnapshot, *o) {
+			if killer == nil || o.ID != killer.ID {
+				observers = append(observers, o)
+			}
+			witnessIDs = append(witnessIDs, o.ID)
+		}
+	}
+	obs := Observation{
+		Kind:      "actor_died",
+		Modality:  "eyewitness",
+		SubjectID: killerID,
+		ObjectID:  target.ID,
+		Item:      canon,
+		Location:  target.Location,
+		Quantity:  1,
+	}
 	ev := w.record(target, x, "actor_died", map[string]any{
-		"text":       fmt.Sprintf("%s died from %s (%s)", target.Name, cause, killerName),
-		"killer_id":  killerID,
-		"cause":      canon,
-		"detail":     cause,
-		"was_sick":   wasSick,
-		"was_jailed": wasJailed,
-	}, killer)
+		"text":        fmt.Sprintf("%s died from %s (%s)", target.Name, cause, killerName),
+		"killer_id":   killerID,
+		"cause":       canon,
+		"detail":      cause,
+		"district":    target.Location,
+		"was_sick":    wasSick,
+		"was_jailed":  wasJailed,
+		"witnesses":   witnessIDs,
+		"observation": obs,
+	}, observers...)
+	// Also notify qualifying remote sensory observers (e.g. divine_sense / orbital_sensor) respecting shielding.
+	if len(w.Catalog.SensoryModes) > 0 {
+		for i := range w.Actors {
+			o := &w.Actors[i]
+			if o.ID == target.ID || (killer != nil && o.ID == killer.ID) || o.Dead || w.Tick < o.JailedUntil || ActorHasTag(witnessIDs, o.ID) {
+				continue
+			}
+			if o.Task != nil && (o.Task.Action.Kind == "sleep" || o.Task.Dormant) {
+				continue
+			}
+			if mod, ok := w.CanSenseVenueRemotely(*o, target.Location, target.VenueID); ok {
+				sObs := obs
+				sObs.Modality = mod
+				mem := Memory{
+					Kind:        "actor_died",
+					Tick:        w.Tick,
+					EventID:     ev.ID,
+					RootEventID: ev.ID,
+					Source:      target.ID,
+					SourceRole:  target.Role,
+					TargetID:    killerID,
+					Text:        fmt.Sprintf("Perceived via %s: %s died from %s (%s)", mod, target.Name, cause, killerName),
+					Observation: &sObs,
+				}
+				o.Memories = appendMemory(o.Memories, mem)
+				witnessIDs = append(witnessIDs, o.ID)
+			}
+		}
+		ev.Payload["witnesses"] = witnessIDs
+	}
 	// Settle inheritance before deciding where any heirless estate goes. Observe
 	// marks this death event, so the end-of-step observer cannot settle it twice.
 	return append([]Event{ev}, w.ensureRelations().ObserveCausalRelationEvents(w, []Event{ev})...)
@@ -1820,15 +1987,21 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 	x := t.Action
 	switch x.Kind {
 	case "move":
+		fromDistrict := a.Location
+		medium := "road"
+		if road, ok := w.Map.RoadBetween(fromDistrict, x.Location); ok && road.Medium != "" {
+			medium = road.Medium
+		}
 		a.Location = x.Location
 		if a.VenueID != "" {
 			if v, ok := w.Map.VenueByID(a.VenueID); !ok || (v.DistrictID != "" && v.DistrictID != x.Location) {
 				a.VenueID = w.Map.DefaultVenueForDistrict(x.Location)
 			}
 		}
-		return []Event{w.record(a, x, "moved", map[string]any{
+		events := []Event{w.record(a, x, "moved", map[string]any{
 			"text": a.Name + " walked along the road to " + x.Location,
 		})}
+		return append(events, w.checkActorTransitHazard(a, x, fromDistrict, a.Location, medium, "")...)
 	case "move_venue":
 		return w.finishMoveVenue(a, t)
 	case "craft":
@@ -1859,7 +2032,8 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 			event.Payload["stage_complete"] = true
 			event.Payload["field_id"] = g.FieldID
 			event.Payload["workers"] = []WorkerRun{{FirstID: a.ID, Count: 1}}
-			return []Event{event}
+			events := []Event{event}
+			return append(events, w.checkActorCraftAccident(a, x, r)...)
 		}
 		before := w.yieldCredit("actor", a.ID, r.ID)
 		delivered, next := settleYieldCredit(before, t.FundedHundredths)
@@ -1881,7 +2055,11 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 			"yield_credit_after":  next,
 			"observation":         obs,
 		})}
-		return append(events, w.grantProfessionXP(a, x, r.Profession, w.Catalog.CraftXP(r), tier)...)
+		if r.SkillID != "" {
+			events = append(events, w.grantSkillXP(a, x, r.SkillID, w.Catalog.CraftXP(r))...)
+		}
+		events = append(events, w.grantProfessionXP(a, x, r.Profession, w.Catalog.CraftXP(r), tier)...)
+		return append(events, w.checkActorCraftAccident(a, x, r)...)
 	case "maintain_infra":
 		if w.DistrictStates == nil {
 			return nil
@@ -1891,7 +2069,8 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 		if !ok || !exists || ds.Infrastructure == nil {
 			return nil
 		}
-		cond := ds.Infrastructure[x.Item] + 20
+		repairGain := 20 + w.Catalog.SkillRepairBonus(*a)
+		cond := ds.Infrastructure[x.Item] + repairGain
 		if cond > spec.MaxCondition {
 			cond = spec.MaxCondition
 		}
@@ -1903,8 +2082,20 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 			"infrastructure": x.Item,
 			"condition":      cond,
 		})}
-		for profID := range a.Professions {
-			return append(events, w.grantProfessionXP(a, x, profID, 6, 2)...)
+		for _, sid := range sortedProductionKeys(a.Skills) {
+			if a.Skills[sid] > 0 {
+				if sk, ok := w.Catalog.Skills[sid]; ok && sk.RepairBonusPerLevel > 0 {
+					events = append(events, w.grantSkillXP(a, x, sid, 6)...)
+				}
+			}
+		}
+		if a.Role != "" && a.Professions[a.Role] > 0 {
+			return append(events, w.grantProfessionXP(a, x, a.Role, 6, 2)...)
+		}
+		for _, profID := range sortedProductionKeys(a.Professions) {
+			if a.Professions[profID] > 0 {
+				return append(events, w.grantProfessionXP(a, x, profID, 6, 2)...)
+			}
 		}
 		return events
 	case "hunt_threat":
@@ -2266,6 +2457,9 @@ func (w *World) Apply(id string, x Action) []Event {
 	case "transmit_message":
 		return w.applyTransmitMessage(a, x)
 
+	case "claim_world_event":
+		return w.applyClaimWorldEvent(a, x)
+
 	case "move":
 		if a.InsideHouse != "" {
 			return fail("leave house before walking village roads")
@@ -2276,6 +2470,9 @@ func (w *World) Apply(id string, x Action) []Event {
 		road, ok := w.Map.RoadBetween(a.Location, x.Location)
 		if !ok {
 			return fail(fmt.Sprintf("no direct road from %s to %s", a.Location, x.Location))
+		}
+		if severed, reason := w.isRouteSevered(a.Location, x.Location, road.Medium, ""); severed {
+			return fail(reason)
 		}
 		effTicks, effEnergy := w.effectiveRoadCost(road)
 		if a.Energy < effEnergy {
@@ -2332,7 +2529,7 @@ func (w *World) Apply(id string, x Action) []Event {
 		itemID := x.Item
 		if itemID == "" {
 			for k, spec := range w.Catalog.Items {
-				if spec.Edible && a.Items[k] > 0 {
+				if w.Catalog.ActorAcceptsFood(*a, spec) && a.Items[k] > 0 {
 					if itemID == "" || spec.NutritionUnits > w.Catalog.Items[itemID].NutritionUnits || spec.NutritionUnits == w.Catalog.Items[itemID].NutritionUnits && k < itemID {
 						itemID = k
 					}
@@ -2346,6 +2543,9 @@ func (w *World) Apply(id string, x Action) []Event {
 		spec, ok := w.Catalog.Items[itemID]
 		if !ok || !spec.Edible {
 			return fail("item is not edible: " + itemID)
+		}
+		if form, hasForm := w.Catalog.ActorFormSpec(*a); hasForm && !form.MeetsMinFoodTier(spec) {
+			return fail("food tier too low for current form: " + itemID)
 		}
 		if a.Items[itemID] < 1 {
 			return fail("no " + itemID)
@@ -2621,8 +2821,11 @@ func (w *World) Apply(id string, x Action) []Event {
 		})}
 
 	case "perform_ritual":
+		if !w.Catalog.EffectiveEnvironment().Institutions.RitualsEnabled() {
+			return fail("rituals are disabled in this world environment")
+		}
 		if a.InsideHouse != "" {
-			return fail("step outside to shrine precinct before performing ritual")
+			return fail("step outside to an open ritual precinct before performing ritual")
 		}
 		var rit *RitualSpec
 		for i := range w.Catalog.Rituals {
@@ -2679,6 +2882,8 @@ func (w *World) Apply(id string, x Action) []Event {
 		})}
 
 	case "repair_house":
+		env := w.Catalog.EffectiveEnvironment()
+		repairItem := env.RepairItem
 		h := w.house(x.HouseID)
 		if h == nil || h.District != a.Location || (a.InsideHouse != "" && a.InsideHouse != h.ID) {
 			return fail("house is not at current location")
@@ -2689,11 +2894,11 @@ func (w *World) Apply(id string, x Action) []Event {
 		if a.Energy < 8 {
 			return fail("insufficient energy to repair house")
 		}
-		if a.Items["plank"] < 1 {
-			return fail("repairing a house requires 1 plank")
+		if a.Items[repairItem] < 1 {
+			return fail("repairing a house requires 1 " + repairItem)
 		}
 		a.Energy -= 8
-		w.adjustActorItem(a, "plank", -1, true)
+		w.adjustActorItem(a, repairItem, -1, true)
 		task := Task{Action: x, TotalTicks: 3, Remaining: 2, StartedTick: w.Tick}
 		a.Task = &task
 		return []Event{w.record(a, x, "task_started", map[string]any{
@@ -2703,6 +2908,9 @@ func (w *World) Apply(id string, x Action) []Event {
 		})}
 
 	case "upgrade_house":
+		env := w.Catalog.EffectiveEnvironment()
+		repairItem := env.RepairItem
+		builderProf := env.BuilderProfession
 		h := w.house(x.HouseID)
 		if h == nil {
 			return fail("unknown house: " + x.HouseID)
@@ -2716,13 +2924,13 @@ func (w *World) Apply(id string, x Action) []Event {
 		if h.Level >= 3 {
 			return fail("house is already at maximum asset level")
 		}
-		if a.Professions["carpenter"] < 2 {
-			return fail("renovating a house requires carpenter profession level 2")
+		if builderProf != "" && a.Professions[builderProf] < 2 {
+			return fail("renovating a house requires " + builderProf + " profession level 2")
 		}
-		planks := h.Level
+		materials := h.Level
 		coins := 4 * h.Level
-		if a.Items["plank"] < planks {
-			return fail(fmt.Sprintf("renovation requires %d planks", planks))
+		if a.Items[repairItem] < materials {
+			return fail(fmt.Sprintf("renovation requires %d %s", materials, repairItem))
 		}
 		if a.Money < coins {
 			return fail(fmt.Sprintf("renovation requires %d coins", coins))
@@ -2730,7 +2938,7 @@ func (w *World) Apply(id string, x Action) []Event {
 		if a.Energy < 12 {
 			return fail("insufficient energy to renovate")
 		}
-		w.adjustActorItem(a, "plank", -planks, true)
+		w.adjustActorItem(a, repairItem, -materials, true)
 		if coins > 0 {
 			if len(w.Cohorts) > 0 {
 				w.adjustActorCurrency(a, "coins", -int64(coins), false)
@@ -2801,21 +3009,34 @@ func (w *World) Apply(id string, x Action) []Event {
 				"damage":         dmg,
 				"absorbed":       absorbed,
 				"immune_blocked": immune,
-			}, b)
+			}, append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)...)
 			events := append(broken, ev)
 			events = append(events, interruptEvs...)
 			events = append(events, w.grantCombatXP(a, x, 4, 1)...)
 			events = append(events, w.markDeadIfZero(b, a, x, "combat attack")...)
 			return events
 		}
-		damage := 8 + (CombatPowerWithCatalog(w.Catalog, *a)-10)/2
-		if damage < 10 {
-			damage = 10
+		atkPower := CombatPowerWithCatalog(w.Catalog, *a)
+		defPower := CombatPowerWithCatalog(w.Catalog, *b)
+		damage := 10 + (atkPower-defPower)/2
+		if damage < 3 {
+			damage = 3
+		}
+		if damage > 28 {
+			damage = 28
 		}
 		if damage > b.Health {
 			damage = b.Health
 		}
 		b.Health -= damage
+		recoil := 0
+		if defPower >= atkPower+20 && b.Health > 0 && a.Health > 1 {
+			recoil = minInt(14, (defPower-atkPower)/5)
+			if recoil >= a.Health {
+				recoil = a.Health - 1
+			}
+			a.Health -= recoil
+		}
 		var interruptEvs []Event
 		if damage > 0 && b.Health > 0 {
 			interruptEvs = w.interruptTaskOnDamage(b, "combat")
@@ -2823,9 +3044,12 @@ func (w *World) Apply(id string, x Action) []Event {
 		a.RestUntil = w.Tick + 32
 		b.Trust[a.ID] -= 2
 		ev := w.record(a, x, "attacked", map[string]any{
-			"text":   fmt.Sprintf("%s attacked %s for %d damage", a.Name, b.Name, damage),
-			"damage": damage,
-		}, b)
+			"text":           fmt.Sprintf("%s attacked %s for %d damage", a.Name, b.Name, damage),
+			"damage":         damage,
+			"attacker_power": atkPower,
+			"defender_power": defPower,
+			"recoil":         recoil,
+		}, append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)...)
 		events := []Event{ev}
 		events = append(events, interruptEvs...)
 		events = append(events, w.grantCombatXP(a, x, 4, 1)...)
@@ -2864,7 +3088,7 @@ func (w *World) Apply(id string, x Action) []Event {
 			"text":           fmt.Sprintf("%s sparred with %s in martial arts practice (power %d vs %d)", a.Name, b.Name, atkPower, defPower),
 			"attacker_power": atkPower,
 			"defender_power": defPower,
-		}, b)
+		}, append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)...)
 		events := []Event{ev}
 		events = append(events, w.grantCombatXP(a, x, 6, 2)...)
 		events = append(events, w.grantCombatXP(b, x, 4, 1)...)
@@ -2881,16 +3105,18 @@ func (w *World) Apply(id string, x Action) []Event {
 			return fail("thief is injured or laying low to recuperate")
 		}
 		a.Energy -= 5
-		stealth := a.Attributes.Dexterity + a.Professions["thief"]*3 + a.Professions["master_thief"]*4
+		env := w.Catalog.EffectiveEnvironment()
+		outlawTag := env.PrimaryOutlawTag()
+		stealth, maxCoins := w.Catalog.StealthBonus(*a)
 		if b.Task != nil && b.Task.Action.Kind == "sleep" {
 			stealth += 4
 		}
-		vigilance := b.Attributes.Insight + b.Professions["constable"]*3 + b.Professions["chief_constable"]*4 + b.Professions["martial_artist"]*2 + b.Professions["guard"]*2
+		vigilance := w.Catalog.VigilanceBonus(*b)
 		if ClockAt(w.Tick).IsNight && w.IsCurfewActiveAt(a.Location, a.VenueID) {
 			vigilance += 8
 		}
+		stealProf := w.Catalog.BestProfessionForCapability(*a, "steal")
 		if stealth >= vigilance && (b.Money > 0 || len(b.Items) > 0) {
-			maxCoins := 2 + a.Professions["thief"] + a.Professions["master_thief"]*2
 			stolenCoins := b.Money
 			if stolenCoins > maxCoins {
 				stolenCoins = maxCoins
@@ -2898,27 +3124,34 @@ func (w *World) Apply(id string, x Action) []Event {
 			b.Money -= stolenCoins
 			a.Money += stolenCoins
 
-			stolenItem := ""
+			stolenItem := w.Catalog.SelectLootItem(*b)
 			stolenQty := 0
-			for _, candidate := range []string{"choice_grain", "medicine", "tonic", "scroll", "tools", "plank", "food"} {
-				if b.Items[candidate] > 0 {
-					stolenItem = candidate
-					stolenQty = 1
-					w.adjustActorItem(b, candidate, -1, false)
-					w.adjustActorItem(a, candidate, 1, false)
-					break
-				}
+			if stolenItem != "" {
+				stolenQty = 1
+				w.adjustActorItem(b, stolenItem, -1, false)
+				w.adjustActorItem(a, stolenItem, 1, false)
 			}
-			a.Tags = appendUnique(a.Tags, "outlaw")
+			a.Tags = appendUnique(a.Tags, outlawTag)
 			a.RestUntil = w.Tick + 32
 			b.Trust[a.ID] -= 2
 			ev := w.record(a, x, "stolen", map[string]any{
-				"text":     fmt.Sprintf("%s pickpocketed %d coins and %d %s from %s", a.Name, stolenCoins, stolenQty, stolenItem, b.Name),
+				"text":     fmt.Sprintf("%s stole %d coins and %d %s from %s", a.Name, stolenCoins, stolenQty, stolenItem, b.Name),
 				"coins":    stolenCoins,
 				"item":     stolenItem,
 				"quantity": stolenQty,
 			}, b)
-			return append([]Event{ev}, w.grantProfessionXP(a, x, "thief", 6, 2)...)
+			events := []Event{ev}
+			for _, sid := range sortedProductionKeys(a.Skills) {
+				if a.Skills[sid] > 0 {
+					if sk, ok := w.Catalog.Skills[sid]; ok && sk.StealthBonusPerLevel > 0 {
+						events = append(events, w.grantSkillXP(a, x, sid, 6)...)
+					}
+				}
+			}
+			if stealProf != "" {
+				return append(events, w.grantProfessionXP(a, x, stealProf, 6, 2)...)
+			}
+			return events
 		}
 		dmg := 12
 		if dmg >= a.Health {
@@ -2927,14 +3160,17 @@ func (w *World) Apply(id string, x Action) []Event {
 		if dmg > 0 {
 			a.Health -= dmg
 		}
-		a.Tags = appendUnique(a.Tags, "outlaw")
+		a.Tags = appendUnique(a.Tags, outlawTag)
 		a.RestUntil = w.Tick + 64
 		b.Trust[a.ID] -= 3
 		ev := w.record(a, x, "steal_foiled", map[string]any{
 			"text":   fmt.Sprintf("%s was caught trying to steal from %s (-%d health)", a.Name, b.Name, dmg),
 			"damage": dmg,
-		}, b)
-		return append([]Event{ev}, w.grantProfessionXP(a, x, "thief", 2, 1)...)
+		}, append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)...)
+		if stealProf != "" {
+			return append([]Event{ev}, w.grantProfessionXP(a, x, stealProf, 2, 1)...)
+		}
+		return []Event{ev}
 
 	case "raid":
 		if b == nil || b.ID == id || !SamePlace(*a, *b) || w.Tick < b.JailedUntil {
@@ -2947,13 +3183,12 @@ func (w *World) Apply(id string, x Action) []Event {
 			return fail("raider is injured or recuperating after recent raid")
 		}
 		a.Energy -= 8
+		env := w.Catalog.EffectiveEnvironment()
+		outlawTag := env.PrimaryOutlawTag()
 		atkPower := CombatPowerWithCatalog(w.Catalog, *a)
 		defPower := CombatPowerWithCatalog(w.Catalog, *b)
-		profID := "bandit"
-		if a.Professions["gangster"] > a.Professions["bandit"] {
-			profID = "gangster"
-		}
-		a.Tags = appendUnique(a.Tags, "outlaw")
+		profID := w.Catalog.BestProfessionForCapability(*a, "raid")
+		a.Tags = appendUnique(a.Tags, outlawTag)
 		if atkPower >= defPower {
 			dmg := 14 + (atkPower-defPower)/2
 			if dmg > 35 {
@@ -2981,16 +3216,12 @@ func (w *World) Apply(id string, x Action) []Event {
 			b.Money -= lootCoins
 			a.Money += lootCoins
 
-			lootItem := ""
+			lootItem := w.Catalog.SelectLootItem(*b)
 			lootQty := 0
-			for _, candidate := range []string{"choice_grain", "food", "plank", "tools", "medicine", "timber", "ore"} {
-				if b.Items[candidate] > 0 {
-					lootItem = candidate
-					lootQty = 1
-					w.adjustActorItem(b, candidate, -1, false)
-					w.adjustActorItem(a, candidate, 1, false)
-					break
-				}
+			if lootItem != "" {
+				lootQty = 1
+				w.adjustActorItem(b, lootItem, -1, false)
+				w.adjustActorItem(a, lootItem, 1, false)
 			}
 			b.Trust[a.ID] -= 4
 			ev := w.record(a, x, "raided", map[string]any{
@@ -2999,9 +3230,11 @@ func (w *World) Apply(id string, x Action) []Event {
 				"item":     lootItem,
 				"quantity": lootQty,
 				"damage":   dmg,
-			}, b)
+			}, append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)...)
 			events := []Event{ev}
-			events = append(events, w.grantProfessionXP(a, x, profID, 8, 3)...)
+			if profID != "" {
+				events = append(events, w.grantProfessionXP(a, x, profID, 8, 3)...)
+			}
 			events = append(events, w.markDeadIfZero(b, a, x, "armed raid")...)
 			return events
 		}
@@ -3018,17 +3251,21 @@ func (w *World) Apply(id string, x Action) []Event {
 		ev := w.record(a, x, "raid_repelled", map[string]any{
 			"text":   fmt.Sprintf("%s repelled a raid by %s (-%d health to attacker)", b.Name, a.Name, dmg),
 			"damage": dmg,
-		}, b)
+		}, append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)...)
 		events := []Event{ev}
 		events = append(events, w.grantCombatXP(b, x, 6, 2)...)
 		events = append(events, w.markDeadIfZero(a, b, x, "repelled raid clash")...)
 		return events
 
 	case "extort":
+		env := w.Catalog.EffectiveEnvironment()
+		if !env.Institutions.RacketeeringEnabled() {
+			return fail("protection extortion is disabled in this world environment")
+		}
 		if b == nil || b.ID == id || !SamePlace(*a, *b) || w.Tick < b.JailedUntil {
 			return fail("target is not nearby")
 		}
-		if ActorHasTag(b.IdentityTags(), "outlaw") {
+		if w.Catalog.IsOutlawTags(b.IdentityTags()) {
 			return fail("cannot extort fellow outlaw")
 		}
 		if a.Energy < 6 {
@@ -3038,11 +3275,11 @@ func (w *World) Apply(id string, x Action) []Event {
 			return fail("enforcer is injured or resting")
 		}
 		a.Energy -= 6
-		a.Tags = appendUnique(a.Tags, "outlaw")
+		a.Tags = appendUnique(a.Tags, env.PrimaryOutlawTag())
 		atkPower := CombatPowerWithCatalog(w.Catalog, *a) + 2
 		defPower := CombatPowerWithCatalog(w.Catalog, *b)
 		if atkPower >= defPower && b.Money >= 2 {
-			fee := 2 + a.Professions["gangster"] + a.Professions["gang_boss"]*2
+			fee := w.Catalog.ExtortionFee(*a)
 			if fee > b.Money/3+1 {
 				fee = b.Money/3 + 1
 			}
@@ -3055,16 +3292,15 @@ func (w *World) Apply(id string, x Action) []Event {
 			a.RestUntil = w.Tick + 32
 			w.addDistrictCorruption(a.Location, 1)
 			ev := w.record(a, x, "extorted", map[string]any{
-				"text":             fmt.Sprintf("%s collected %d protection-fee coins from %s in %s", a.Name, fee, b.Name, a.Location),
+				"text":             fmt.Sprintf("%s collected %d coercion-fee coins from %s in %s", a.Name, fee, b.Name, a.Location),
 				"protection_coins": fee,
 				"district":         a.Location,
-			}, b)
+			}, append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)...)
 			events := []Event{ev}
-			gangProf := "gangster"
-			if a.Professions["gang_boss"] > 0 {
-				gangProf = "gang_boss"
+			if extProf := w.Catalog.BestProfessionForCapability(*a, "extort"); extProf != "" {
+				events = append(events, w.grantProfessionXP(a, x, extProf, 5, 2)...)
 			}
-			return append(events, w.grantProfessionXP(a, x, gangProf, 5, 2)...)
+			return events
 		}
 		dmg := 8
 		if dmg > a.Health-1 {
@@ -3074,9 +3310,9 @@ func (w *World) Apply(id string, x Action) []Event {
 		a.RestUntil = w.Tick + 48
 		b.Trust[a.ID] -= 2
 		ev := w.record(a, x, "extort_resisted", map[string]any{
-			"text":   fmt.Sprintf("%s refused protection extortion from %s (-%d health to enforcer)", b.Name, a.Name, dmg),
+			"text":   fmt.Sprintf("%s refused extortion from %s (-%d health to attacker)", b.Name, a.Name, dmg),
 			"damage": dmg,
-		}, b)
+		}, append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)...)
 		return []Event{ev}
 
 	case "bribe":
@@ -3084,7 +3320,7 @@ func (w *World) Apply(id string, x Action) []Event {
 			return fail("official is not nearby")
 		}
 		if !w.Catalog.Capabilities(*b)["arrest"] {
-			return fail("target does not hold law-enforcement authority")
+			return fail("target does not hold enforcement authority")
 		}
 		if a.Energy < 3 {
 			return fail("insufficient energy")
@@ -3128,6 +3364,9 @@ func (w *World) Apply(id string, x Action) []Event {
 		return []Event{ev}
 
 	case "audit_corruption":
+		if !w.Catalog.EffectiveEnvironment().Institutions.OversightEnabled() {
+			return fail("oversight audits are disabled in this world environment")
+		}
 		if b == nil || b.ID == id || !SamePlace(*a, *b) || w.Tick < b.JailedUntil {
 			return fail("suspect is not nearby")
 		}
@@ -3179,40 +3418,38 @@ func (w *World) Apply(id string, x Action) []Event {
 			"jailed_until":      jailedUntil,
 		}, observers...)
 		events := []Event{ev}
-		for _, profID := range []string{"xiucai", "chief_constable", "scholar", "constable"} {
-			if a.Professions[profID] > 0 {
-				events = append(events, w.grantProfessionXP(a, x, profID, 8, 3)...)
-				break
-			}
+		if auditProf := w.Catalog.BestProfessionForCapability(*a, "audit_corruption"); auditProf != "" {
+			events = append(events, w.grantProfessionXP(a, x, auditProf, 8, 3)...)
 		}
 		return events
 
 	case "arrest":
+		env := w.Catalog.EffectiveEnvironment()
+		if !env.Institutions.EnforcementEnabled() {
+			return fail("enforcement detention is disabled in this world environment")
+		}
 		if b == nil || b.ID == id || !SamePlace(*a, *b) || w.Tick < b.JailedUntil {
 			return fail("target is not nearby")
 		}
 		bTags := b.IdentityTags()
-		if !ActorHasTag(bTags, "outlaw") && !ActorHasTag(bTags, "raider") && !ActorHasTag(bTags, "thief") && !ActorHasTag(bTags, "gang") && a.Trust[b.ID] >= 0 {
+		if !w.Catalog.IsOutlawTags(bTags) && a.Trust[b.ID] >= 0 {
 			return fail("target is a law-abiding resident")
 		}
 		if a.Energy < 7 {
-			return fail("insufficient energy to arrest")
+			return fail("insufficient energy to detain suspect")
 		}
 		if a.Health < 45 || w.Tick < a.RestUntil {
-			return fail("constable is injured or resting from recent patrol clash")
+			return fail("enforcer is injured or resting from recent patrol clash")
 		}
 		a.Energy -= 7
 		lawPower := CombatPowerWithCatalog(w.Catalog, *a) + 3
 		usedWrit := false
-		if a.Items["bounty_writ"] > 0 {
+		if env.EnforcementItem != "" && a.Items[env.EnforcementItem] > 0 {
 			lawPower += 5
 			usedWrit = true
 		}
 		outlawPower := CombatPowerWithCatalog(w.Catalog, *b)
-		lawProf := "constable"
-		if a.Professions["constable"] == 0 && a.Professions["guard"] > 0 {
-			lawProf = "guard"
-		}
+		lawProf := w.Catalog.BestProfessionForCapability(*a, "arrest")
 		if lawPower >= outlawPower {
 			dmg := 12
 			if b.Health <= dmg && outlawPower < 18 {
@@ -3235,7 +3472,7 @@ func (w *World) Apply(id string, x Action) []Event {
 			baseOfficial := 4
 			if usedWrit {
 				baseOfficial += 3
-				w.adjustActorItem(a, "bounty_writ", -1, true)
+				w.adjustActorItem(a, env.EnforcementItem, -1, true)
 			}
 			if len(w.Cohorts) > 0 {
 				baseOfficial = int(w.debitTreasury(int64(baseOfficial), "bounty"))
@@ -3257,14 +3494,16 @@ func (w *World) Apply(id string, x Action) []Event {
 				}
 			}
 			ev := w.record(a, x, "arrested", map[string]any{
-				"text":         fmt.Sprintf("%s arrested outlaw %s, imprisoning until tick %d, confiscating %d coins and claiming %d bounty (%d damage)", a.Name, b.Name, b.JailedUntil, confiscated, bounty, dmg),
+				"text":         fmt.Sprintf("%s detained %s, confining until tick %d, confiscating %d coins and claiming %d bounty (%d damage)", a.Name, b.Name, b.JailedUntil, confiscated, bounty, dmg),
 				"coins":        bounty,
 				"confiscated":  confiscated,
 				"damage":       dmg,
 				"jailed_until": b.JailedUntil,
-			}, b)
+			}, append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)...)
 			events := []Event{ev}
-			events = append(events, w.grantProfessionXP(a, x, lawProf, 8, 3)...)
+			if lawProf != "" {
+				events = append(events, w.grantProfessionXP(a, x, lawProf, 8, 3)...)
+			}
 			events = append(events, w.markDeadIfZero(b, a, x, "violent arrest resistance")...)
 			return events
 		}
@@ -3275,9 +3514,9 @@ func (w *World) Apply(id string, x Action) []Event {
 		a.Health -= dmg
 		a.RestUntil = w.Tick + 64
 		ev := w.record(a, x, "arrest_resisted", map[string]any{
-			"text":   fmt.Sprintf("outlaw %s resisted arrest by %s (-%d health)", b.Name, a.Name, dmg),
+			"text":   fmt.Sprintf("%s resisted detention by %s (-%d health)", b.Name, a.Name, dmg),
 			"damage": dmg,
-		}, b)
+		}, append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)...)
 		events := []Event{ev}
 		events = append(events, w.grantProfessionXP(a, x, lawProf, 3, 1)...)
 		events = append(events, w.markDeadIfZero(a, b, x, "resisting outlaw counterattack")...)
@@ -3305,7 +3544,7 @@ func (w *World) Apply(id string, x Action) []Event {
 		if !ok || (spec.MedicinalHeal <= 0 && spec.DiseaseCure <= 0) || a.Items[itemID] < 1 {
 			return fail("no medicine")
 		}
-		amount := maxInt(15, spec.MedicinalHeal-5)
+		amount := maxInt(15, spec.MedicinalHeal-5) + w.Catalog.SkillHealBonus(*a)
 		if amount > MaxHealth-b.Health {
 			amount = MaxHealth - b.Health
 		}
@@ -3333,8 +3572,15 @@ func (w *World) Apply(id string, x Action) []Event {
 			"healed":        amount,
 			"health":        b.Health,
 			"cured_disease": curedDisease,
-		}, b)
+		}, append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)...)
 		events := []Event{ev}
+		for _, sid := range sortedProductionKeys(a.Skills) {
+			if a.Skills[sid] > 0 {
+				if sk, ok := w.Catalog.Skills[sid]; ok && sk.HealBonusPerLevel > 0 {
+					events = append(events, w.grantSkillXP(a, x, sid, 6)...)
+				}
+			}
+		}
 		for _, prof := range w.Catalog.Professions {
 			if a.Professions[prof.ID] > 0 && ActorHasTag(prof.Grants, "healer") {
 				return append(events, w.grantProfessionXP(a, x, prof.ID, 6, 2)...)

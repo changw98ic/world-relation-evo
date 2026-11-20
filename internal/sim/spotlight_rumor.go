@@ -787,11 +787,7 @@ func (w *World) hasAnyPublicForumDistrict() bool {
 }
 
 func (w *World) isPublicForumDistrict(districtID string) bool {
-	return w.Map.DistrictHasFeature(districtID, "hub") ||
-		w.Map.DistrictHasFeature(districtID, "market") ||
-		w.Map.DistrictHasFeature(districtID, "shrine") ||
-		w.Map.DistrictHasFeature(districtID, "yamen") ||
-		w.Map.DistrictHasFeature(districtID, "academy")
+	return w.isConfiguredForumDistrict(districtID)
 }
 
 func (w *World) isHighTrustPublicFigure(a *Actor) bool {
@@ -807,8 +803,12 @@ func (w *World) isHighTrustPublicFigure(a *Actor) bool {
 		caps["audit_corruption"] ||
 		caps["arrest"] ||
 		caps["perform_ritual"] ||
-		ActorHasTag(idTags, "law") ||
+		caps["issue_decree"] ||
+		w.Catalog.IsEnforcementTags(idTags) ||
+		w.Catalog.IsOversightTags(idTags) ||
 		ActorHasTag(idTags, "ritual") ||
+		ActorHasTag(idTags, "elder") ||
+		ActorHasTag(idTags, "ruler") ||
 		ActorHasTag(idTags, "scholar")
 	if !hasAuthorityRole && a.Level < 4 {
 		return false

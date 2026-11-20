@@ -300,6 +300,9 @@ func (w *World) collectTaxWithSkim(districtID string, grossTax int64) (netTreasu
 // stepCohortDailyTaxation runs once per day at 12:00 to assess household, land, and guild surplus taxes
 // across non-civic, non-outlaw cohorts, complete with corrupt collector "fire-meltage" surcharges (火耗加派) and skimming.
 func (w *World) stepCohortDailyTaxation() []Event {
+	if !w.Catalog.EffectiveEnvironment().Institutions.TaxationEnabled() {
+		return nil
+	}
 	clock := ClockAt(w.Tick)
 	if clock.Hour != 12 || clock.Minute != 0 || len(w.Cohorts) == 0 {
 		return nil
@@ -459,6 +462,9 @@ func (w *World) stepCohortDailyTaxation() []Event {
 // collection ("例钱 / 码头水头规费"), temporary anti-pickpocket turf protection for paying stalls, and violent
 // stall-smashing / Martial Hall counter-clashes when guilds refuse extortion.
 func (w *World) stepCohortProtectionRackets() []Event {
+	if !w.Catalog.EffectiveEnvironment().Institutions.RacketeeringEnabled() {
+		return nil
+	}
 	clock := ClockAt(w.Tick)
 	if (clock.Hour != 10 && clock.Hour != 16) || clock.Minute != 0 || len(w.Cohorts) == 0 {
 		return nil
@@ -779,6 +785,9 @@ func (w *World) stepCohortBriberyAndCollusion() []Event {
 // corruption breaches AuditThreshold or on the 3-day supervisory docket, jailing corrupt personnel and
 // confiscating IllicitWealth back into w.PublicTreasury.
 func (w *World) stepCohortAntiCorruptionAudit() []Event {
+	if !w.Catalog.EffectiveEnvironment().Institutions.OversightEnabled() {
+		return nil
+	}
 	clock := ClockAt(w.Tick)
 	if clock.Hour != 16 || clock.Minute != 0 || len(w.Cohorts) == 0 {
 		return nil
@@ -786,7 +795,7 @@ func (w *World) stepCohortAntiCorruptionAudit() []Event {
 	gov := w.Catalog.EffectiveGovernance()
 	routineDocket := (w.Tick/TicksPerDay)%3 == 2
 
-	// Identify censorate / public-trust oversight cohort (e.g. xiucai, scholar, chief_constable, high_priest)
+	// Identify public-trust oversight cohort from configured oversight tags/capabilities
 	var censor *PopulationCohort
 	for i := range w.Cohorts {
 		c := &w.Cohorts[i]
@@ -794,11 +803,11 @@ func (w *World) stepCohortAntiCorruptionAudit() []Event {
 			continue
 		}
 		prof, ok := w.Catalog.ProfessionByID(c.Profession)
-		if !ok || ActorHasTag(prof.Grants, gov.OutlawTag) {
+		if !ok || w.Catalog.IsOutlawTags(prof.Grants) || ActorHasTag(prof.Grants, gov.OutlawTag) {
 			continue
 		}
 		caps := w.Catalog.Capabilities(Actor{Tags: prof.Grants})
-		if ActorHasTag(prof.Grants, "censor") || (caps[gov.AuditCapability] && c.IllicitWealth == 0) || (w.Catalog.HasPublicTrustDuty([]string{c.Profession}) && !w.isLawCollectorCohort(c)) {
+		if w.Catalog.IsOversightTags(prof.Grants) || (caps[gov.AuditCapability] && c.IllicitWealth == 0) || (w.Catalog.HasPublicTrustDuty([]string{c.Profession}) && !w.isLawCollectorCohort(c)) {
 			if censor == nil || c.Tier > censor.Tier || c.Population > censor.Population {
 				censor = c
 			}

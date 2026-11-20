@@ -36,6 +36,7 @@ type PopulationCohort struct {
 	District              string  `json:"district"`
 	FactionID             string  `json:"faction_id,omitempty"`
 	Profession            string  `json:"profession"`
+	FormID                string  `json:"form_id,omitempty"`
 	Tier                  int     `json:"tier"`
 	ProfLevel             int     `json:"prof_level"`
 	Rank                  string  `json:"rank,omitempty"`
@@ -79,6 +80,15 @@ func CloneCohort(c PopulationCohort) PopulationCohort {
 		}
 	}
 	return c
+}
+
+// cohortFormSpec returns the FormSpec bound to c.FormID, if any.
+func (w *World) cohortFormSpec(c PopulationCohort) (FormSpec, bool) {
+	if c.FormID == "" || w.Catalog.Forms == nil {
+		return FormSpec{}, false
+	}
+	f, ok := w.Catalog.Forms[c.FormID]
+	return f, ok
 }
 
 // EffectivePopulation returns healthy, free working-age cohort members able to work, patrol, or fight.
@@ -321,14 +331,20 @@ func (w *World) buildStepIndex() *stepIndex {
 			nbTags = a.IdentityTags()
 		}
 		idx.neighborSnap[i] = Neighbor{
-			ID:       a.ID,
-			Name:     a.Name,
-			Role:     a.Role,
-			Tags:     nbTags,
-			Level:    a.Level,
-			Health:   a.Health,
-			Sleeping: a.Task != nil && a.Task.Action.Kind == "sleep",
-			Jailed:   a.JailedUntil > w.Tick,
+			ID:          a.ID,
+			Name:        a.Name,
+			Role:        a.Role,
+			FormID:      a.FormID,
+			PowerTier:   w.Catalog.ActorPowerTier(*a),
+			CombatPower: CombatPowerWithCatalog(w.Catalog, *a),
+			Skills:      cloneIntMap(a.Skills),
+			Tags:        nbTags,
+			Personality: a.Personality,
+			Hobbies:     append([]string(nil), a.Hobbies...),
+			Level:       a.Level,
+			Health:      a.Health,
+			Sleeping:    a.Task != nil && a.Task.Action.Kind == "sleep",
+			Jailed:      a.JailedUntil > w.Tick,
 		}
 		if !a.InTransit() {
 			venueBucket := ""
@@ -396,6 +412,7 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 		Catalog:         CloneCatalog(idx.catalogSnapshot),
 	}
 	p.ActiveEffects = w.perceivedActiveEffects(a, idx.activeEffectsSnap)
+	p.ActiveWorldEvents = w.perceivedActiveWorldEvents(a)
 	if cohorts := idx.cohortsByDistrict[a.Location]; len(cohorts) > 0 {
 		p.LocalCohorts = append([]CohortView(nil), cohorts...)
 	}
@@ -472,6 +489,7 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 					}
 					nb := idx.neighborSnap[bi]
 					nb.Tags = append([]string(nil), nb.Tags...)
+					nb.Hobbies = append([]string(nil), nb.Hobbies...)
 					p.Nearby = append(p.Nearby, nb)
 				}
 			} else {
@@ -493,6 +511,7 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 					nb := idx.neighborSnap[bi]
 					if offerPeers[nb.ID] || a.Trust[nb.ID] != 0 {
 						nb.Tags = append([]string(nil), nb.Tags...)
+					nb.Hobbies = append([]string(nil), nb.Hobbies...)
 						selected = append(selected, nb)
 						picked[nb.ID] = true
 						if len(selected) >= MaxNearbyView {
@@ -512,6 +531,7 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 							continue
 						}
 						nb.Tags = append([]string(nil), nb.Tags...)
+					nb.Hobbies = append([]string(nil), nb.Hobbies...)
 						selected = append(selected, nb)
 						picked[nb.ID] = true
 					}
@@ -1034,6 +1054,11 @@ func (w *World) HydrateActor(cohortID string) (*Actor, error) {
 	for _, g := range prof.Grants {
 		tags = appendUnique(tags, g)
 	}
+	if form, ok := w.cohortFormSpec(*c); ok {
+		for _, t := range form.InnateTags {
+			tags = appendUnique(tags, t)
+		}
+	}
 	if w.Catalog.TagsConsume([]string{baseRole}, "water") {
 		tags = appendUnique(tags, "water_user")
 	}
@@ -1078,6 +1103,7 @@ func (w *World) HydrateActor(cohortID string) (*Actor, error) {
 		ID:           actorID,
 		Name:         fmt.Sprintf("%s·%d", c.Name, c.HydratedSeq),
 		Role:         baseRole,
+		FormID:       c.FormID,
 		Tags:         tags,
 		Attributes:   attrs,
 		Professions:  profs,
@@ -1139,7 +1165,7 @@ func (w *World) DehydrateActor(actorID string) error {
 	profLv := a.Professions[profID]
 	if profLv < 1 {
 		for k, lv := range a.Professions {
-			if lv > profLv {
+			if lv > profLv || (lv == profLv && (profID == "" || k < profID)) {
 				profID = k
 				profLv = lv
 			}

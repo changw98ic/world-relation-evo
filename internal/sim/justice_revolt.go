@@ -252,7 +252,7 @@ func (w *World) effectiveJusticeSpec(jr *JusticeRevoltState) JusticeRevoltSpec {
 func (w *World) actorCanEnforceLaw(a Actor, spec JusticeRevoltSpec) bool {
 	idTags := a.IdentityTags()
 	caps := w.Catalog.Capabilities(a)
-	if caps[spec.LawCapability] || caps["frame_suspect"] || ActorHasTag(idTags, "law") {
+	if caps[spec.LawCapability] || caps["frame_suspect"] || w.Catalog.IsEnforcementTags(idTags) {
 		return true
 	}
 	return w.Catalog.HasCoercivePower(idTags) && w.Catalog.HasPublicTrustDuty(idTags)
@@ -261,7 +261,7 @@ func (w *World) actorCanEnforceLaw(a Actor, spec JusticeRevoltSpec) bool {
 func (w *World) actorCanAppeal(a Actor, spec JusticeRevoltSpec) bool {
 	idTags := a.IdentityTags()
 	caps := w.Catalog.Capabilities(a)
-	if ActorHasTag(idTags, spec.OversightTag) || caps[spec.OversightCapability] || caps["file_appeal"] {
+	if ActorHasTag(idTags, spec.OversightTag) || w.Catalog.IsOversightTags(idTags) || caps[spec.OversightCapability] || caps["file_appeal"] {
 		return true
 	}
 	return w.Catalog.HasPublicTrustDuty(idTags)
@@ -281,7 +281,7 @@ func (w *World) isOutlawCohort(c *PopulationCohort, spec JusticeRevoltSpec) bool
 		return false
 	}
 	prof, ok := w.Catalog.ProfessionByID(c.Profession)
-	if ok && ActorHasTag(prof.Grants, spec.OutlawTag) {
+	if ok && (ActorHasTag(prof.Grants, spec.OutlawTag) || w.Catalog.IsOutlawTags(prof.Grants)) {
 		return true
 	}
 	return false
@@ -415,8 +415,11 @@ func (w *World) ApplyJusticeAction(jr *JusticeRevoltState, actorID string, x Act
 
 	switch x.Kind {
 	case "frame_suspect":
+		if !w.Catalog.EffectiveEnvironment().Institutions.EnforcementEnabled() {
+			return fail("enforcement framing is disabled in this world environment"), true
+		}
 		if !w.actorCanEnforceLaw(*a, spec) {
-			return fail("actor lacks law-enforcement authority"), true
+			return fail("actor lacks enforcement authority"), true
 		}
 		if b == nil || b.ID == a.ID || !SamePlace(*a, *b) {
 			return fail("target suspect is not nearby"), true
@@ -425,7 +428,7 @@ func (w *World) ApplyJusticeAction(jr *JusticeRevoltState, actorID string, x Act
 			return fail("target is already imprisoned"), true
 		}
 		bTags := b.IdentityTags()
-		if ActorHasTag(bTags, spec.OutlawTag) || ActorHasTag(bTags, "raider") || ActorHasTag(bTags, "thief") || ActorHasTag(bTags, "gang") {
+		if ActorHasTag(bTags, spec.OutlawTag) || w.Catalog.IsOutlawTags(bTags) {
 			return fail("cannot scapegoat-frame an outlaw"), true
 		}
 		localCorr := 0
@@ -644,11 +647,10 @@ func (w *World) ApplyJusticeAction(jr *JusticeRevoltState, actorID string, x Act
 			"grievance":         grievance,
 		}, observers...)
 		events := []Event{ev}
-		for _, profID := range []string{"xiucai", "chief_constable", "scholar", "constable"} {
-			if a.Professions[profID] > 0 {
-				events = append(events, w.grantProfessionXP(a, x, profID, 8, 3)...)
-				break
-			}
+		if appealProf := w.Catalog.BestProfessionForCapability(*a, "file_appeal"); appealProf != "" {
+			events = append(events, w.grantProfessionXP(a, x, appealProf, 8, 3)...)
+		} else if auditProf := w.Catalog.BestProfessionForCapability(*a, spec.OversightCapability); auditProf != "" {
+			events = append(events, w.grantProfessionXP(a, x, auditProf, 8, 3)...)
 		}
 		return events, true
 	}
@@ -656,7 +658,7 @@ func (w *World) ApplyJusticeAction(jr *JusticeRevoltState, actorID string, x Act
 	return nil, false
 }
 
-// StepJusticeAndRevolt runs macro magistrate court trials, scapegoat framing, censorate appeals,
+// StepJusticeAndRevolt runs macro enforcement court trials, scapegoat framing, oversight appeals,
 // district grievance tracking, tax strikes, granary riots, popular uprisings, and state
 // pacification/amnesty reintegration cycles while preserving all 6 conservation ledgers.
 func (w *World) StepJusticeAndRevolt(jr *JusticeRevoltState) []Event {
@@ -668,26 +670,27 @@ func (w *World) StepJusticeAndRevolt(jr *JusticeRevoltState) []Event {
 	if clock.Minute != 0 {
 		return nil
 	}
+	env := w.Catalog.EffectiveEnvironment()
 	spec := w.effectiveJusticeSpec(jr)
 	var events []Event
 
-	// 1. 15:00 Afternoon Magistrate Court Docket (fair trials vs. corrupt scapegoat framing)
-	if clock.Hour == 15 {
+	// 1. 15:00 Afternoon Enforcement Docket (fair trials vs. corrupt scapegoat framing)
+	if clock.Hour == 15 && env.Institutions.EnforcementEnabled() {
 		events = append(events, w.stepMacroCourtTrials(jr, spec)...)
 	}
 
-	// 2. 17:00 Oversight / Censorate Appeals Docket
-	if clock.Hour == 17 {
+	// 2. 17:00 Oversight Appeals Docket
+	if clock.Hour == 17 && env.Institutions.OversightEnabled() {
 		events = append(events, w.stepMacroAppeals(jr, spec)...)
 	}
 
-	// 3. 18:00 Daily District Grievance Evaluation & Escalation Ladder (tax_strike -> granary_riot -> revolt_erupted)
-	if clock.Hour == 18 {
+	// 3. 18:00 Daily District Grievance Evaluation & Escalation Ladder
+	if clock.Hour == 18 && env.Institutions.RevoltEnabled() {
 		events = append(events, w.stepGrievanceAndEscalation(jr, spec)...)
 	}
 
-	// 4. 20:00 State Pacification, Suppression & Dynastic Amnesty / Rebel Reintegration Cycle
-	if clock.Hour == 20 {
+	// 4. 20:00 Pacification, Suppression & Amnesty / Reintegration Cycle
+	if clock.Hour == 20 && env.Institutions.RevoltEnabled() {
 		events = append(events, w.stepPacificationAndAmnesty(jr, spec)...)
 		jr.pruneResolvedHistory(w.Tick)
 	}
@@ -1632,7 +1635,7 @@ func (w *World) executeDynasticAmnesty(jr *JusticeRevoltState, spec JusticeRevol
 			continue
 		}
 		aTags := a.IdentityTags()
-		if !ActorHasTag(aTags, spec.OutlawTag) && !ActorHasTag(aTags, "raider") && !ActorHasTag(aTags, "thief") && !ActorHasTag(aTags, "gang") {
+		if !ActorHasTag(aTags, spec.OutlawTag) && !w.Catalog.IsOutlawTags(aTags) {
 			a.JailedUntil = 0
 			totalReleased++
 		}

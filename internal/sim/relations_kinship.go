@@ -178,8 +178,17 @@ type MonopolyCharter struct {
 	Active                  bool   `json:"active"`
 }
 
-// RelationEvoState holds all JSON-serializable kinship, vendetta, patronage, turf sovereignty,
-// faction leadership, and monopoly charter state.
+// MentorshipBond tracks an established mentor-apprentice instructional relationship.
+type MentorshipBond struct {
+	MentorID        string `json:"mentor_id"`
+	ApprenticeID    string `json:"apprentice_id"`
+	TopicID         string `json:"topic_id,omitempty"`
+	EstablishedTick int64  `json:"established_tick"`
+	Lessons         int    `json:"lessons"`
+}
+
+// RelationEvoState holds all JSON-serializable kinship, mentorship, vendetta, patronage,
+// turf sovereignty, faction leadership, and monopoly charter state.
 type RelationEvoState struct {
 	Spec                RelationEvoSpec                `json:"spec,omitempty"`
 	Seeded              bool                           `json:"seeded,omitempty"`
@@ -187,6 +196,7 @@ type RelationEvoState struct {
 	Kinship             map[string]*ActorKinship       `json:"kinship"`
 	Clans               map[string]*ClanRecord         `json:"clans"`
 	CohortClans         map[string]string              `json:"cohort_clans"`
+	Mentorships         []MentorshipBond               `json:"mentorships,omitempty"`
 	Grudges             []GrudgeRecord                 `json:"grudges,omitempty"`
 	DistrictSovereignty map[string]DistrictSovereignty `json:"district_sovereignty"`
 	ControllingFaction  map[string]string              `json:"controlling_faction"`
@@ -230,6 +240,9 @@ func CloneRelationEvoState(s *RelationEvoState) *RelationEvoState {
 	}
 	if s.CohortClans != nil {
 		out.CohortClans = cloneStringMap(s.CohortClans)
+	}
+	if s.Mentorships != nil {
+		out.Mentorships = append([]MentorshipBond(nil), s.Mentorships...)
 	}
 	if s.Grudges != nil {
 		out.Grudges = append([]GrudgeRecord(nil), s.Grudges...)
@@ -1048,23 +1061,131 @@ func (rs *RelationEvoState) settleDeathAndInheritance(w *World, e Event) []Event
 		w.settleUnclaimedActorEstate(deceased, ownedHouses)
 	}
 
-	// If killed by an assailant, form a high-intensity blood-feud grudge for nearest kin or clan.
+	// If killed by an assailant, form a high-intensity blood-feud grudge ONLY for kin/clan/mentors
+	// who actually witnessed the killing (or heard about it later via speech/channel_message!).
 	if killerID := relPayloadString(e.Payload, "killer_id"); killerID != "" && killerID != deceasedID {
+		witnesses, hasWitnessField := extractStringSlicePayload(e.Payload, "witnesses")
+		knowsMurder := func(actorID string) bool {
+			if !hasWitnessField {
+				return true // backward compatibility for synthetic events without witness metadata
+			}
+			return ActorHasTag(witnesses, actorID)
+		}
+		rootID := payloadInt64(e.Payload, "root_event_id")
+		if rootID <= 0 {
+			rootID = e.ID
+		}
 		aggrievedID := ""
-		if kin := rs.nearestLivingKin(w, deceasedID); kin != nil && kin.ID != killerID {
+		if kin := rs.nearestLivingKin(w, deceasedID); kin != nil && kin.ID != killerID && knowsMurder(kin.ID) {
 			aggrievedID = kin.ID
-		} else if k.ClanID != "" && k.ClanID != rs.entityClanID(w, killerID) {
+		} else if k.ClanID != "" && k.ClanID != rs.entityClanID(w, killerID) && !hasWitnessField {
 			aggrievedID = k.ClanID
 		}
 		if aggrievedID != "" {
-			rootID := payloadInt64(e.Payload, "root_event_id")
-			if rootID <= 0 {
-				rootID = e.ID
-			}
 			events = append(events, rs.recordGrudge(w, aggrievedID, killerID, "homicide", 70, rootID, e.ID)...)
+		}
+		// Surviving mentors or apprentices who witnessed the slaying also form a protective vendetta.
+		for _, partnerID := range rs.mentorshipPartners(deceasedID) {
+			if partnerID == killerID || partnerID == aggrievedID || !knowsMurder(partnerID) {
+				continue
+			}
+			partner := w.actor(partnerID)
+			if partner == nil || partner.Dead {
+				continue
+			}
+			if partner.Trust == nil {
+				partner.Trust = map[string]int{}
+			}
+			partner.Trust[killerID] -= 4
+			events = append(events, rs.recordGrudge(w, partnerID, killerID, "mentor_apprentice_slain", 55, rootID, e.ID)...)
 		}
 	}
 	return events
+}
+
+func extractStringSlicePayload(payload map[string]any, key string) ([]string, bool) {
+	if payload == nil {
+		return nil, false
+	}
+	raw, exists := payload[key]
+	if !exists {
+		return nil, false
+	}
+	switch v := raw.(type) {
+	case []string:
+		return v, true
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out, true
+	}
+	return nil, true
+}
+
+// RecordMentorship creates or deepens a formal mentor-apprentice bond when knowledge/skills are taught.
+func (rs *RelationEvoState) RecordMentorship(w *World, mentor, apprentice *Actor, topicID string) []Event {
+	if rs == nil || w == nil || mentor == nil || apprentice == nil || mentor.ID == "" || apprentice.ID == "" || mentor.ID == apprentice.ID {
+		return nil
+	}
+	rs.EnsureKinshipSeeded(w)
+	for i := range rs.Mentorships {
+		b := &rs.Mentorships[i]
+		if b.MentorID == mentor.ID && b.ApprenticeID == apprentice.ID {
+			b.Lessons++
+			if b.TopicID == "" && topicID != "" {
+				b.TopicID = topicID
+			}
+			return nil
+		}
+	}
+	rs.Mentorships = append(rs.Mentorships, MentorshipBond{
+		MentorID:        mentor.ID,
+		ApprenticeID:    apprentice.ID,
+		TopicID:         topicID,
+		EstablishedTick: w.Tick,
+		Lessons:         1,
+	})
+	mk := rs.ensureActorKinship(w, *mentor)
+	ak := rs.ensureActorKinship(w, *apprentice)
+	mk.ProtegeIDs = appendUnique(mk.ProtegeIDs, apprentice.ID)
+	if ak.PatronID == "" {
+		ak.PatronID = mentor.ID
+	}
+	if mentor.Trust == nil {
+		mentor.Trust = map[string]int{}
+	}
+	if apprentice.Trust == nil {
+		apprentice.Trust = map[string]int{}
+	}
+	mentor.Trust[apprentice.ID] += 2
+	apprentice.Trust[mentor.ID] += 3
+	ev := w.record(mentor, Action{Kind: "teach_knowledge", TargetID: apprentice.ID, SkillID: topicID}, "mentorship_formed", map[string]any{
+		"text":            fmt.Sprintf("%s and %s formed a formal mentor-apprentice bond (%s)", mentor.Name, apprentice.Name, topicID),
+		"mentor_id":       mentor.ID,
+		"apprentice_id":   apprentice.ID,
+		"topic_id":        topicID,
+		"established_tick": w.Tick,
+	}, apprentice)
+	return []Event{ev}
+}
+
+func (rs *RelationEvoState) mentorshipPartners(actorID string) []string {
+	if rs == nil || actorID == "" {
+		return nil
+	}
+	var out []string
+	for _, b := range rs.Mentorships {
+		if b.MentorID == actorID && b.ApprenticeID != "" {
+			out = appendUnique(out, b.ApprenticeID)
+		} else if b.ApprenticeID == actorID && b.MentorID != "" {
+			out = appendUnique(out, b.MentorID)
+		}
+	}
+	return out
 }
 
 // ObserveCausalRelationEvents inspects newly settled simulation events to update lineage
@@ -1089,9 +1210,29 @@ func (rs *RelationEvoState) ObserveCausalRelationEvents(w *World, events []Event
 			dmg := int(payloadInt64(e.Payload, "damage"))
 			coins := int(payloadInt64(e.Payload, "coins"))
 			out = append(out, rs.recordGrudge(w, e.TargetID, e.ActorID, "raided", 32+dmg/2+coins, rootID, e.ID)...)
+			for _, partnerID := range rs.mentorshipPartners(e.TargetID) {
+				if partnerID != e.ActorID {
+					if partner := w.actor(partnerID); partner != nil && !partner.Dead {
+						if partner.Trust == nil {
+							partner.Trust = map[string]int{}
+						}
+						partner.Trust[e.ActorID] -= 2
+					}
+				}
+			}
 		case "attacked":
 			dmg := int(payloadInt64(e.Payload, "damage"))
 			out = append(out, rs.recordGrudge(w, e.TargetID, e.ActorID, "attacked", 24+dmg/2, rootID, e.ID)...)
+			for _, partnerID := range rs.mentorshipPartners(e.TargetID) {
+				if partnerID != e.ActorID {
+					if partner := w.actor(partnerID); partner != nil && !partner.Dead {
+						if partner.Trust == nil {
+							partner.Trust = map[string]int{}
+						}
+						partner.Trust[e.ActorID] -= 2
+					}
+				}
+			}
 		case "extort_resisted":
 			out = append(out, rs.recordGrudge(w, e.TargetID, e.ActorID, "extort_resisted", 28, rootID, e.ID)...)
 		case "cohort_raided":
@@ -1136,6 +1277,39 @@ func (rs *RelationEvoState) ObserveCausalRelationEvents(w *World, events []Event
 			out = append(out, rs.recordGrudge(w, agg, off, "wrongful_conviction", 48, rootID, e.ID)...)
 		case "actor_died":
 			out = append(out, rs.settleDeathAndInheritance(w, e)...)
+		case "speech", "channel_message":
+			// Epistemic death-news trigger: when a kin, sworn ally, or mentor/apprentice hears
+			// a credible report naming a killer, they form the blood feud upon learning the news!
+			var stmt *Statement
+			if e.Action.Statement != nil {
+				stmt = e.Action.Statement
+			} else if rawStmt, ok := e.Payload["statement"].(Statement); ok {
+				stmt = &rawStmt
+			}
+			if stmt != nil && stmt.Topic == "actor_died" && stmt.SubjectID != "" && stmt.ObjectID != "" && e.TargetID != "" {
+				listener := w.actor(e.TargetID)
+				killerID := stmt.SubjectID
+				victimID := stmt.ObjectID
+				if listener != nil && !listener.Dead && listener.ID != killerID && listener.Trust[e.ActorID] >= -1 {
+					bonded := false
+					if ActorHasTag(rs.mentorshipPartners(victimID), listener.ID) {
+						bonded = true
+					} else if lk := rs.Kinship[listener.ID]; lk != nil {
+						if lk.SpouseID == victimID || lk.PatronID == victimID ||
+							ActorHasTag(lk.ParentIDs, victimID) || ActorHasTag(lk.ChildIDs, victimID) ||
+							ActorHasTag(lk.SwornIDs, victimID) || ActorHasTag(lk.ProtegeIDs, victimID) {
+							bonded = true
+						}
+					}
+					if bonded {
+						if listener.Trust == nil {
+							listener.Trust = map[string]int{}
+						}
+						listener.Trust[killerID] -= 4
+						out = append(out, rs.recordGrudge(w, listener.ID, killerID, "homicide_reported", 65, rootID, e.ID)...)
+					}
+				}
+			}
 		case "actor_succeeded":
 			predID := relPayloadString(e.Payload, "predecessor_id")
 			if predID == "" {
@@ -1187,7 +1361,7 @@ func (rs *RelationEvoState) matchesAggrieved(a *Actor, g GrudgeRecord) bool {
 	if k.SpouseID == g.AggrievedID || k.PatronID == g.AggrievedID {
 		return true
 	}
-	if ActorHasTag(k.ParentIDs, g.AggrievedID) || ActorHasTag(k.ChildIDs, g.AggrievedID) || ActorHasTag(k.SwornIDs, g.AggrievedID) {
+	if ActorHasTag(k.ParentIDs, g.AggrievedID) || ActorHasTag(k.ChildIDs, g.AggrievedID) || ActorHasTag(k.SwornIDs, g.AggrievedID) || ActorHasTag(k.ProtegeIDs, g.AggrievedID) {
 		return true
 	}
 	return false
@@ -1485,7 +1659,7 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 			b.Task = nil
 		}
 		if b.Health > 0 && a.Health > 10 {
-			counter := maxInt(2, defPower/4)
+			counter := maxInt(2, minInt(22, defPower/4))
 			if counter > a.Health-1 {
 				counter = a.Health - 1
 			}

@@ -301,8 +301,11 @@ func (w *World) applyTeachKnowledge(a *Actor, x Action, b *Actor) []Event {
 	fail := func(reason string) []Event {
 		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
+	if x.TechID == "" && x.SkillID != "" {
+		return w.applyTeachSkill(a, x, b)
+	}
 	if x.TechID == "" {
-		return fail("teach_knowledge requires tech_id")
+		return fail("teach_knowledge requires tech_id or skill_id")
 	}
 	tech, ok := w.Catalog.Techs[x.TechID]
 	if !ok {
@@ -416,7 +419,7 @@ func (w *World) applyTeachKnowledge(a *Actor, x Action, b *Actor) []Event {
 			"discoverer_id": rec.DiscovererID,
 			"observation":   obs,
 		}, b)
-		return []Event{ev}
+		return append([]Event{ev}, w.ensureRelations().RecordMentorship(w, a, b, tech.ID)...)
 	}
 
 	// Remote channel instruction records Channel + Statement and never fabricates an Observation on student.
@@ -493,7 +496,68 @@ func (w *World) applyTeachKnowledge(a *Actor, x Action, b *Actor) []Event {
 	}
 	b.Memories = appendMemory(b.Memories, studentMem)
 	w.ObserveContinuity(e)
-	return []Event{e}
+	return append([]Event{e}, w.ensureRelations().RecordMentorship(w, a, b, tech.ID)...)
+}
+
+func (w *World) applyTeachSkill(a *Actor, x Action, b *Actor) []Event {
+	fail := func(reason string) []Event {
+		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+	}
+	skill, ok := w.Catalog.Skills[x.SkillID]
+	if !ok {
+		return fail("unknown skill: " + x.SkillID)
+	}
+	teacherLv := a.Skills[skill.ID]
+	if teacherLv < 2 {
+		return fail("teacher needs at least level 2 in skill " + skill.ID)
+	}
+	if b == nil || b.ID == a.ID || b.Dead || w.Tick < b.JailedUntil {
+		return fail("student is unavailable")
+	}
+	if b.Task != nil && b.Task.Action.Kind == "sleep" {
+		return fail("student is asleep")
+	}
+	studentLv := b.Skills[skill.ID]
+	if studentLv >= teacherLv {
+		return fail(b.Name + " is already as proficient in " + skill.Name)
+	}
+	if !SamePlace(*a, *b) {
+		return fail("student must be co-located for skill mentorship")
+	}
+	if a.Energy < 4 {
+		return fail("insufficient energy to mentor skill " + skill.ID)
+	}
+	a.Energy -= 4
+	a.Trust[b.ID]++
+	b.Trust[a.ID] += 2
+	xpGain := 12 + teacherLv*2
+	skillEvents := w.grantSkillXP(b, x, skill.ID, xpGain)
+	newLv := b.Skills[skill.ID]
+	msgText := x.Text
+	if msgText == "" {
+		msgText = fmt.Sprintf("%s mentored %s in %s (level %d -> %d)", a.Name, b.Name, skill.Name, studentLv, newLv)
+	}
+	obs := Observation{
+		Kind:      "knowledge_taught",
+		SubjectID: a.ID,
+		ObjectID:  b.ID,
+		Item:      skill.ID,
+		Location:  a.Location,
+		Quantity:  newLv,
+	}
+	ev := w.record(a, x, "knowledge_taught", map[string]any{
+		"text":                msgText,
+		"skill_id":            skill.ID,
+		"skill_name":          skill.Name,
+		"teacher_id":          a.ID,
+		"student_id":          b.ID,
+		"teacher_skill_level": teacherLv,
+		"student_skill_level": newLv,
+		"xp_gained":           xpGain,
+		"observation":         obs,
+	}, b)
+	out := append([]Event{ev}, skillEvents...)
+	return append(out, w.ensureRelations().RecordMentorship(w, a, b, skill.ID)...)
 }
 
 func (w *World) facilityAdoptionSiteFailure(a Actor, x Action) string {

@@ -23,9 +23,10 @@ type residentMealRange struct {
 // Cohorts advance before World.Step increments its clock. physiologyTick is the
 // same end-of-step clock that exact members use for hunger and damage.
 func (w *World) settleResidentMeals(c *PopulationCohort, edible []string, physiologyTick int64) []Event {
+	form, _ := w.cohortFormSpec(*c)
 	var nutritious []string
 	for _, id := range edible {
-		if spec := w.Catalog.Items[id]; spec.Edible && spec.NutritionUnits > 0 {
+		if spec := w.Catalog.Items[id]; form.AcceptsFoodItem(spec) {
 			nutritious = append(nutritious, id)
 		}
 	}
@@ -35,8 +36,11 @@ func (w *World) settleResidentMeals(c *PopulationCohort, edible []string, physio
 	if population == 0 {
 		return nil
 	}
+	if form.IsHungerDisabled() {
+		return nil
+	}
 	c.ensureResidents(population)
-	increment := hungerIncrement(physiologyTick, w.Catalog.Lifecycle, FormSpec{})
+	increment := hungerIncrement(physiologyTick, w.Catalog.Lifecycle, form)
 	if increment == 0 {
 		hungry := false
 		for _, b := range c.Residents {
@@ -87,7 +91,7 @@ func (w *World) settleResidentMeals(c *PopulationCohort, edible []string, physio
 			c.DigestedFood += int64(part.Count)
 		}
 		if damageDue {
-			part.Health = max(0, part.Health-starvationDamage(part.Hunger, w.Catalog.Lifecycle, FormSpec{}))
+			part.Health = max(0, part.Health-starvationDamage(part.Hunger, w.Catalog.Lifecycle, form))
 		}
 		r.HungerAfter, r.HealthAfter, r.NutritionAfter = part.Hunger, part.Health, part.NutritionReserve
 		meals = append(meals, r)

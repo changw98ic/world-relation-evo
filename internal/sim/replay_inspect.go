@@ -32,7 +32,7 @@ func cloneAction(x Action) Action {
 	return out
 }
 
-// RecordingDecider wraps any live Decider (such as agent.Pipeline with Jev + ContentModel) and records
+// RecordingDecider wraps any live Decider (such as agent.Pipeline with Jev) and records
 // every settled Action per (Tick, ActorID) in a thread-safe manner.
 type RecordingDecider struct {
 	Inner Decider

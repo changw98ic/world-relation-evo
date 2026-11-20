@@ -49,9 +49,31 @@ func nutritionNeeded(ticks int64) int64 {
 	return ticks/TicksPerDay*DailyNutritionUnits + (ticks%TicksPerDay*DailyNutritionUnits+TicksPerDay-1)/TicksPerDay
 }
 
-func hungerIncrement(tick int64, _ LifecycleSpec, form FormSpec) int {
-	if tick <= 0 || form.DisableHunger {
+// DailyNutritionForForm returns the daily nutrition units required by form
+// (0 for fasting/non-eating forms, 3 for standard mortals, >3 for high-intake forms).
+func DailyNutritionForForm(form FormSpec) int64 {
+	if form.IsHungerDisabled() {
 		return 0
+	}
+	pct := int64(form.EffectiveDailyIntakePct())
+	if pct <= 0 {
+		return 0
+	}
+	return maxInt64(1, (DailyNutritionUnits*pct+99)/100)
+}
+
+func hungerIncrement(tick int64, _ LifecycleSpec, form FormSpec) int {
+	if tick <= 0 || form.IsHungerDisabled() {
+		return 0
+	}
+	if form.DailyIntakePct != nil {
+		intakePct := int64(*form.DailyIntakePct)
+		denom := int64(TicksPerDay) * 100
+		numer := DailyNutritionUnits * intakePct
+		total := func(t int64) int64 {
+			return (t * numer) / denom
+		}
+		return int(total(tick) - total(tick-1))
 	}
 	multiplier := int64(100)
 	if form.HungerIntervalMulPct > 0 {
@@ -77,7 +99,13 @@ func absorbNutrition(hunger *int, reserve *int64, units int64) {
 }
 
 func starvationDamage(hunger int, lc LifecycleSpec, form FormSpec) int {
+	if form.IsHungerDisabled() {
+		return 0
+	}
 	threshold := lc.StarvationThreshold
+	if form.StarvationThreshold > 0 {
+		threshold = form.StarvationThreshold
+	}
 	if threshold <= 0 {
 		threshold = 6
 	}
@@ -85,7 +113,10 @@ func starvationDamage(hunger int, lc LifecycleSpec, form FormSpec) int {
 	if dmg <= 0 {
 		dmg = 10
 	}
-	if hunger >= threshold && !form.DisableHunger {
+	if form.StarvationDamage != nil {
+		dmg = maxInt(0, *form.StarvationDamage)
+	}
+	if hunger >= threshold {
 		return dmg
 	}
 	return 0
@@ -97,7 +128,8 @@ func (w *World) consumeActorRation(a *Actor) []Event {
 	if a.Dead || a.Hunger <= 0 {
 		return nil
 	}
-	if form, ok := w.actorFormSpec(*a); ok && form.DisableHunger {
+	form, _ := w.actorFormSpec(*a)
+	if form.IsHungerDisabled() {
 		return nil
 	}
 	before := a.Hunger
@@ -109,7 +141,7 @@ func (w *World) consumeActorRation(a *Actor) []Event {
 	}
 	items := make([]string, 0, len(a.Items))
 	for item, qty := range a.Items {
-		if qty > 0 && w.Catalog.Items[item].Edible && w.Catalog.Items[item].NutritionUnits > 0 {
+		if qty > 0 && form.AcceptsFoodItem(w.Catalog.Items[item]) {
 			items = append(items, item)
 		}
 	}

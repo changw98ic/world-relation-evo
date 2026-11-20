@@ -9,10 +9,20 @@ import (
 func TestIndexedPerceptionContainsTheSameLocalSupplyAndYieldFacts(t *testing.T) {
 	w := lawWorld()
 	w.Cohorts = []PopulationCohort{{ID: "neighbors", District: "home", Population: 2, Adults: 2, Profession: "worker"}}
+	w.ActiveWorldEvents = []ActiveWorldEvent{{
+		InstanceID:  "relic@1",
+		SpecID:      "relic",
+		Name:        "Ancient Relic",
+		Category:    "artifact_emergence",
+		DistrictID:  "home",
+		StartedTick: 0,
+		ExpiresTick: 96,
+		Intensity:   65,
+	}}
 	direct := w.View("a")
 	indexed := w.viewIndexed(0, w.buildStepIndex())
-	if !reflect.DeepEqual(direct.LocalCohorts, indexed.LocalCohorts) || !reflect.DeepEqual(direct.ExpectedCraftYield, indexed.ExpectedCraftYield) {
-		t.Fatalf("the actual stepping path hid supply or promised different output: direct=%+v/%v indexed=%+v/%v", direct.LocalCohorts, direct.ExpectedCraftYield, indexed.LocalCohorts, indexed.ExpectedCraftYield)
+	if !reflect.DeepEqual(direct.LocalCohorts, indexed.LocalCohorts) || !reflect.DeepEqual(direct.ExpectedCraftYield, indexed.ExpectedCraftYield) || !reflect.DeepEqual(direct.ActiveWorldEvents, indexed.ActiveWorldEvents) {
+		t.Fatalf("the actual stepping path hid supply, yield, or world events: direct=%+v/%v/%+v indexed=%+v/%v/%+v", direct.LocalCohorts, direct.ExpectedCraftYield, direct.ActiveWorldEvents, indexed.LocalCohorts, indexed.ExpectedCraftYield, indexed.ActiveWorldEvents)
 	}
 }
 
