@@ -15,11 +15,6 @@ func (f boundarySelector) Select(ctx context.Context, p sim.Perception, options 
 	return f(ctx, p, options)
 }
 
-type boundaryGenerator func(context.Context, sim.Perception, sim.Action) (Content, error)
-
-func (f boundaryGenerator) Generate(ctx context.Context, p sim.Perception, a sim.Action) (Content, error) {
-	return f(ctx, p, a)
-}
 
 func boundaryWorld() *sim.World {
 	return &sim.World{ID: "boundary", Tick: 1, NextID: 100, Catalog: sim.DefaultCatalog(), Map: sim.WorldMap{Districts: []sim.District{{ID: "meeting"}, {ID: "remote"}}}, Actors: []sim.Actor{

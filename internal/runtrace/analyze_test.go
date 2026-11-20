@@ -1,7 +1,6 @@
 package runtrace
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,7 +11,7 @@ import (
 // These are controlled counterexamples for the reviewer, not model E2E runs.
 // Each completed trace differs from its valid control by one evidence defect.
 func TestTraceReviewDetectsCounterexamplesEvenWhenRunCompleted(t *testing.T) {
-	for _, defect := range []string{"control", "available_action", "content_authority", "raw_memory_provenance", "individual_holdings", "zero_output", "provider_schema", "content_schema", "model_evidence", "plan_availability", "agreement_terms", "care_replacement"} {
+	for _, defect := range []string{"control", "available_action", "content_authority", "individual_holdings", "zero_output", "model_evidence", "plan_availability", "agreement_terms", "care_replacement"} {
 		t.Run(defect, func(t *testing.T) {
 			dir := t.TempDir()
 			writer, err := Create(dir)
@@ -50,23 +49,6 @@ func TestTraceReviewDetectsCounterexamplesEvenWhenRunCompleted(t *testing.T) {
 			ready := selected
 			if defect == "content_authority" {
 				ready.Quantity = 10
-			}
-			if defect == "provider_schema" || defect == "content_schema" {
-				body := "{broken"
-				if defect == "content_schema" {
-					body = `{"choices":[{"message":{"content":"not a JSON object"}}]}`
-				}
-				record("content_request", map[string]any{"body": "controlled counterexample"})
-				record("content_response", map[string]any{"status": 200, "body": body})
-			}
-			if defect == "raw_memory_provenance" {
-				// Root ID 4 does not mean the character possesses memory event 4.
-				body, err := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": "{\"text\":\"claim\",\"basis_event_id\":4}"}}}})
-				if err != nil {
-					t.Fatal(err)
-				}
-				record("content_request", map[string]any{"body": "controlled counterexample"})
-				record("content_response", map[string]any{"status": 200, "body": string(body)})
 			}
 			record("decision_ready", map[string]any{"action": ready})
 			after := sim.World{ID: initial.ID, Tick: 1, Actors: []sim.Actor{a}}
@@ -112,7 +94,7 @@ func TestTraceReviewDetectsCounterexamplesEvenWhenRunCompleted(t *testing.T) {
 			status := "violation"
 			if defect == "zero_output" {
 				status = "needs_review"
-			} else if defect == "provider_schema" || defect == "content_schema" || defect == "model_evidence" {
+			} else if defect == "model_evidence" {
 				status = "observed_error"
 			}
 			found := false

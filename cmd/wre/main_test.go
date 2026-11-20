@@ -44,7 +44,7 @@ func TestCLILargePopulationUsesJevForEveryIdleDecision(t *testing.T) {
 		rw.WriteHeader(400)
 	}))
 	defer server.Close()
-	for key, value := range map[string]string{"WRE_JEV_URL": server.URL, "WRE_JEV_KEY": "fixture", "WRE_JEV_MODEL": "fixture", "WRE_MODEL_URL": server.URL, "WRE_MODEL_KEY": "fixture", "WRE_MODEL": "fixture"} {
+	for key, value := range map[string]string{"WRE_JEV_URL": server.URL, "WRE_JEV_KEY": "fixture", "WRE_JEV_MODEL": "fixture"} {
 		t.Setenv(key, value)
 	}
 	dir := filepath.Join(t.TempDir(), "all-jev-trace")
@@ -118,7 +118,6 @@ func TestCLIProviderFailureLeavesOriginalTraceAndFailedRun(t *testing.T) {
 	defer server.Close()
 	for key, value := range map[string]string{
 		"WRE_JEV_URL": server.URL, "WRE_JEV_KEY": "local-contract-key", "WRE_JEV_MODEL": "local-contract-model",
-		"WRE_MODEL_URL": server.URL, "WRE_MODEL_KEY": "local-content-key", "WRE_MODEL": "local-content-model",
 	} {
 		t.Setenv(key, value)
 	}
@@ -147,7 +146,7 @@ func TestCLIProviderFailureLeavesOriginalTraceAndFailedRun(t *testing.T) {
 	if !bytes.Contains(raw, []byte("controlled provider outage")) {
 		t.Fatal("original provider response was lost")
 	}
-	if bytes.Contains(raw, []byte("local-contract-key")) || bytes.Contains(raw, []byte("local-content-key")) {
+	if bytes.Contains(raw, []byte("local-contract-key")) {
 		t.Fatal("trace exposed credentials")
 	}
 }

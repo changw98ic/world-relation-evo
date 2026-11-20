@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -23,36 +22,14 @@ func TestPriceNegotiationRetainsItsMeaningAcrossTwoListeners(t *testing.T) {
 	}
 	quote := &sim.Statement{Topic: "trade_negotiation", Item: offer.Item, Location: "meeting", Quantity: 3}
 	spoken := boundaryApply(t, w, "alice", sim.Action{Kind: "speak", TargetID: "bob", BasisEventID: proposal.ID, Text: text, Statement: quote})[0]
-	reply, err := (TemplateContent{}).Generate(context.Background(), w.View("bob"), sim.Action{Kind: "speak", TargetID: "charlie"})
-	if err != nil || reply.BasisEventID != spoken.ID || reply.Statement == nil || *reply.Statement != *quote || !strings.Contains(reply.Text, text) || strings.Contains(reply.Text, "produced") {
-		t.Fatalf("counteroffer did not retain its actual terms: %+v %v", reply, err)
+	reply := boundaryOption(t, w, "bob", "speak", "charlie")
+	if reply.BasisEventID != spoken.ID || reply.Statement == nil || *reply.Statement != *quote || !strings.Contains(reply.Text, text) || strings.Contains(reply.Text, "produced") {
+		t.Fatalf("counteroffer did not retain its actual terms: %+v", reply)
 	}
-	boundaryApply(t, w, "bob", sim.Action{Kind: "speak", TargetID: "charlie", Text: reply.Text, Statement: reply.Statement, BasisEventID: reply.BasisEventID})
+	boundaryApply(t, w, "bob", reply)
 	last := w.Actors[2].Memories[len(w.Actors[2].Memories)-1]
 	if last.RootEventID != proposal.ID || last.Observation != nil || *last.Statement != *quote || w.Continuity.Agreements[0].Quantity != offer.Quantity || w.Actors[0].Items["food"] != 20 {
 		t.Fatal("dialogue changed formal terms, assets, or provenance")
-	}
-}
-
-func TestContentModelChecksMeaningOfProductionCitation(t *testing.T) {
-	w := boundaryWorld()
-	w.Actors[0].Memories = []sim.Memory{{EventID: 1158, Kind: "agreement_proposed", Text: "2 food for 2 coins"}}
-	v := w.View("alice")
-	for _, tc := range []struct {
-		response string
-		valid    bool
-	}{
-		{`{"text":"三份粮仍收两枚钱。","basis_event_id":1158,"statement":{"topic":"item_produced","item":"food","quantity":3}}`, false},
-		{`{"text":"三份粮仍收两枚钱。","basis_event_id":1158,"statement":{"topic":"trade_negotiation","item":"food","quantity":3}}`, true},
-		{`{"text":"我有三份粮。","statement":{"topic":"stock","item":"food","quantity":3}}`, true},
-		{`{"text":"我种了三份粮。","statement":{"topic":"item_produced","item":"food","quantity":3}}`, true},
-		{`{"text":"我再想想。","basis_event_id":1158}`, true},
-	} {
-		server := localContentServer(t, tc.response)
-		_, err := (ContentModel{Endpoint: server.URL, Client: server.Client()}).Generate(context.Background(), v, sim.Action{Kind: "speak", TargetID: "bob"})
-		if (err == nil) != tc.valid {
-			t.Fatalf("valid=%v response=%s err=%v", tc.valid, tc.response, err)
-		}
 	}
 }
 

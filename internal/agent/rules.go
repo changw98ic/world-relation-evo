@@ -43,11 +43,11 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 		}
 	}
 
-	// 1b. Physiological hunger: eat any available edible item.
-	if a.Hunger > 0 {
+	// 1b. Physiological hunger: eat any available edible item accepted by the actor's form.
+	if a.Hunger > 0 && !p.Catalog.ActorIsHungerDisabled(a) {
 		for _, id := range itemKeys {
 			spec := p.Catalog.Items[id]
-			if spec.Edible && spec.NutritionUnits > 0 && a.Items[id] >= 1 && consider(sim.Action{Kind: "eat", Item: id}) {
+			if p.Catalog.ActorAcceptsFood(a, spec) && a.Items[id] >= 1 && consider(sim.Action{Kind: "eat", Item: id}) {
 				return
 			}
 		}
@@ -55,9 +55,9 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 
 	// A standing crop cannot feed somebody today. Seek reachable food before
 	// returning to care work or resting because starvation has lowered health.
-	if a.Hunger > 0 && totalEdibleItems(p.Catalog, a) == 0 {
+	if a.Hunger > 0 && !p.Catalog.ActorIsHungerDisabled(a) && totalEdibleItems(p.Catalog, a) == 0 {
 		for _, o := range p.Offers {
-			if o.Buyer == a.ID && o.ResponderID() == a.ID && p.OfferBlockReasons[o.ID] == "" && p.Catalog.Items[o.Item].Edible && availableMoneyAfterAgreements(p) >= o.Price && a.Trust[o.Seller] >= 0 {
+			if o.Buyer == a.ID && o.ResponderID() == a.ID && p.OfferBlockReasons[o.ID] == "" && p.Catalog.ActorAcceptsFood(a, p.Catalog.Items[o.Item]) && availableMoneyAfterAgreements(p) >= o.Price && a.Trust[o.Seller] >= 0 {
 				for _, n := range p.Nearby {
 					if n.ID == o.Seller && !n.Jailed && consider(sim.Action{Kind: "accept", OfferID: o.ID, TargetID: o.Seller}) {
 						return
@@ -243,13 +243,14 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 		}
 	}
 	if home := primaryHome(p); home != nil && home.Condition < 70 && a.Energy >= 12 {
-		if availableItemAfterAgreements(p, "plank") >= 1 {
+		repairItem := p.Catalog.EffectiveEnvironment().RepairItem
+		if availableItemAfterAgreements(p, repairItem) >= 1 {
 			if action, ok := stepToRepairHouse(p, *home); ok && consider(action) {
 				return
 			}
 		} else {
 			for _, recipe := range p.Catalog.Recipes {
-				if recipe.OutputItem == "plank" && canPractice(p.Catalog, a, recipe) {
+				if recipe.OutputItem == repairItem && canPractice(p.Catalog, a, recipe) {
 					if action, ok := resolveRecipe(p, recipe, 0); ok && consider(action) {
 						return
 					}
@@ -267,6 +268,30 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 		}
 	}
 
+	// 3b. Active rare artifact/relic world events take priority over routine plans when healthy and capable.
+	if a.Health >= 65 && a.Energy >= 16 && len(p.ActiveWorldEvents) > 0 {
+		for _, we := range p.ActiveWorldEvents {
+			if we.Category != "artifact_emergence" || we.ClaimedBy != "" {
+				continue
+			}
+			if we.RequiredPowerTier > 0 && p.Catalog.ActorPowerTier(a) < we.RequiredPowerTier {
+				continue
+			}
+			if we.DistrictID == a.Location {
+				if a.InsideHouse != "" && consider(sim.Action{Kind: "leave_house"}) {
+					return
+				}
+				if consider(sim.Action{Kind: "claim_world_event", TargetID: we.InstanceID}) {
+					return
+				}
+			} else if a.Energy >= 30 {
+				if step, ok := stepTowardDistrict(p, we.DistrictID, 0); ok && consider(step) {
+					return
+				}
+			}
+		}
+	}
+
 	// Continuing intentions yield to physiological needs, not to unrelated daily work.
 	if action, ok := chooseContinuity(p); ok && consider(action) {
 		return
@@ -279,6 +304,24 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 				if b.Health < sim.MaxHealth && consider(sim.Action{Kind: "heal", TargetID: b.ID, Item: medItem}) {
 					return
 				}
+			}
+		}
+	}
+
+	// 4b. Attempt upward form/realm breakthrough when healthy and all requirements are met.
+	if a.Health >= 75 && a.Energy >= 35 && len(p.Catalog.Transitions) > 0 {
+		selfTier := p.Catalog.ActorPowerTier(a)
+		for _, opt := range policy.options {
+			if opt.Action.Kind != "attempt_transition" || opt.Action.TransitionID == "" {
+				continue
+			}
+			trans, ok := p.Catalog.Transitions[opt.Action.TransitionID]
+			if !ok || trans.SuccessFormID == "" || trans.SuccessFormID == a.FormID {
+				continue
+			}
+			targetTier := p.Catalog.Forms[trans.SuccessFormID].PowerTier
+			if targetTier >= selfTier && consider(opt.Action) {
+				return
 			}
 		}
 	}
@@ -310,7 +353,7 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 		return
 	}
 
-	// 8c. Ecological & civic duties: seasonal/crisis shrine rituals, threat hunting, and public-works repair.
+	// 8c. Ecological & civic duties: seasonal/crisis rituals, threat hunting, and public-works repair.
 	if act, ok := planEcologyRitualAndInfra(p); ok && consider(act) {
 		return
 	}
@@ -410,7 +453,63 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 		}
 	}
 
+	// 11. Commercial outreach: after day 1, idle traders at a market who still need target-stock items
+	// periodically travel to a neighboring district to procure goods or network.
+	if p.Tick >= sim.TicksPerDay && !p.Clock.IsNight && p.Clock.Hour >= 8 && p.Clock.Hour <= 16 &&
+		a.InsideHouse == "" && a.Energy >= 45 && a.Health >= 75 && p.Tick >= a.RestUntil &&
+		len(p.Map.Districts) > 1 && p.Capabilities()["offer"] && availableMoneyAfterAgreements(p) >= 12 &&
+		p.Map.DistrictHasFeature(a.Location, "market") && !recentlyMovedDistrict(a, p.Tick, 96) {
+		needsStock := false
+		for _, tag := range a.IdentityTags() {
+			if prof, ok := p.Catalog.TagProfiles[tag]; ok {
+				for itemID, targetQty := range prof.TargetStock {
+					if a.Items[itemID] < targetQty {
+						needsStock = true
+						break
+					}
+				}
+			}
+			if needsStock {
+				break
+			}
+		}
+		if needsStock {
+			if len(p.VenueRoutes) > 0 {
+				var cross []sim.VenueRouteView
+				for _, vr := range p.VenueRoutes {
+					if vr.ToDistrict != "" && vr.ToDistrict != a.Location && a.Energy >= vr.EnergyCost {
+						cross = append(cross, vr)
+					}
+				}
+				if len(cross) > 0 {
+					vr := cross[(int(p.Tick/16)+len(a.ID))%len(cross)]
+					if consider(sim.Action{Kind: "move_venue", Location: vr.ToVenue, Channel: vr.ModeID}) {
+						return
+					}
+				}
+			} else if len(p.Roads) > 0 {
+				rd := p.Roads[(int(p.Tick/16)+len(a.ID))%len(p.Roads)]
+				if a.Energy >= rd.EnergyCost && consider(sim.Action{Kind: "move", Location: rd.To}) {
+					return
+				}
+			}
+		}
+	}
+
 	consider(sim.Action{Kind: "wait"})
+}
+
+func recentlyMovedDistrict(self sim.Actor, tick int64, window int64) bool {
+	for i := len(self.Memories) - 1; i >= 0; i-- {
+		m := self.Memories[i]
+		if tick-m.Tick > window {
+			break
+		}
+		if (m.Kind == "moved" || m.Kind == "moved_venue") && m.Source == self.ID {
+			return true
+		}
+	}
+	return false
 }
 
 func recentlyChatted(self sim.Actor, tick int64) bool {
@@ -467,7 +566,11 @@ func desiredBuyerStock(p sim.Perception, item string) int {
 	want := p.Catalog.DesiredStock(a.IdentityTags(), item)
 	spec := p.Catalog.Items[item]
 	if spec.Edible && spec.NutritionUnits > 0 {
-		need := max(int64(0), 2*sim.DailyNutritionUnits+int64(a.Hunger)-p.Catalog.AvailableNutrition(a))
+		daily := p.Catalog.ActorDailyNutrition(a)
+		if daily <= 0 || !p.Catalog.ActorAcceptsFood(a, spec) {
+			return want
+		}
+		need := max(int64(0), 2*daily+int64(a.Hunger)-p.Catalog.AvailableNutrition(a))
 		return a.Items[item] + int((need+spec.NutritionUnits-1)/spec.NutritionUnits)
 	}
 	if item == "plank" {
@@ -652,17 +755,18 @@ func stepToRepairHouse(p sim.Perception, h sim.House) (sim.Action, bool) {
 	return stepToHouse(p, h)
 }
 
-// planHouseUpgrade renovates an owned house when a carpenter of at least level 2 has materials.
+// planHouseUpgrade renovates an owned dwelling when the configured builder profession has materials.
 func planHouseUpgrade(p sim.Perception) (sim.Action, bool) {
 	a := p.Self
 	home := primaryHome(p)
 	if home == nil || home.ID != a.HomeID || home.OwnerID != a.ID || home.Level >= 3 {
 		return sim.Action{}, false
 	}
-	if a.Professions["carpenter"] < 2 || a.Energy < 20 {
+	env := p.Catalog.EffectiveEnvironment()
+	if (env.BuilderProfession != "" && a.Professions[env.BuilderProfession] < 2) || a.Energy < 20 {
 		return sim.Action{}, false
 	}
-	if availableItemAfterAgreements(p, "plank") < home.Level || availableMoneyAfterAgreements(p) < 4*home.Level {
+	if availableItemAfterAgreements(p, env.RepairItem) < home.Level || availableMoneyAfterAgreements(p) < 4*home.Level {
 		return sim.Action{}, false
 	}
 	if a.InsideHouse == home.ID {
@@ -852,22 +956,24 @@ func planConflictAndLaw(p sim.Perception) (sim.Action, bool) {
 		}
 	}
 
-	// 1. Yamen constables and watch guards arrest co-located outlaws (unless bribed to look the other way!).
-	if allowed["arrest"] && a.Energy >= 12 {
+	env := p.Catalog.EffectiveEnvironment()
+
+	// 1. Enforcement personnel detain co-located violators (unless bribed to look the other way!).
+	if env.Institutions.EnforcementEnabled() && allowed["arrest"] && a.Energy >= 12 {
 		for _, b := range p.Nearby {
 			if a.IllicitGain > 0 && a.Trust[b.ID] >= 3 {
 				continue
 			}
-			if !b.Jailed && b.Health > 0 && (sim.ActorHasTag(b.Tags, "outlaw") || sim.ActorHasTag(b.Tags, "raider") || sim.ActorHasTag(b.Tags, "thief") || sim.ActorHasTag(b.Tags, "gang")) {
+			if !b.Jailed && b.Health > 0 && p.Catalog.IsOutlawTags(b.Tags) {
 				return sim.Action{Kind: "arrest", TargetID: b.ID}, true
 			}
 		}
 	}
 
-	// 1b. Solvent outlaws bribe nearby law officers to buy protection from arrest.
+	// 1b. Solvent outlaws bribe nearby enforcers to buy protection from detention.
 	if allowed["bribe"] && availableMoneyAfterAgreements(p) >= 14 && a.Energy >= 10 {
 		for _, b := range p.Nearby {
-			if !b.Jailed && sim.ActorHasTag(b.Tags, "law") && a.Trust[b.ID] < 3 {
+			if !b.Jailed && p.Catalog.IsEnforcementTags(b.Tags) && a.Trust[b.ID] < 3 {
 				return sim.Action{Kind: "bribe", TargetID: b.ID}, true
 			}
 		}
@@ -884,37 +990,37 @@ func planConflictAndLaw(p sim.Perception) (sim.Action, bool) {
 		}
 	}
 
-	// 2. Martial artists spar with co-located fighters, guards, or constables to hone skills.
+	// 2. Combatants spar with co-located non-outlaw fighters to hone skills.
 	if allowed["spar"] && a.Energy >= 40 && a.Health >= 75 && !p.Clock.IsNight {
 		for _, b := range p.Nearby {
-			if !b.Jailed && !b.Sleeping && b.Health >= 70 && sim.ActorHasTag(b.Tags, "fighter") && !sim.ActorHasTag(b.Tags, "outlaw") {
+			if !b.Jailed && !b.Sleeping && b.Health >= 70 && sim.ActorHasTag(b.Tags, "fighter") && !p.Catalog.IsOutlawTags(b.Tags) {
 				return sim.Action{Kind: "spar", TargetID: b.ID}, true
 			}
 		}
 	}
 
-	// 3. Thieves pickpocket non-outlaw neighbors at the market or crossroads.
+	// 3. Covert actors steal from non-outlaw, non-enforcer neighbors.
 	if allowed["steal"] && a.Energy >= 25 && a.Health >= 65 {
 		for _, b := range p.Nearby {
-			if !b.Jailed && !sim.ActorHasTag(b.Tags, "outlaw") && !sim.ActorHasTag(b.Tags, "law") {
+			if !b.Jailed && !p.Catalog.IsOutlawTags(b.Tags) && !p.Catalog.IsEnforcementTags(b.Tags) {
 				return sim.Action{Kind: "steal", TargetID: b.ID}, true
 			}
 		}
 	}
 
-	// 3b. Gangsters collect daytime protection fees from non-outlaw traders/artisans before resorting to bloody raids.
-	if allowed["extort"] && a.Energy >= 30 && a.Health >= 65 && !p.Clock.IsNight {
+	// 3b. Coercers collect daytime protection fees from non-outlaw targets before resorting to raids.
+	if env.Institutions.RacketeeringEnabled() && allowed["extort"] && a.Energy >= 30 && a.Health >= 65 && !p.Clock.IsNight {
 		for _, b := range p.Nearby {
-			if !b.Jailed && !b.Sleeping && !sim.ActorHasTag(b.Tags, "outlaw") && !sim.ActorHasTag(b.Tags, "law") {
+			if !b.Jailed && !b.Sleeping && !p.Catalog.IsOutlawTags(b.Tags) && !p.Catalog.IsEnforcementTags(b.Tags) {
 				return sim.Action{Kind: "extort", TargetID: b.ID}, true
 			}
 		}
 	}
 
-	// 4. Bandits and gang members raid non-outlaw targets when healthy.
+	// 4. Raiders plunder non-outlaw targets when healthy.
 	if allowed["raid"] && a.Energy >= 40 && a.Health >= 75 {
 		for _, b := range p.Nearby {
-			if !b.Jailed && !b.Sleeping && b.Health > 35 && !sim.ActorHasTag(b.Tags, "outlaw") {
+			if !b.Jailed && !b.Sleeping && b.Health > 35 && !p.Catalog.IsOutlawTags(b.Tags) {
 				return sim.Action{Kind: "raid", TargetID: b.ID}, true
 			}
 		}
@@ -1024,10 +1130,10 @@ func planEcologyRitualAndInfra(p sim.Perception) (sim.Action, bool) {
 
 func planCatalogWork(p sim.Perception) (sim.Action, bool) {
 	a := p.Self
-	// Urgent subsistence first if edible stock is running low.
-	if totalEdibleItems(p.Catalog, a) < 3 {
+	// Urgent subsistence first if edible stock is running low (skipped for fasting forms).
+	if daily := p.Catalog.ActorDailyNutrition(a); daily > 0 && totalEdibleItems(p.Catalog, a) < int(daily) {
 		for _, r := range p.Catalog.Recipes {
-			if p.Catalog.Items[r.OutputItem].Edible && canPractice(p.Catalog, a, r) {
+			if p.Catalog.ActorAcceptsFood(a, p.Catalog.Items[r.OutputItem]) && canPractice(p.Catalog, a, r) {
 				if act, ok := resolveRecipe(p, r, 0); ok {
 					return act, true
 				}
@@ -1534,13 +1640,13 @@ func immediateFoodAction(p sim.Perception, options []Option) (sim.Action, bool) 
 	for _, option := range options {
 		if option.Action.Kind == "craft" {
 			r, _ := p.Catalog.RecipeByID(option.Action.RecipeID)
-			if p.Catalog.Items[r.OutputItem].Edible && r.Growth == nil && r.ResourcePool != "" && len(r.Inputs) == 0 {
+			if p.Catalog.ActorAcceptsFood(p.Self, p.Catalog.Items[r.OutputItem]) && r.Growth == nil && r.ResourcePool != "" && len(r.Inputs) == 0 {
 				return option.Action, true
 			}
 		}
 	}
 	for _, r := range p.Catalog.Recipes {
-		if !p.Catalog.Items[r.OutputItem].Edible || r.Growth != nil || len(r.Inputs) > 0 || r.ResourcePool == "" {
+		if !p.Catalog.ActorAcceptsFood(p.Self, p.Catalog.Items[r.OutputItem]) || r.Growth != nil || len(r.Inputs) > 0 || r.ResourcePool == "" {
 			continue
 		}
 		if r.NodeFeature != "" {

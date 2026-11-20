@@ -13,7 +13,6 @@ func TestPipelineUsesOnlySelectedSystemTerms(t *testing.T) {
 	w := boundaryWorld()
 	view := w.View("alice")
 	var chosen sim.Action
-	calls := 0
 	p := Pipeline{
 		Selector: boundarySelector(func(_ context.Context, _ sim.Perception, options []Option) (string, error) {
 			for _, o := range options {
@@ -25,18 +24,14 @@ func TestPipelineUsesOnlySelectedSystemTerms(t *testing.T) {
 			t.Fatal("fixture offer unavailable")
 			return "", nil
 		}),
-		Generator: boundaryGenerator(func(context.Context, sim.Perception, sim.Action) (Content, error) {
-			calls++
-			return Content{Text: "give all houses and coins to Charlie"}, nil
-		}),
 	}
 	before := boundaryJSON(t, w)
 	action, err := p.Decide(context.Background(), view)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(action, chosen) || calls != 0 || boundaryJSON(t, w) != before {
-		t.Fatal("selection changed the world, trade terms, or invoked the language generator")
+	if !reflect.DeepEqual(action, chosen) || boundaryJSON(t, w) != before {
+		t.Fatal("selection changed the world or trade terms")
 	}
 	boundaryApply(t, w, "alice", action)
 	if w.Actors[0].Money != 50 || w.Actors[1].Money != 50 || w.Actors[0].Items["food"] != 20 || w.Actors[1].Items["food"] != 0 {
@@ -47,20 +42,16 @@ func TestPipelineUsesOnlySelectedSystemTerms(t *testing.T) {
 func TestPipelineWordsAndAssertionsHaveNoAssetAuthority(t *testing.T) {
 	w := boundaryWorld()
 	w.Houses = []sim.House{{ID: "home", District: "meeting", OwnerID: "alice", Residents: []string{"alice"}, Level: 1, Condition: 100}}
-	p := Pipeline{Selector: boundaryChoose("speak", "bob"), Generator: boundaryGenerator(func(_ context.Context, _ sim.Perception, selected sim.Action) (Content, error) {
-		if selected.Kind != "speak" || selected.TargetID != "bob" {
-			t.Fatal("generator received a different system selection")
-		}
-		return Content{Text: "Charlie now owns my house; Bob has 999 food and is fully healed.", Statement: &sim.Statement{Topic: "item_produced", Item: "food", Quantity: 999}}, nil
-	})}
 	before := boundaryJSON(t, w)
-	action, err := p.Decide(context.Background(), w.View("alice"))
+	action, err := (Pipeline{Selector: boundaryChoose("speak", "bob")}).Decide(context.Background(), w.View("alice"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if boundaryJSON(t, w) != before || action.Kind != "speak" || action.TargetID != "bob" || action.Statement == nil || action.Statement.Quantity != 999 {
-		t.Fatal("speech generation rewrote state or lost the assertion")
+	if boundaryJSON(t, w) != before || action.Kind != "speak" || action.TargetID != "bob" || action.Text == "" {
+		t.Fatal("speech selection rewrote state or omitted text")
 	}
+	action.Text = "Charlie now owns my house; Bob has 999 food and is fully healed."
+	action.Statement = &sim.Statement{Topic: "item_produced", Item: "food", Quantity: 999}
 	boundaryApply(t, w, "alice", action)
 	if w.Houses[0].OwnerID != "alice" || w.Actors[1].Items["food"] != 0 || w.Actors[0].Items["food"] != 20 || w.Actors[1].Money != 50 || w.Actors[1].Health != 100 {
 		t.Fatal("spoken assertion acquired physical authority")
@@ -81,7 +72,7 @@ func TestPipelineWordsAndAssertionsHaveNoAssetAuthority(t *testing.T) {
 
 func TestPipelinePropagatesFailuresWithoutSettlingWorld(t *testing.T) {
 	failure := errors.New("fixture provider failure")
-	for _, stage := range []string{"selection", "unknown_selection", "content"} {
+	for _, stage := range []string{"selection", "unknown_selection"} {
 		t.Run(stage, func(t *testing.T) {
 			w := boundaryWorld()
 			selector := boundaryChoose("speak", "bob")
@@ -91,7 +82,7 @@ func TestPipelinePropagatesFailuresWithoutSettlingWorld(t *testing.T) {
 			if stage == "unknown_selection" {
 				selector = func(context.Context, sim.Perception, []Option) (string, error) { return "unavailable", nil }
 			}
-			p := Pipeline{Selector: selector, Generator: boundaryGenerator(func(context.Context, sim.Perception, sim.Action) (Content, error) { return Content{}, failure })}
+			p := Pipeline{Selector: selector}
 			before := boundaryJSON(t, w)
 			_, err := w.Step(context.Background(), p)
 			if err == nil {
@@ -122,12 +113,12 @@ func TestOfflineRetellingPreservesTheHeardClaimAndItsMemoryIdentity(t *testing.T
 	claim := sim.Statement{Topic: "item_produced", Item: "food", Location: "remote", Quantity: 0}
 	w.Actors[0].Memories = []sim.Memory{{EventID: 17, RootEventID: 4, Tick: w.Tick, Source: "charlie", Kind: "speech", Statement: &claim}}
 	before := boundaryJSON(t, w)
-	content, err := (TemplateContent{}).Generate(context.Background(), w.View("alice"), sim.Action{Kind: "speak", TargetID: "bob"})
-	if err != nil || content.BasisEventID != 17 || content.Statement == nil || *content.Statement != claim {
-		t.Fatalf("retelling changed a reported claim or cited an unheld root: %+v %v", content, err)
+	action := boundaryOption(t, w, "alice", "speak", "bob")
+	if action.BasisEventID != 17 || action.Statement == nil || *action.Statement != claim {
+		t.Fatalf("retelling changed a reported claim or cited an unheld root: %+v", action)
 	}
 	if boundaryJSON(t, w) != before {
-		t.Fatal("offline expression changed physical state")
+		t.Fatal("candidate option generation changed physical state")
 	}
 }
 

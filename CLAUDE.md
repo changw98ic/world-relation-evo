@@ -18,7 +18,7 @@ go test -tags live ./cmd/wre -run '^TestLiveModelWorkflowRecordsEvidenceAcrossDa
 go test -tags longrun ./internal/agent -run '^TestLongFoodCycles$' -count=1 -v -timeout 0
 ```
 
-The live test requires the configured Jev service, content service and PostgreSQL.
+The live test requires the configured Jev service and PostgreSQL.
 It starts two real simulation processes and compares database replay with final
 state. The long test records rule-driven village and watershed food cycles for
 250 simulated days. Missing external configuration is a test failure.
@@ -28,15 +28,16 @@ state. The long test records rule-driven village and watershed food cycles for
 - One tick is 15 minutes; there are 96 ticks per day. Tick zero is 06:00.
 - `internal/sim` owns state, physical settlement, population groups, perception,
   resource accounts and deterministic replay. `internal/agent` owns candidates,
-  Jev selection, content requests and the explicit offline rule policy.
+  Jev selection and the explicit offline rule policy.
 - `internal/pack` validates and clones external definitions. `internal/store`
   persists snapshots, events, decisions and replay checkpoints in PostgreSQL.
 - Idle decisions run concurrently against isolated views of one starting world.
   Settlement is serial and deterministic. A model error aborts before settlement.
   Earlier same-tick actions can legitimately consume unreserved trade goods.
-- Jev chooses a system-defined candidate. Content generation runs for speech,
-  transmission and decree text. It cannot change behavior, target or trade terms.
-  There is no silent fallback from a failed model call to offline rules.
+- Jev chooses a system-defined candidate directly. Simulation runtime does not
+  call a content LLM; communication candidates carry deterministic system-built
+  text and structured claims. There is no silent fallback from a failed model
+  call to offline rules.
 - Material and nutrition budgets bound output. Skill and facilities cannot create
   extra material. Biological growth requires declared sources, elapsed time and
   local care. Preparation, care, harvest and patrols share available workers.

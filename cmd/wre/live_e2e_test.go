@@ -29,7 +29,7 @@ func TestLiveModelWorkflowRecordsEvidenceAcrossDatabaseRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	loadDotEnv(filepath.Join(root, ".env"))
-	for _, key := range []string{"WRE_JEV_KEY", "WRE_MODEL_URL", "WRE_MODEL", "DATABASE_URL"} {
+	for _, key := range []string{"WRE_JEV_KEY", "DATABASE_URL"} {
 		if os.Getenv(key) == "" {
 			t.Fatalf("live workflow requires %s; this is a failure, not a skipped model test", key)
 		}
@@ -107,7 +107,6 @@ func TestLiveModelWorkflowRecordsEvidenceAcrossDatabaseRestart(t *testing.T) {
 		}
 		return stdout.Bytes()
 	}
-	totalContentCalls := 0
 	for _, segment := range []string{"first", "resumed"} {
 		traceDir := filepath.Join(dir, segment)
 		args := []string{"-world", worldID, "-decider", "jev", "-steps", "16", "-pace", "0", "-quiet", "-checkpoint-every", "24", "-trace-dir", traceDir}
@@ -126,14 +125,20 @@ func TestLiveModelWorkflowRecordsEvidenceAcrossDatabaseRestart(t *testing.T) {
 		if !report.RunCompleted || !report.TraceComplete || report.TicksSettled != 16 || report.PersistedTicks != 16 {
 			t.Fatalf("%s workflow/evidence incomplete; inspect %s", segment, traceDir)
 		}
-		if report.Decisions == 0 || report.JevResponses != report.Decisions {
-			t.Fatalf("%s did not call Jev for every recorded active decision; inspect %s", segment, traceDir)
+		if report.Decisions == 0 || report.JevResponses < report.Decisions {
+			t.Fatalf("%s did not call Jev for every recorded active decision (decisions=%d jev_responses=%d); inspect %s", segment, report.Decisions, report.JevResponses, traceDir)
 		}
-		totalContentCalls += report.ContentResponses
-		t.Logf("%s: decisions=%d content_calls=%d findings_for_review=%d; simulation validity not established", segment, report.Decisions, report.ContentResponses, len(report.Findings))
-	}
-	if totalContentCalls == 0 {
-		t.Fatalf("workflow did not exercise the real content model; inspect %s", dir)
+		for _, row := range report.Timeline {
+			if row.Source != "jev" {
+				t.Fatalf("%s recorded non-Jev decision source %q for %s at tick %d; inspect %s", segment, row.Source, row.ActorID, row.Tick, traceDir)
+			}
+		}
+		for _, f := range report.Findings {
+			if f.Status == "violation" || f.Status == "observed_error" {
+				t.Fatalf("%s audit reported %s (%s) at tick %d: %s; inspect %s", segment, f.Rule, f.Status, f.Tick, f.Detail, traceDir)
+			}
+		}
+		t.Logf("%s: decisions=%d jev_calls=%d findings_for_review=%d; simulation validity not established", segment, report.Decisions, report.JevResponses, len(report.Findings))
 	}
 	final, err := os.ReadFile(filepath.Join(dir, "resumed", "final.json"))
 	if err != nil {

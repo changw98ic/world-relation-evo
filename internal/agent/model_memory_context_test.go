@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -39,24 +38,16 @@ func TestModelRequestsDoNotReplayEveryOldDialogueVerbatim(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
-		if r.URL.Path == "/systemone" {
-			check(raw)
-			fmt.Fprint(rw, `{"answers":{"decision":{"type":"choice","choice":"rest"}}}`)
+		if r.URL.Path != "/systemone" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+			rw.WriteHeader(404)
 			return
 		}
-		var envelope struct{ Messages []struct{ Content string } }
-		if err := json.Unmarshal(raw, &envelope); err != nil {
-			t.Error(err)
-		}
-		check([]byte(envelope.Messages[1].Content))
-		// Older structured claims remain citable even when prose is not resent.
-		fmt.Fprint(rw, `{"choices":[{"message":{"content":"{\"text\":\"你先前说有七份粮，我没有亲眼见到。\",\"basis_event_id\":31}"}}]}`)
+		check(raw)
+		fmt.Fprint(rw, `{"answers":{"decision":{"type":"choice","choice":"rest"}}}`)
 	}))
 	defer server.Close()
 	if _, err := (Jev{Endpoint: server.URL + "/systemone", APIKey: "fixture", Client: server.Client()}).Select(context.Background(), p, []Option{{ID: "rest", Action: sim.Action{Kind: "wait"}}}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := (ContentModel{Endpoint: server.URL, Client: server.Client()}).Generate(context.Background(), p, sim.Action{Kind: "speak", TargetID: "bob"}); err != nil {
 		t.Fatal(err)
 	}
 	if boundaryJSON(t, p) != before {

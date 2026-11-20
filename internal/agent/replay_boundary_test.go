@@ -13,61 +13,57 @@ import (
 	"github.com/changw98ic/world-relation-evo/internal/sim"
 )
 
-// This uses two local protocol endpoints to prove replay never requests a new
-// decision. It is not a real-provider end-to-end or language-quality test.
+// This uses a local Jev protocol endpoint to prove replay never requests a new
+// decision. It is not a real-provider end-to-end test.
 func TestLocalProtocolRecordingReplaysFromNonzeroTickWithoutProviderCalls(t *testing.T) {
-	var choices, expressions atomic.Int64
+	var choices atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/systemone":
-			choices.Add(1)
-			var request struct {
-				Questions map[string]struct {
-					Criteria map[string]string `json:"criteria"`
-				} `json:"questions"`
+		if r.URL.Path != "/systemone" {
+			t.Error("unexpected local protocol endpoint")
+			rw.WriteHeader(404)
+			return
+		}
+		choices.Add(1)
+		var request struct {
+			Questions map[string]struct {
+				Criteria map[string]string `json:"criteria"`
+			} `json:"questions"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			rw.WriteHeader(400)
+			return
+		}
+		selected := ""
+		for id, label := range request.Questions["decision"].Criteria {
+			_, raw, found := strings.Cut(label, "; system-defined action: ")
+			if !found {
+				continue
 			}
-			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			var a sim.Action
+			if err := json.Unmarshal([]byte(raw), &a); err != nil {
 				t.Error(err)
 				rw.WriteHeader(400)
 				return
 			}
-			selected := ""
-			for id, label := range request.Questions["decision"].Criteria {
-				_, raw, found := strings.Cut(label, "; system-defined action: ")
-				if !found {
-					continue
-				}
-				var a sim.Action
-				if err := json.Unmarshal([]byte(raw), &a); err != nil {
-					t.Error(err)
-					rw.WriteHeader(400)
-					return
-				}
-				if a.Kind == "speak" {
-					selected = id
-					break
-				}
+			if a.Kind == "speak" {
+				selected = id
+				break
 			}
-			if selected == "" {
-				t.Error("fixture has no local speech candidate")
-				rw.WriteHeader(400)
-				return
-			}
-			_ = json.NewEncoder(rw).Encode(map[string]any{"answers": map[string]any{"decision": map[string]string{"type": "choice", "choice": selected}}})
-		case "/chat/completions":
-			expressions.Add(1)
-			_ = json.NewEncoder(rw).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": `{"text":"我听说粮食已经送到。","statement":{"topic":"item_produced","item":"food","quantity":0}}`}}}})
-		default:
-			t.Error("unexpected local protocol endpoint")
-			rw.WriteHeader(404)
 		}
+		if selected == "" {
+			t.Error("fixture has no local speech candidate")
+			rw.WriteHeader(400)
+			return
+		}
+		_ = json.NewEncoder(rw).Encode(map[string]any{"answers": map[string]any{"decision": map[string]string{"type": "choice", "choice": selected}}})
 	}))
 	defer server.Close()
 	w := boundaryWorld()
 	w.Tick = 37
 	w.Actors = w.Actors[:2]
 	checkpoint := []byte(boundaryJSON(t, w))
-	pipeline := Pipeline{Selector: Jev{Endpoint: server.URL + "/systemone", APIKey: "fixture", Client: server.Client()}, Generator: ContentModel{Endpoint: server.URL, Name: "fixture", Client: server.Client()}}
+	pipeline := Pipeline{Selector: Jev{Endpoint: server.URL + "/systemone", APIKey: "fixture", Client: server.Client()}}
 	var logs []sim.TickDecisionLog
 	var originalEvents []sim.Event
 	for i := 0; i < 2; i++ {
@@ -78,16 +74,16 @@ func TestLocalProtocolRecordingReplaysFromNonzeroTickWithoutProviderCalls(t *tes
 		logs = append(logs, log)
 		originalEvents = append(originalEvents, events...)
 	}
-	if logs[0].Tick != 37 || len(logs[0].Decisions) != 2 || choices.Load() == 0 || expressions.Load() == 0 {
-		t.Fatal("the recording did not exercise both provider adapters at the checkpoint tick")
+	if logs[0].Tick != 37 || len(logs[0].Decisions) != 2 || choices.Load() == 0 {
+		t.Fatal("the recording did not exercise the decision provider adapter at the checkpoint tick")
 	}
-	beforeChoices, beforeExpressions := choices.Load(), expressions.Load()
+	beforeChoices := choices.Load()
 	server.Close()
 	replayed, events, err := sim.ReplayFromCheckpoint(checkpoint, logs, w.Tick)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if choices.Load() != beforeChoices || expressions.Load() != beforeExpressions {
+	if choices.Load() != beforeChoices {
 		t.Fatal("replay made new model requests")
 	}
 	if boundaryJSON(t, replayed) != boundaryJSON(t, w) || boundaryJSON(t, events) != boundaryJSON(t, originalEvents) {
@@ -146,8 +142,7 @@ func TestLocalProviderCancellationRemainsAnError(t *testing.T) {
 	cancel()
 	view := boundaryWorld().View("alice")
 	_, choiceErr := (Jev{Endpoint: server.URL, APIKey: "fixture", Client: server.Client()}).Select(ctx, view, []Option{{ID: "wait", Action: sim.Action{Kind: "wait"}}})
-	_, contentErr := (ContentModel{Endpoint: server.URL, Name: "fixture", Client: server.Client()}).Generate(ctx, view, sim.Action{Kind: "speak", TargetID: "bob"})
-	if choiceErr == nil || contentErr == nil || requests.Load() != 0 {
+	if choiceErr == nil || requests.Load() != 0 {
 		t.Fatal("cancelled requests succeeded or reached a provider")
 	}
 }

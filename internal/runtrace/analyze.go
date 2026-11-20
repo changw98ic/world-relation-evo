@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/changw98ic/world-relation-evo/internal/modelreply"
 	"github.com/changw98ic/world-relation-evo/internal/sim"
 )
 
@@ -62,7 +61,6 @@ type Report struct {
 	TicksSettled      int              `json:"ticks_settled"`
 	Decisions         int              `json:"decisions"`
 	JevResponses      int              `json:"jev_responses"`
-	ContentResponses  int              `json:"content_responses"`
 	PersistedTicks    int              `json:"persisted_ticks"`
 	RunError          string           `json:"run_error,omitempty"`
 	Findings          []Finding        `json:"findings"`
@@ -77,10 +75,9 @@ type decisionKey struct {
 }
 
 type inputOption struct {
-	ID           string     `json:"id"`
-	Label        string     `json:"label"`
-	Action       sim.Action `json:"action"`
-	PrepareQuote bool       `json:"prepare_quote,omitempty"`
+	ID     string     `json:"id"`
+	Label  string     `json:"label"`
+	Action sim.Action `json:"action"`
 }
 type inputData struct {
 	DecisionSource string         `json:"decision_source"`
@@ -92,9 +89,6 @@ type decisionEvidence struct {
 	input      inputData
 	row        DecisionReview
 	jev        bool
-	content    bool
-	quote      bool
-	draft      *inputOption
 	jevRequest bool
 	jevStage   string
 	jevChoice  string
@@ -241,66 +235,6 @@ func Analyze(dir string) (Report, error) {
 				return report, err
 			}
 			d.row.UnavailablePreferences = data.Preferences
-		case "quote_selected":
-			d, ok := decisions[key]
-			if !ok {
-				return report, fmt.Errorf("quote selection without input at %d", e.Seq)
-			}
-			var data struct {
-				OptionID string     `json:"option_id"`
-				Action   sim.Action `json:"action"`
-			}
-			if err := decodeData(e, &data); err != nil {
-				return report, err
-			}
-			if d.draft != nil {
-				return report, fmt.Errorf("duplicate quote selection at %d", e.Seq)
-			}
-			for _, o := range d.input.Options {
-				if o.ID == data.OptionID && o.PrepareQuote && reflect.DeepEqual(o.Action, data.Action) {
-					copy := o
-					d.draft = &copy
-					break
-				}
-			}
-			if d.draft == nil {
-				return report, fmt.Errorf("quote draft is not a selected editable candidate at %d", e.Seq)
-			}
-		case "quote_options":
-			d, ok := decisions[key]
-			if !ok || d.draft == nil {
-				return report, fmt.Errorf("quote options without selected draft at %d", e.Seq)
-			}
-			var data struct {
-				DraftOptionID string         `json:"draft_option_id"`
-				Terms         sim.TradeTerms `json:"terms"`
-				Options       []inputOption  `json:"options"`
-			}
-			if err := decodeData(e, &data); err != nil {
-				return report, err
-			}
-			quoteView := d.input.Perception
-			quoteView.Catalog = before.Catalog
-			proposal, err := sim.QuoteAction(quoteView, d.draft.Action, data.Terms)
-			if err != nil || data.DraftOptionID != d.draft.ID || len(data.Options) == 0 || data.Options[0].ID != "quote-confirm" || data.Options[0].PrepareQuote || !reflect.DeepEqual(data.Options[0].Action, proposal) {
-				return report, fmt.Errorf("invalid explicit quote options at %d", e.Seq)
-			}
-			expected := []inputOption{data.Options[0]}
-			for _, o := range d.input.Options {
-				if !o.PrepareQuote {
-					expected = append(expected, o)
-				}
-			}
-			if !reflect.DeepEqual(expected, data.Options) {
-				return report, fmt.Errorf("quote confirmation changed ordinary alternatives at %d", e.Seq)
-			}
-			if mode == "jev" && d.input.DecisionSource != "rules" && (!d.jev || d.jevChoice != d.draft.ID) {
-				add(e, "model_evidence", "observed_error", "报价草稿缺少对应的模型选择凭证", d.row.InputSeq)
-			}
-			d.input.Options = data.Options
-			d.jev = false
-			d.jevChoice = ""
-			d.jevRequest = false
 		case "decision_selected":
 			d, ok := decisions[key]
 			if !ok {
@@ -319,7 +253,7 @@ func Analyze(dir string) (Report, error) {
 			}
 			found := false
 			for _, option := range d.input.Options {
-				if !option.PrepareQuote && option.ID == data.OptionID && reflect.DeepEqual(option.Action, data.Action) {
+				if option.ID == data.OptionID && reflect.DeepEqual(option.Action, data.Action) {
 					found = true
 				}
 			}
@@ -337,21 +271,11 @@ func Analyze(dir string) (Report, error) {
 			if err := decodeData(e, &data); err != nil {
 				return report, err
 			}
-			selected, ready := d.row.Action, data.Action
-			switch selected.Kind {
-			case "speak", "transmit_message":
-				selected.Statement, ready.Statement = nil, nil
-				selected.BasisEventID, ready.BasisEventID = 0, 0
-				selected.Text, ready.Text = "", ""
-			case "issue_decree":
-				selected.Text, ready.Text = "", ""
-			}
-			if !reflect.DeepEqual(selected, ready) {
-				add(e, "content_authority", "violation", "内容生成改变了已选定的系统动作或交易条款", d.row.InputSeq)
+			if !reflect.DeepEqual(d.row.Action, data.Action) {
+				add(e, "content_authority", "violation", "准备执行的动作改变了已选定的系统动作", d.row.InputSeq)
 			}
 			d.row.Action, d.row.ReadySeq = data.Action, e.Seq
-			contentAction := data.Action.Kind == "speak" || data.Action.Kind == "transmit_message" || data.Action.Kind == "issue_decree"
-			if mode == "jev" && d.input.DecisionSource != "rules" && (!d.jev || contentAction && !d.content || d.draft != nil && !d.quote) {
+			if mode == "jev" && d.input.DecisionSource != "rules" && !d.jev {
 				add(e, "model_evidence", "observed_error", "真实模型模式的已执行决策缺少相应模型原始响应", d.row.InputSeq)
 			}
 			if err := sim.ValidateCitation(d.input.Perception.Self.Memories, data.Action.BasisEventID, data.Action.Statement); err != nil {
@@ -368,22 +292,20 @@ func Analyze(dir string) (Report, error) {
 					add(e, "speech_locality", "violation", "当面讲话的目标不在人物当时可接触的邻居中", d.row.InputSeq)
 				}
 			}
-		case "jev_request", "content_request", "quote_request":
+		case "jev_request":
 			d, ok := decisions[key]
 			if !ok {
 				return report, fmt.Errorf("model request without perception at %d", e.Seq)
 			}
-			if e.Kind == "jev_request" {
-				var data struct {
-					Stage string `json:"selection_stage"`
-				}
-				if err := decodeData(e, &data); err != nil {
-					return report, err
-				}
-				d.jevRequest = true
-				d.jevStage = data.Stage
+			var data struct {
+				Stage string `json:"selection_stage"`
 			}
-		case "jev_response", "content_response", "quote_response":
+			if err := decodeData(e, &data); err != nil {
+				return report, err
+			}
+			d.jevRequest = true
+			d.jevStage = data.Stage
+		case "jev_response":
 			d, ok := decisions[key]
 			if !ok {
 				return report, fmt.Errorf("model response without perception at %d", e.Seq)
@@ -395,35 +317,24 @@ func Analyze(dir string) (Report, error) {
 			if err := decodeData(e, &data); err != nil {
 				return report, err
 			}
-			if e.Kind == "jev_response" {
-				if d.jevRequest && d.jevStage == "action" && data.Status == 200 {
-					var response struct {
-						Answers map[string]struct {
-							Type   string `json:"type"`
-							Choice string `json:"choice"`
-						} `json:"answers"`
-					}
-					if err := json.Unmarshal([]byte(data.Body), &response); err == nil && response.Answers["decision"].Type == "choice" {
-						d.jev = true
-						d.jevChoice = response.Answers["decision"].Choice
-					}
+			if d.jevRequest && d.jevStage == "action" && data.Status == 200 {
+				var response struct {
+					Answers map[string]struct {
+						Type   string `json:"type"`
+						Choice string `json:"choice"`
+					} `json:"answers"`
 				}
-				d.jevRequest = false
-				report.JevResponses++
-			} else if e.Kind == "quote_response" {
-				d.quote = true
-				report.ContentResponses++
-			} else {
-				d.content = true
-				report.ContentResponses++
+				if err := json.Unmarshal([]byte(data.Body), &response); err == nil && response.Answers["decision"].Type == "choice" {
+					d.jev = true
+					d.jevChoice = response.Answers["decision"].Choice
+				}
 			}
+			d.jevRequest = false
+			report.JevResponses++
 			if data.Status != 200 {
 				add(e, "provider_response", "observed_error", fmt.Sprintf("外部模型返回HTTP %d；原文保存在该记录中", data.Status))
 			}
-			if e.Kind == "content_response" && data.Status == 200 {
-				checkContentCitation(e, data.Body, d.input.Perception, add)
-			}
-		case "decision_error", "jev_error", "content_error", "quote_error", "step_error":
+		case "decision_error", "jev_error", "step_error":
 			var data struct {
 				Stage string `json:"stage"`
 				Error string `json:"error"`
@@ -548,32 +459,6 @@ func Analyze(dir string) (Report, error) {
 		report.Findings = append(report.Findings, Finding{Rule: "trace_completion", Status: "observed_error", Evidence: []uint64{seq}, Detail: "缺少结束记录，不能把截断trace判为运行成功"})
 	}
 	return report, nil
-}
-
-func checkContentCitation(e Entry, body string, p sim.Perception, add func(Entry, string, string, string, ...uint64)) {
-	var response struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal([]byte(body), &response); err != nil {
-		add(e, "provider_schema", "observed_error", "模型响应不是有效JSON："+err.Error())
-		return
-	}
-	if len(response.Choices) == 0 {
-		add(e, "provider_schema", "observed_error", "内容模型响应没有choices")
-		return
-	}
-	content, err := modelreply.Decode(response.Choices[0].Message.Content)
-	if err != nil {
-		add(e, "content_schema", "observed_error", "内容不是单个有效JSON对象："+err.Error())
-		return
-	}
-	if err := sim.ValidateCitation(p.Self.Memories, content.BasisEventID, content.Statement); err != nil {
-		add(e, "raw_memory_provenance", "violation", err.Error())
-	}
 }
 
 func checkHoldings(e Entry, world *sim.World, add func(Entry, string, string, string, ...uint64)) {

@@ -109,33 +109,28 @@ logs.
 
 The production pipeline (`-decider jev`, the default) is:
 
-**identity tags + catalog → system-defined action candidates → Jev choice → text generation when needed → system settlement → events/state.**
+**identity tags + catalog → system-defined action candidates → Jev choice → system settlement → events/state.**
 
 Jev selects a candidate ID for an idle character. Ongoing tasks advance without
 another decision. TypeSafe's [Choice protocol](https://docs.typesafe.ai/primitives/choice)
 allows at most 255 alternatives per question. Larger action sets use successive
 group and concrete-action choices. Every original action remains reachable; all
 stages are recorded. A character's decision can therefore make multiple Jev
-requests. The content model runs for `speak`, `transmit_message`, and
-`issue_decree`. It receives the selected action and the character's perception,
-including remembered experiences. It supplies words and, for communication,
-assertions and memory references. Decrees use only its text. The selected behavior,
-target, route, recipe, decree parameters, and trade terms remain system-controlled.
+requests. Simulation runtime does not call a content LLM; `speak`,
+`transmit_message`, and `issue_decree` candidates carry deterministic
+system-built text, assertions, and memory references.
 
-Configure Jev and a separate content model:
+Configure Jev:
 
 ```sh
 export WRE_JEV_KEY=your-jev-key
 export WRE_JEV_MODEL=jev-latest
 # Optional complete endpoint: WRE_JEV_URL=https://api.typesafe.ai/v1/systemone
-export WRE_MODEL_URL=https://your-provider.example/v1
-export WRE_MODEL=your-model
-export WRE_MODEL_KEY=your-key
 go run ./cmd/wre -world model-village -decider jev -steps 24 -pace 0s
 ```
 
 The CLI reads `.env` from the working directory; existing nonempty environment
-variables take precedence. `WRE_MODEL_URL` and `WRE_MODEL` are required in Jev mode.
+variables take precedence. `WRE_JEV_KEY` is required in Jev mode.
 Jev's URL and model default to the values shown above. Add `-offline-run` to use
 model decisions without PostgreSQL.
 
@@ -410,10 +405,8 @@ Model requests retain the latest text in each directed conversation, plus recall
 structured claims, observations and source IDs. Omitted older text and archived
 closed agreements are disclosed; full history remains in snapshots and traces.
 Open agreements remain complete. Observations remain observations and statements
-remain attributed claims. The content
-model receives the character's situation without a preassigned honesty stance or
-fixed quantity distortion. Offline text is a deterministic test fixture, not a claim
-of model-quality realism.
+remain attributed claims. Communication candidates carry deterministic system-built
+text and structured claims; simulation runtime does not invoke a content LLM.
 
 ## Tests
 
@@ -437,8 +430,8 @@ WRE_TEST_DATABASE_URL="$DATABASE_URL" \
 ```
 
 The real model workflow builds and starts the executable, calls the configured
-Jev and content providers, saves to PostgreSQL, restarts from that database, and
-replays persisted decisions. Configure the model variables above and
+Jev provider, saves to PostgreSQL, restarts from that database, and
+replays persisted decisions. Configure `WRE_JEV_KEY` and
 `DATABASE_URL`, then run:
 
 ```sh
@@ -503,7 +496,7 @@ Workflow completion is not evidence that the simulated world is valid.
 
 - `cmd/wre`: simulation, inspection, and replay commands
 - `internal/sim`: world state, perception, action settlement, population groups, world systems, and replay
-- `internal/agent`: action candidates, Jev selection, content generation, and rule decisions
+- `internal/agent`: action candidates, Jev selection, and rule decisions
 - `internal/pack`: WorldPack loading, validation, and world creation
 - `internal/store`: PostgreSQL snapshots, events, decision logs, checkpoints, and world locks
 - `packs`: reference world definitions
@@ -536,16 +529,8 @@ are derived from persistent dialogue/offers/agreements, including expiry and
 local availability. They do not schedule a response, reveal an absent person's
 private location, force someone to stay, or treat spoken promises as settlement.
 
-Jev can keep a catalog quote or choose to draft other quantity, total price and
-currency. Only that explicit draft choice calls the content endpoint for
-structured trade terms. After validation, Jev makes a second choice between the
-concrete proposal and all its original ordinary actions, including declining or
-deferring. This adds one content request and one further selection cycle when
-negotiation is chosen, not on every tick. Errors propagate before settlement;
-there is no silent fallback. Speech generation still cannot edit any action.
-
 A counteroffer keeps the seller, buyer and item, receives a new ID, and replaces
-the prior offer only when the proposing character confirms it. Its predecessor
+the prior offer only when explicitly submitted. Its predecessor
 and original expiry remain visible. Only the other party can accept it; acceptance
 checks current location, permissions, stock and funds, then transfers the exact
 accepted terms once. Named offers cannot be diverted to unrelated cohorts.
@@ -554,7 +539,6 @@ is valid. The offline baseline uses its existing demand/sale-intent, uncommitted
 inventory and trust preferences to answer counteroffers; this is not a calibrated
 bargaining model. Delivery-agreement price negotiation is not added by this path.
 
-Tests exercise controlled HTTP choices, cross-tick responses, optional deferral,
-rejection, failed/stale settlement, pending-offer snapshots and deterministic
-replay. They do not establish the quality of real-model negotiations or improved
-long-run survival.
+Tests exercise cross-tick counteroffers, rejection, failed/stale settlement,
+pending-offer snapshots and deterministic replay. They do not establish the
+quality of real-model negotiations or improved long-run survival.

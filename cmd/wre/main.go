@@ -62,6 +62,12 @@ func runArgs(args []string, stdout, stderr io.Writer) error {
 			return runReplay(args[1:], stdout, stderr)
 		case "audit-trace":
 			return runTraceAudit(args[1:], stdout, stderr)
+		case "expand-options":
+			return runExpandOptions(args[1:], stdout, stderr)
+		case "expand-responses":
+			return runExpandResponses(args[1:], stdout, stderr)
+		case "expand-rulebook":
+			return runExpandRulebook(args[1:], stdout, stderr)
 		}
 	}
 	return runSim(args, stdout, stderr)
@@ -74,7 +80,10 @@ func runSim(args []string, stdout, stderr io.Writer) (runErr error) {
 	pop := fs.Int("pop", 30, "initial total population when creating a new world (e.g. 30 or 1000000)")
 	steps := fs.Int("steps", 24, "quarter-hour ticks (15m each) to run; 0 runs continuously")
 	pace := fs.Duration("pace", time.Second, "real delay per simulation tick")
-	mode := fs.String("decider", "jev", "jev (production) or rules (offline test)")
+	mode := fs.String("decider", "jev", "jev (production), rules (offline baseline), playbook (per-actor compiled), or rulebook (actor-agnostic generic causal rules)")
+	playbookDir := fs.String("playbook-dir", "", "path to offline expand-options output directory (required when -decider=playbook)")
+	rulebookPath := fs.String("rulebook", "", "path to actor-agnostic rulebook.json or expand-rulebook dir (required when -decider=rulebook)")
+	seed := fs.Int64("seed", 0, "deterministic RNG seed for rulebook/stochastic selectors")
 	compact := fs.Bool("compact-events", false, "persist only high-value causal/economic/progression events")
 	quiet := fs.Bool("quiet", false, "suppress per-event stdout NDJSON and log periodic day summaries to stderr")
 	packPath := fs.String("pack", "", "path to an external WorldPack JSON file to initialize a new world")
@@ -84,6 +93,8 @@ func runSim(args []string, stdout, stderr io.Writer) (runErr error) {
 	outCheckpoint := fs.String("out-checkpoint", "", "optional path to write initial World checkpoint JSON before stepping")
 	outDecisions := fs.String("out-decisions", "", "optional path to write recorded per-tick TickDecisionLog JSON array")
 	outEvents := fs.String("out-events", "", "optional path to write emitted events JSON array")
+	outPlaybookLog := fs.String("out-playbook-log", "", "optional path to write PlaybookSelector execution telemetry and decision log JSON")
+	outRulebookLog := fs.String("out-rulebook-log", "", "optional path to write RulebookSelector execution telemetry and causal log JSON")
 	traceDir := fs.String("trace-dir", "", "write original model calls, perceptions and settled world states to a new evidence directory")
 
 	if err := fs.Parse(args); err != nil {
@@ -132,9 +143,12 @@ func runSim(args []string, stdout, stderr io.Writer) (runErr error) {
 		return err
 	}
 
-	d, err := buildDecider(*mode, evidence)
+	d, playbookSel, rulebookSel, err := buildDecider(*mode, *playbookDir, *rulebookPath, evidence)
 	if err != nil {
 		return err
+	}
+	if rulebookSel != nil && *seed != 0 {
+		rulebookSel.Seed = *seed
 	}
 
 	var loadedPack *pack.WorldPack
@@ -362,6 +376,37 @@ func runSim(args []string, stdout, stderr io.Writer) (runErr error) {
 			return fmt.Errorf("write events file: %w", err)
 		}
 	}
+	if *outPlaybookLog != "" && playbookSel != nil {
+		if err := playbookSel.WriteLog(*outPlaybookLog); err != nil {
+			return fmt.Errorf("write playbook log file: %w", err)
+		}
+	}
+	if playbookSel != nil {
+		snap := playbookSel.SnapshotLog()
+		fmt.Fprintf(stderr, "playbook_summary world=%s total=%d base=%d(%d/%d unique) counter=%d(%d/%d unique) scenarios=%d/%d travel(base=%d,counter=%d) exact=%d fallback=%d survival=%d rules_fallback=%d\n",
+			snap.WorldID, snap.Stats.TotalDecisions,
+			snap.Stats.BaseDecisions, snap.Stats.UniqueBaseOptions, snap.Stats.TotalBaseOptions,
+			snap.Stats.CounterDecisions, snap.Stats.UniqueCounters, snap.Stats.TotalCounters,
+			snap.Stats.ScenariosActivated, snap.Stats.TotalScenarios,
+			snap.Stats.TravelForBase, snap.Stats.TravelForCounter,
+			snap.Stats.ExactMatches, snap.Stats.SemanticFallbacks,
+			snap.Stats.RulesSurvival, snap.Stats.RulesFallback)
+	}
+	if *outRulebookLog != "" && rulebookSel != nil {
+		if err := rulebookSel.WriteLog(*outRulebookLog); err != nil {
+			return fmt.Errorf("write rulebook log file: %w", err)
+		}
+	}
+	if rulebookSel != nil {
+		snap := rulebookSel.SnapshotLog()
+		fmt.Fprintf(stderr, "rulebook_summary world=%s total=%d proactive=%d(%d/%d unique) reaction=%d(actor2=%d,witness=%d,%d/%d unique) pairs=%d avg_pairs_per_rule=%.2f responders=%d survival=%d rules_fallback=%d\n",
+			snap.WorldID, snap.Stats.TotalDecisions,
+			snap.Stats.ProactiveDecisions, snap.Stats.UniqueProactiveRules, snap.Stats.TotalProactiveRules,
+			snap.Stats.ReactionDecisions, snap.Stats.Actor2Reactions, snap.Stats.WitnessReactions,
+			snap.Stats.UniqueReactionRules, snap.Stats.TotalReactionRules,
+			snap.Stats.UniqueActorPairs, snap.Stats.AvgPairsPerFiredRule, snap.Stats.UniqueResponders,
+			snap.Stats.RulesSurvival, snap.Stats.RulesFallback)
+	}
 	if evidence != nil {
 		if err := evidence.WriteJSON("final.json", w); err != nil {
 			return err
@@ -370,17 +415,39 @@ func runSim(args []string, stdout, stderr io.Writer) (runErr error) {
 	return nil
 }
 
-func buildDecider(mode string, evidence *runtrace.Writer) (sim.Decider, error) {
+func buildDecider(mode, playbookDir, rulebookPath string, evidence *runtrace.Writer) (sim.Decider, *agent.PlaybookSelector, *agent.RulebookSelector, error) {
 	switch mode {
 	case "rules":
 		pipeline := agent.Offline()
 		pipeline.Trace = evidence
-		return pipeline, nil
-	case "jev":
-		endpoint, name := os.Getenv("WRE_MODEL_URL"), os.Getenv("WRE_MODEL")
-		if endpoint == "" || name == "" {
-			return nil, fmt.Errorf("jev mode requires WRE_MODEL_URL and WRE_MODEL")
+		return pipeline, nil, nil, nil
+	case "playbook":
+		if strings.TrimSpace(playbookDir) == "" {
+			return nil, nil, nil, fmt.Errorf("playbook mode requires -playbook-dir <expand-options-dir>")
 		}
+		pb, err := agent.LoadPlaybook(playbookDir)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		sel := agent.NewPlaybookSelector(pb, evidence)
+		return agent.Pipeline{
+			Selector: sel,
+			Trace:    evidence,
+		}, sel, nil, nil
+	case "rulebook":
+		if strings.TrimSpace(rulebookPath) == "" {
+			return nil, nil, nil, fmt.Errorf("rulebook mode requires -rulebook <rulebook.json-or-dir>")
+		}
+		rb, err := agent.LoadRulebook(rulebookPath)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		sel := agent.NewRulebookSelector(rb, evidence)
+		return agent.Pipeline{
+			Selector: sel,
+			Trace:    evidence,
+		}, nil, sel, nil
+	case "jev":
 		jevURL := os.Getenv("WRE_JEV_URL")
 		if jevURL == "" {
 			jevURL = "https://api.typesafe.ai/v1/systemone"
@@ -391,15 +458,14 @@ func buildDecider(mode string, evidence *runtrace.Writer) (sim.Decider, error) {
 		}
 		key := os.Getenv("WRE_JEV_KEY")
 		if key == "" {
-			return nil, fmt.Errorf("jev mode requires WRE_JEV_KEY")
+			return nil, nil, nil, fmt.Errorf("jev mode requires WRE_JEV_KEY")
 		}
 		return agent.Pipeline{
-			Selector:  agent.Jev{Endpoint: jevURL, Name: jevName, APIKey: key, Trace: evidence},
-			Generator: agent.ContentModel{Endpoint: endpoint, Name: name, APIKey: os.Getenv("WRE_MODEL_KEY"), Trace: evidence},
-			Trace:     evidence,
-		}, nil
+			Selector: agent.Jev{Endpoint: jevURL, Name: jevName, APIKey: key, Trace: evidence},
+			Trace:    evidence,
+		}, nil, nil, nil
 	default:
-		return nil, fmt.Errorf("unknown decider %q", mode)
+		return nil, nil, nil, fmt.Errorf("unknown decider %q", mode)
 	}
 }
 

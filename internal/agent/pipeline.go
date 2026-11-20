@@ -8,32 +8,23 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/changw98ic/world-relation-evo/internal/modelreply"
 	"github.com/changw98ic/world-relation-evo/internal/runtrace"
 	"github.com/changw98ic/world-relation-evo/internal/sim"
 )
 
 type Option struct {
-	PrepareQuote bool       `json:"prepare_quote,omitempty"`
-	ID           string     `json:"id"`
-	Label        string     `json:"label"`
-	Action       sim.Action `json:"action"`
+	ID     string     `json:"id"`
+	Label  string     `json:"label"`
+	Action sim.Action `json:"action"`
 }
 
 type Selector interface {
 	Select(context.Context, sim.Perception, []Option) (string, error)
 }
 
-type Content = modelreply.Content
-
-type Generator interface {
-	Generate(context.Context, sim.Perception, sim.Action) (Content, error)
-}
-
 type Pipeline struct {
-	Selector  Selector
-	Generator Generator
-	Trace     *runtrace.Writer
+	Selector Selector
+	Trace    *runtrace.Writer
 }
 
 func (p Pipeline) Decide(ctx context.Context, view sim.Perception) (action sim.Action, err error) {
@@ -50,17 +41,24 @@ func (p Pipeline) Decide(ctx context.Context, view sim.Perception) (action sim.A
 		}
 	}()
 	options := Options(view)
-	if _, ok := p.Generator.(QuoteGenerator); ok {
-		options = withQuoteOptions(view, options)
-	}
 	selector := p.Selector
 	source := "selector"
-	switch p.Selector.(type) {
+	switch s := p.Selector.(type) {
 	case RuleSelector, *RuleSelector:
 		source = "rules"
 		selector = RuleSelector{trace: p.Trace}
 	case Jev, *Jev:
 		source = "jev"
+	case *PlaybookSelector:
+		source = "playbook"
+		if s.Trace == nil && p.Trace != nil {
+			s.Trace = p.Trace
+		}
+	case *RulebookSelector:
+		source = "rulebook"
+		if s.Trace == nil && p.Trace != nil {
+			s.Trace = p.Trace
+		}
 	}
 	if err = p.Trace.Record("decision_input", view.Tick, view.Self.ID, map[string]any{"perception": view, "options": options, "decision_source": source}); err != nil {
 		return sim.Action{}, err
@@ -75,48 +73,20 @@ func (p Pipeline) Decide(ctx context.Context, view sim.Perception) (action sim.A
 		return sim.Action{}, err
 	}
 	var selected *sim.Action
-	prepareQuote := false
 	for _, o := range options {
 		if o.ID == id {
 			v := o.Action
 			selected = &v
-			prepareQuote = o.PrepareQuote
 			break
 		}
 	}
 	if selected == nil {
 		return sim.Action{}, fmt.Errorf("selector returned unavailable option %q", id)
 	}
-	if prepareQuote {
-		stage = "quote"
-		resolved, selectedID, quoteErr := p.resolveQuote(ctx, view, selector, id, *selected, options)
-		if quoteErr != nil {
-			return sim.Action{}, quoteErr
-		}
-		selected, id = &resolved, selectedID
-	}
 	stage = "selected"
 	if err = p.Trace.Record("decision_selected", view.Tick, view.Self.ID, map[string]any{"option_id": id, "action": *selected}); err != nil {
 		return sim.Action{}, err
 	}
-	if selected.Kind != "speak" && selected.Kind != "transmit_message" && selected.Kind != "issue_decree" {
-		return *selected, nil
-	}
-	stage = "generator"
-	content, err := p.Generator.Generate(ctx, view, *selected)
-	if err != nil {
-		return sim.Action{}, err
-	}
-	// Content cannot replace the selected behavior, target, route, house, profession, guild, recipe, decree parameters, or trade terms.
-	if selected.Kind == "issue_decree" {
-		if content.Text != "" {
-			selected.Text = content.Text
-		}
-		return *selected, nil
-	}
-	selected.Text = content.Text
-	selected.Statement = content.Statement
-	selected.BasisEventID = content.BasisEventID
 	return *selected, nil
 }
 
@@ -181,6 +151,9 @@ func Options(p sim.Perception) []Option {
 			if blocked, _ := worldRules.IsActionBlockedByWorldLaw(a, action); blocked {
 				return
 			}
+			if action.Text == "" && (action.Kind == "speak" || action.Kind == "transmit_message" || action.Kind == "issue_decree") {
+				action = buildCommunicationAction(p, action)
+			}
 			options = append(options, Option{ID: fmt.Sprintf("o%03d", len(options)), Label: label, Action: action})
 		}
 	}
@@ -223,10 +196,13 @@ func Options(p sim.Perception) []Option {
 		}
 		add(leaveLabel, sim.Action{Kind: "leave_house"})
 		if h := p.CurrentHouse; h != nil && h.OwnerID == a.ID && h.Level < 3 {
-			planks := h.Level
+			env := p.Catalog.EffectiveEnvironment()
+			repairItem := env.RepairItem
+			builderProf := env.BuilderProfession
+			materials := h.Level
 			coins := 4 * h.Level
-			if a.Professions["carpenter"] >= 2 && a.Items["plank"] >= planks && a.Money >= coins && a.Energy >= 12 {
-				add(fmt.Sprintf("Renovate %s to asset level %d (%d planks + %d coins, 60m, -12 energy)", h.Name, h.Level+1, planks, coins), sim.Action{
+			if (builderProf == "" || a.Professions[builderProf] >= 2) && a.Items[repairItem] >= materials && a.Money >= coins && a.Energy >= 12 {
+				add(fmt.Sprintf("Renovate %s to asset level %d (%d %s + %d coins, 60m, -12 energy)", h.Name, h.Level+1, materials, repairItem, coins), sim.Action{
 					Kind: "upgrade_house", HouseID: h.ID,
 				})
 			}
@@ -436,6 +412,19 @@ func Options(p sim.Perception) []Option {
 			add(fmt.Sprintf("Conduct %s at %s (%dm, -%d energy, +%d morale)", rit.Name, a.Location, rit.Ticks*15, rit.EnergyCost, rit.MoraleBoost),
 				sim.Action{Kind: "perform_ritual", RecipeID: rit.ID})
 		}
+
+		if a.Energy >= 8 {
+			for _, we := range p.ActiveWorldEvents {
+				if we.Category != "artifact_emergence" || we.ClaimedBy != "" || we.DistrictID != a.Location {
+					continue
+				}
+				if we.RequiredPowerTier > 0 && p.Catalog.ActorPowerTier(a) < we.RequiredPowerTier {
+					continue
+				}
+				add(fmt.Sprintf("Claim %s at %s (-8 energy; reward +%d %s, +%d coins)", we.Name, a.Location, we.RewardQty, we.RewardItem, we.RewardCoins),
+					sim.Action{Kind: "claim_world_event", TargetID: we.InstanceID})
+			}
+		}
 	}
 
 	for _, r := range p.Catalog.Recipes {
@@ -476,8 +465,9 @@ func Options(p sim.Perception) []Option {
 
 	for _, h := range p.AccessibleHouses {
 		if h.District == a.Location && (a.InsideHouse == "" || a.InsideHouse == h.ID) {
-			if h.Condition < sim.MaxCondition && a.Energy >= 8 && a.Items["plank"] >= 1 {
-				add(fmt.Sprintf("Repair %s with 1 plank (45m, -8 energy, condition %d/100)", h.Name, h.Condition), sim.Action{Kind: "repair_house", HouseID: h.ID})
+			repairItem := p.Catalog.EffectiveEnvironment().RepairItem
+			if h.Condition < sim.MaxCondition && a.Energy >= 8 && a.Items[repairItem] >= 1 {
+				add(fmt.Sprintf("Repair %s with 1 %s (45m, -8 energy, condition %d/100)", h.Name, repairItem, h.Condition), sim.Action{Kind: "repair_house", HouseID: h.ID})
 			}
 		}
 	}
@@ -534,8 +524,9 @@ func Options(p sim.Perception) []Option {
 			Kind: "foreclose_collateral", TargetID: p.OverdueBorrowerID, HouseID: p.OverdueHouseID,
 		})
 	}
-	if p.HasOpenWrongfulCase && p.AppealTargetID != "" && a.IllicitGain == 0 && a.Energy >= 6 {
-		add("File censorate appeal for "+p.AppealTargetID+" (-6 energy)", sim.Action{
+	env := p.Catalog.EffectiveEnvironment()
+	if env.Institutions.OversightEnabled() && p.HasOpenWrongfulCase && p.AppealTargetID != "" && a.IllicitGain == 0 && a.Energy >= 6 {
+		add(fmt.Sprintf("File %s appeal for %s (-6 energy)", env.OversightName, p.AppealTargetID), sim.Action{
 			Kind: "file_appeal", TargetID: p.AppealTargetID, Location: a.Location, BasisEventID: p.AppealBasisEventID,
 		})
 	}
@@ -582,31 +573,36 @@ func Options(p sim.Perception) []Option {
 				})
 			}
 		}
+		bIsOutlaw := p.Catalog.IsOutlawTags(b.Tags)
+		bIsEnforcer := p.Catalog.IsEnforcementTags(b.Tags)
+		bIsOversight := p.Catalog.IsOversightTags(b.Tags)
 		if b.Health > 0 && a.Energy >= 6 && a.Health >= 25 {
 			add("Attack "+b.Name+" (-6 energy)", sim.Action{Kind: "attack", TargetID: b.ID})
 		}
 		if a.Health >= 65 && b.Health >= 65 && a.Energy >= 6 && p.Tick >= a.RestUntil && !b.Sleeping {
-			add("Spar with "+b.Name+" in martial arts (-6 energy)", sim.Action{Kind: "spar", TargetID: b.ID})
+			add("Spar with "+b.Name+" (-6 energy)", sim.Action{Kind: "spar", TargetID: b.ID})
 		}
-		if a.Health >= 45 && a.Energy >= 5 && p.Tick >= a.RestUntil && !sim.ActorHasTag(b.Tags, "outlaw") {
-			add("Pickpocket "+b.Name+" (-5 energy)", sim.Action{Kind: "steal", TargetID: b.ID})
+		if a.Health >= 45 && a.Energy >= 5 && p.Tick >= a.RestUntil && !bIsOutlaw {
+			add("Steal from "+b.Name+" (-5 energy)", sim.Action{Kind: "steal", TargetID: b.ID})
 		}
-		if a.Health >= 50 && a.Energy >= 6 && p.Tick >= a.RestUntil && !sim.ActorHasTag(b.Tags, "outlaw") {
-			add("Collect gang protection fee from "+b.Name+" (-6 energy)", sim.Action{Kind: "extort", TargetID: b.ID})
+		if env.Institutions.RacketeeringEnabled() && a.Health >= 50 && a.Energy >= 6 && p.Tick >= a.RestUntil && !bIsOutlaw {
+			add("Extort coercion fee from "+b.Name+" (-6 energy)", sim.Action{Kind: "extort", TargetID: b.ID})
 		}
-		if a.Health >= 55 && b.Health > 20 && a.Energy >= 8 && p.Tick >= a.RestUntil && !sim.ActorHasTag(b.Tags, "outlaw") {
+		if a.Health >= 55 && b.Health > 20 && a.Energy >= 8 && p.Tick >= a.RestUntil && !bIsOutlaw {
 			add("Raid and plunder "+b.Name+" (-8 energy)", sim.Action{Kind: "raid", TargetID: b.ID})
 		}
-		if a.Money >= 4 && a.Energy >= 3 && sim.ActorHasTag(b.Tags, "law") {
-			add("Slip hush bribe to law officer "+b.Name+" (-3 energy)", sim.Action{Kind: "bribe", TargetID: b.ID})
+		if a.Money >= 4 && a.Energy >= 3 && bIsEnforcer {
+			add(fmt.Sprintf("Offer hush bribe to %s %s (-3 energy)", env.AuthorityName, b.Name), sim.Action{Kind: "bribe", TargetID: b.ID})
 		}
-		if basisID, hasEv := sim.ActorCorruptionEvidence(a, b.ID); a.IllicitGain == 0 && hasEv && a.Energy >= 6 {
-			add("Audit and expose corrupt officer "+b.Name+" (-6 energy)", sim.Action{
-				Kind: "audit_corruption", TargetID: b.ID, BasisEventID: basisID,
-			})
+		if env.Institutions.OversightEnabled() {
+			if basisID, hasEv := sim.ActorCorruptionEvidence(a, b.ID); a.IllicitGain == 0 && hasEv && a.Energy >= 6 {
+				add(fmt.Sprintf("Audit and expose corrupt %s %s (-6 energy)", env.AuthorityName, b.Name), sim.Action{
+					Kind: "audit_corruption", TargetID: b.ID, BasisEventID: basisID,
+				})
+			}
 		}
-		if a.Health >= 45 && b.Health > 0 && a.Energy >= 7 && p.Tick >= a.RestUntil && (sim.ActorHasTag(b.Tags, "outlaw") || sim.ActorHasTag(b.Tags, "raider") || sim.ActorHasTag(b.Tags, "thief") || sim.ActorHasTag(b.Tags, "gang") || a.Trust[b.ID] < 0) {
-			add("Arrest outlaw "+b.Name+" for yamen bounty (-7 energy)", sim.Action{Kind: "arrest", TargetID: b.ID})
+		if env.Institutions.EnforcementEnabled() && a.Health >= 45 && b.Health > 0 && a.Energy >= 7 && p.Tick >= a.RestUntil && (bIsOutlaw || a.Trust[b.ID] < 0) {
+			add(fmt.Sprintf("Detain violator %s for %s bounty (-7 energy)", b.Name, env.AuthorityName), sim.Action{Kind: "arrest", TargetID: b.ID})
 		}
 		if p.CurrentHouse != nil && p.CurrentHouse.OwnerID == a.ID {
 			add(fmt.Sprintf("Transfer ownership deed of %s to %s (permanent property transfer)", p.CurrentHouse.Name, b.Name), sim.Action{
@@ -629,8 +625,8 @@ func Options(p sim.Perception) []Option {
 				Kind: "avenge_feud", TargetID: b.ID,
 			})
 		}
-		if (a.IllicitGain > 0 || p.DistrictGrievance >= 35) && a.Energy >= 5 && !sim.ActorHasTag(b.Tags, "law") && !sim.ActorHasTag(b.Tags, "censor") && !sim.ActorHasTag(b.Tags, "outlaw") {
-			add(fmt.Sprintf("Frame %s in scapegoat court docket (-5 energy)", b.Name), sim.Action{
+		if env.Institutions.EnforcementEnabled() && (a.IllicitGain > 0 || p.DistrictGrievance >= 35) && a.Energy >= 5 && !bIsEnforcer && !bIsOversight && !bIsOutlaw {
+			add(fmt.Sprintf("Frame %s in %s docket (-5 energy)", b.Name, env.AuthorityName), sim.Action{
 				Kind: "frame_suspect", TargetID: b.ID,
 			})
 		}
@@ -854,6 +850,63 @@ func Options(p sim.Perception) []Option {
 			}
 		}
 	}
+	// Independent skill mentorship (teacher level >= 2 and strictly higher than nearby student).
+	if len(p.Catalog.Skills) > 0 && allowed["teach_knowledge"] && a.Energy >= 4 {
+		skillKeys := make([]string, 0, len(a.Skills))
+		for sid, lv := range a.Skills {
+			if lv >= 2 {
+				skillKeys = append(skillKeys, sid)
+			}
+		}
+		sort.Strings(skillKeys)
+		for _, sid := range skillKeys {
+			sk, ok := p.Catalog.Skills[sid]
+			if !ok {
+				continue
+			}
+			teacherLv := a.Skills[sid]
+			for _, nb := range p.Nearby {
+				if nb.Jailed || nb.Sleeping {
+					continue
+				}
+				if nb.Skills[sid] < teacherLv {
+					add(fmt.Sprintf("Mentor %s in %s (Lv.%d -> Lv.%d, -4 energy)", nb.Name, sk.Name, nb.Skills[sid], min(teacherLv, nb.Skills[sid]+1)),
+						sim.Action{Kind: "teach_knowledge", SkillID: sid, TargetID: nb.ID})
+				}
+			}
+		}
+	}
+
+	// Declarative form/realm transitions (e.g. cultivation breakthroughs) when all preconditions & costs are satisfied.
+	if len(p.Catalog.Transitions) > 0 && allowed["attempt_transition"] {
+		transKeys := make([]string, 0, len(p.Catalog.Transitions))
+		for k := range p.Catalog.Transitions {
+			transKeys = append(transKeys, k)
+		}
+		sort.Strings(transKeys)
+		for _, tid := range transKeys {
+			trans := p.Catalog.Transitions[tid]
+			if trans.ID == "" {
+				trans.ID = tid
+			}
+			if trans.SuccessFormID != "" && a.FormID == trans.SuccessFormID {
+				continue
+			}
+			if ok, _ := sim.CanAttemptTransition(a, trans); ok {
+				name := trans.Name
+				if name == "" {
+					name = trans.ID
+				}
+				ticks := trans.Ticks
+				if ticks < 1 {
+					ticks = 1
+				}
+				add(fmt.Sprintf("Attempt transition %s (%dm)", name, ticks*15),
+					sim.Action{Kind: "attempt_transition", TransitionID: trans.ID})
+			}
+		}
+	}
+
 	addDeclarativeActionOptions(p, allowed, add)
 	for _, itemID := range itemKeys {
 		if ok, _ := sim.CanEquipItem(p.Catalog, a, itemID); ok {
@@ -1146,9 +1199,6 @@ func (r RuleSelector) Select(_ context.Context, p sim.Perception, options []Opti
 
 func ruleOptionID(desired sim.Action, options []Option) string {
 	for _, o := range options {
-		if o.PrepareQuote {
-			continue
-		}
 		a := o.Action
 		if a.Kind == desired.Kind &&
 			(desired.Channel == "" || a.Channel == desired.Channel) &&
@@ -1158,6 +1208,7 @@ func ruleOptionID(desired sim.Action, options []Option) string {
 			a.ProfessionID == desired.ProfessionID &&
 			a.RecipeID == desired.RecipeID &&
 			(desired.TechID == "" || a.TechID == desired.TechID) &&
+			(desired.SkillID == "" || a.SkillID == desired.SkillID) &&
 			(desired.Currency == "" || a.Currency == desired.Currency) &&
 			(desired.TransitionID == "" || a.TransitionID == desired.TransitionID) &&
 			a.OfferID == desired.OfferID &&
@@ -1173,50 +1224,25 @@ func ruleOptionID(desired sim.Action, options []Option) string {
 	return ""
 }
 
-// PrimaryTopicItem determines which item a speaker's recent memories or role focus on for contextual expression.
-func PrimaryTopicItem(cat sim.Catalog, self sim.Actor, listener sim.Neighbor) string {
-	for i := len(self.Memories) - 1; i >= 0; i-- {
-		m := self.Memories[i]
-		if m.Observation != nil && m.Observation.Item != "" {
-			return m.Observation.Item
-		}
-		if m.Kind == "speech" && m.Source != self.ID && m.Source != listener.ID && m.Statement != nil && m.Statement.Item != "" {
-			return m.Statement.Item
-		}
-	}
-	for _, t := range self.IdentityTags() {
-		if prods := cat.TagProfiles[t].Produces; len(prods) > 0 {
-			return prods[0]
-		}
-	}
-	return "food"
+type speechDraft struct {
+	Text         string
+	Statement    *sim.Statement
+	BasisEventID int64
 }
 
-func findNeighbor(nearby []sim.Neighbor, id string) (sim.Neighbor, bool) {
-	for _, b := range nearby {
-		if b.ID == id {
-			return b, true
-		}
-	}
-	return sim.Neighbor{ID: id}, false
-}
-
-// TemplateContent is a deterministic offline fixture, not a simulation of character expression.
-// It preserves witnessed/reported quantities; the content model chooses how a character speaks.
-type TemplateContent struct{}
-
-func (TemplateContent) Generate(_ context.Context, p sim.Perception, a sim.Action) (Content, error) {
+// buildCommunicationAction attaches deterministic structured speech, channel
+// transmission, or decree text directly onto system-defined candidate actions.
+func buildCommunicationAction(p sim.Perception, a sim.Action) sim.Action {
 	if a.Kind == "issue_decree" {
 		polName := a.FactionID
 		if p.Polity != nil && p.Polity.LedPolityName != "" {
 			polName = p.Polity.LedPolityName
 		}
-		return Content{
-			Text: fmt.Sprintf("Proclamation of %s by %s: enact %s (%d).", polName, p.Self.Name, a.Item, a.Quantity),
-		}, nil
+		a.Text = fmt.Sprintf("Proclamation of %s by %s: enact %s (%d).", polName, p.Self.Name, a.Item, a.Quantity)
+		return a
 	}
 	if a.Kind != "speak" && a.Kind != "transmit_message" {
-		return Content{}, nil
+		return a
 	}
 	alreadyToldTarget := func(rootID int64) bool {
 		if rootID == 0 {
@@ -1236,15 +1262,19 @@ func (TemplateContent) Generate(_ context.Context, p sim.Perception, a sim.Actio
 		if p.Tick-m.Tick > sim.TicksPerDay || alreadyToldTarget(m.RootEventID) {
 			continue
 		}
-		if content, ok := reportFromMemory(m, p.Self, a.TargetID); ok {
-			return content, nil
+		if draft, ok := reportFromMemory(m, p.Self, a.TargetID); ok {
+			a.Text = draft.Text
+			a.Statement = draft.Statement
+			a.BasisEventID = draft.BasisEventID
+			return a
 		}
 	}
-	return Content{Text: fmt.Sprintf("I have %d food, %d energy, and am trying to %s.", p.Self.Items["food"], p.Self.Energy, p.Self.Goal)}, nil
+	a.Text = fmt.Sprintf("I have %d food, %d energy, and am trying to %s.", p.Self.Items["food"], p.Self.Energy, p.Self.Goal)
+	return a
 }
 
 // reportFromMemory gives planning and speech the same account of one memory.
-func reportFromMemory(m sim.Memory, self sim.Actor, listenerID string) (Content, bool) {
+func reportFromMemory(m sim.Memory, self sim.Actor, listenerID string) (speechDraft, bool) {
 	if m.Observation != nil {
 		switch m.Observation.Kind {
 		case "item_produced":
@@ -1253,7 +1283,7 @@ func reportFromMemory(m sim.Memory, self sim.Actor, listenerID string) (Content,
 			if m.Source == self.ID {
 				text = fmt.Sprintf("I produced %d %s at %s.", q, m.Observation.Item, m.Observation.Location)
 			}
-			return Content{
+			return speechDraft{
 				Text:         text,
 				BasisEventID: m.EventID,
 				Statement:    &sim.Statement{Topic: "item_produced", Item: m.Observation.Item, Location: m.Observation.Location, Quantity: q},
@@ -1263,7 +1293,7 @@ func reportFromMemory(m sim.Memory, self sim.Actor, listenerID string) (Content,
 			if mod == "" {
 				mod = "eyewitness"
 			}
-			return Content{
+			return speechDraft{
 				Text:         fmt.Sprintf("I observed %s (%s) at %s (intensity %d).", m.Observation.SubjectID, mod, m.Observation.Location, m.Observation.Quantity),
 				BasisEventID: m.EventID,
 				Statement: &sim.Statement{
@@ -1276,9 +1306,9 @@ func reportFromMemory(m sim.Memory, self sim.Actor, listenerID string) (Content,
 			}, true
 		case "corruption":
 			if m.Observation.SubjectID == "" || m.Observation.SubjectID == self.ID || m.Observation.SubjectID == listenerID || self.IllicitGain > 0 {
-				return Content{}, false
+				return speechDraft{}, false
 			}
-			return Content{
+			return speechDraft{
 				Text:         fmt.Sprintf("I witnessed %s taking %d illicit bribe coins at %s.", m.Observation.SubjectID, m.Observation.Quantity, m.Observation.Location),
 				BasisEventID: m.EventID,
 				Statement: &sim.Statement{
@@ -1292,9 +1322,9 @@ func reportFromMemory(m sim.Memory, self sim.Actor, listenerID string) (Content,
 			}, true
 		case "wrongful_conviction":
 			if m.Observation.ObjectID == "" || m.Observation.SubjectID == self.ID || m.Observation.SubjectID == listenerID {
-				return Content{}, false
+				return speechDraft{}, false
 			}
-			return Content{
+			return speechDraft{
 				Text:         fmt.Sprintf("I witnessed %s wrongfully framing %s in %s (case #%d).", m.Observation.SubjectID, m.Observation.ObjectID, m.Observation.Location, m.Observation.CaseID),
 				BasisEventID: m.EventID,
 				Statement: &sim.Statement{
@@ -1311,7 +1341,7 @@ func reportFromMemory(m sim.Memory, self sim.Actor, listenerID string) (Content,
 			if mod == "" {
 				mod = "eyewitness"
 			}
-			return Content{
+			return speechDraft{
 				Text:         fmt.Sprintf("I perceived %s shift (%s) at %s (level %d).", m.Observation.Item, mod, m.Observation.Location, m.Observation.Quantity),
 				BasisEventID: m.EventID,
 				Statement: &sim.Statement{
@@ -1323,7 +1353,7 @@ func reportFromMemory(m sim.Memory, self sim.Actor, listenerID string) (Content,
 				},
 			}, true
 		case "facility_adopted":
-			return Content{
+			return speechDraft{
 				Text:         fmt.Sprintf("I witnessed %s adopting %s at %s.", m.Observation.SubjectID, m.Observation.Item, m.Observation.ObjectID),
 				BasisEventID: m.EventID,
 				Statement: &sim.Statement{
@@ -1335,12 +1365,69 @@ func reportFromMemory(m sim.Memory, self sim.Actor, listenerID string) (Content,
 					Quantity:  1,
 				},
 			}, true
+		case "actor_died":
+			if m.Observation.ObjectID == "" {
+				return speechDraft{}, false
+			}
+			// Never accuse the listener to their own face as the killer.
+			if m.Observation.SubjectID != "" && m.Observation.SubjectID == listenerID {
+				return speechDraft{}, false
+			}
+			text := fmt.Sprintf("I witnessed %s die from %s at %s.", m.Observation.ObjectID, m.Observation.Item, m.Observation.Location)
+			if m.Observation.SubjectID != "" {
+				text = fmt.Sprintf("I witnessed %s killed by %s (%s) at %s.", m.Observation.ObjectID, m.Observation.SubjectID, m.Observation.Item, m.Observation.Location)
+			}
+			return speechDraft{
+				Text:         text,
+				BasisEventID: m.EventID,
+				Statement: &sim.Statement{
+					Topic:     "actor_died",
+					SubjectID: m.Observation.SubjectID,
+					ObjectID:  m.Observation.ObjectID,
+					Item:      m.Observation.Item,
+					Location:  m.Observation.Location,
+					Quantity:  1,
+				},
+			}, true
+		case "world_event":
+			mod := m.Observation.Modality
+			if mod == "" {
+				mod = "eyewitness"
+			}
+			return speechDraft{
+				Text:         fmt.Sprintf("I witnessed world event %s (%s) at %s via %s.", m.Observation.SubjectID, m.Observation.ObjectID, m.Observation.Location, mod),
+				BasisEventID: m.EventID,
+				Statement: &sim.Statement{
+					Topic:     "world_event",
+					SubjectID: m.Observation.SubjectID,
+					ObjectID:  m.Observation.ObjectID,
+					Item:      m.Observation.Item,
+					Location:  m.Observation.Location,
+					Quantity:  m.Observation.Quantity,
+				},
+			}, true
+		case "world_event_claimed":
+			if m.Observation.SubjectID == listenerID {
+				return speechDraft{}, false
+			}
+			return speechDraft{
+				Text:         fmt.Sprintf("I saw %s claim %s (%d %s) at %s.", m.Observation.SubjectID, m.Observation.ObjectID, m.Observation.Quantity, m.Observation.Item, m.Observation.Location),
+				BasisEventID: m.EventID,
+				Statement: &sim.Statement{
+					Topic:     "world_event_claimed",
+					SubjectID: m.Observation.SubjectID,
+					ObjectID:  m.Observation.ObjectID,
+					Item:      m.Observation.Item,
+					Location:  m.Observation.Location,
+					Quantity:  m.Observation.Quantity,
+				},
+			}, true
 		}
 	}
 	if (m.Kind == "speech" || m.Kind == "channel_message") && m.Source != self.ID && m.Source != listenerID && m.Statement != nil {
 		v := *m.Statement
 		if v.SubjectID != "" && v.SubjectID == listenerID {
-			return Content{}, false
+			return speechDraft{}, false
 		}
 		// Retell the speaker's words, including any price, uncertainty and
 		// attribution. A topic alone does not describe what was said.
@@ -1348,9 +1435,9 @@ func reportFromMemory(m sim.Memory, self sim.Actor, listenerID string) (Content,
 		if m.Text == "" {
 			text = fmt.Sprintf("%s reported %s: %d %s at %s.", m.Source, v.Topic, v.Quantity, v.Item, v.Location)
 		}
-		return Content{Text: text, BasisEventID: m.EventID, Statement: &v}, true
+		return speechDraft{Text: text, BasisEventID: m.EventID, Statement: &v}, true
 	}
-	return Content{}, false
+	return speechDraft{}, false
 }
 
-func Offline() Pipeline { return Pipeline{Selector: RuleSelector{}, Generator: TemplateContent{}} }
+func Offline() Pipeline { return Pipeline{Selector: RuleSelector{}} }
