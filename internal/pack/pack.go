@@ -28,11 +28,12 @@ type WorldPack struct {
 	Cohorts        []sim.PopulationCohort `json:"cohorts,omitempty"`
 	Ecology        *sim.EcologySpec       `json:"ecology,omitempty"`
 	Production     *sim.ProductionState   `json:"production,omitempty"`
-	Governance     *sim.GovernanceSpec    `json:"governance,omitempty"`
-	MarketCredit   *sim.MarketCreditSpec  `json:"market_credit,omitempty"`
-	FlowGrid       *sim.FlowGridState     `json:"flow_grid,omitempty"`
-	WorldLaws      map[string]int         `json:"world_laws,omitempty"`
-	Knowledge      *sim.KnowledgeBook     `json:"knowledge,omitempty"`
+	Governance     *sim.GovernanceSpec     `json:"governance,omitempty"`
+	MarketCredit   *sim.MarketCreditSpec   `json:"market_credit,omitempty"`
+	FlowGrid       *sim.FlowGridState      `json:"flow_grid,omitempty"`
+	WorldLaws      map[string]int          `json:"world_laws,omitempty"`
+	Knowledge      *sim.KnowledgeBook      `json:"knowledge,omitempty"`
+	Environment    *sim.EnvironmentProfile `json:"environment,omitempty"`
 }
 
 // LoadFile reads and validates a WorldPack JSON file from disk.
@@ -268,6 +269,13 @@ func (p *WorldPack) Validate() error {
 				}
 			}
 		}
+		if len(p.Catalog.Skills) > 0 {
+			for sid := range a.Skills {
+				if _, ok := p.Catalog.Skills[sid]; !ok {
+					return fmt.Errorf("actor %q references unknown skill %q", a.ID, sid)
+				}
+			}
+		}
 		if len(p.Catalog.EquipSlots) > 0 {
 			for slot := range a.Equipped {
 				hasSlot := false
@@ -345,6 +353,11 @@ func (p *WorldPack) Validate() error {
 				return fmt.Errorf("cohort %q references unknown profession %q", c.ID, c.Profession)
 			}
 		}
+		if c.FormID != "" && len(p.Catalog.Forms) > 0 {
+			if _, ok := p.Catalog.Forms[c.FormID]; !ok {
+				return fmt.Errorf("cohort %q references unknown form_id %q", c.ID, c.FormID)
+			}
+		}
 		if ageSum := c.Children + c.Adults + c.Elders; ageSum > 0 && ageSum != c.Population {
 			return fmt.Errorf("cohort %q age brackets sum %d != population %d", c.ID, ageSum, c.Population)
 		}
@@ -367,6 +380,11 @@ func (p *WorldPack) Validate() error {
 	for _, r := range p.Catalog.Recipes {
 		if r.NodeFeature != "" && !mapFeatures[r.NodeFeature] {
 			return fmt.Errorf("recipe %q requires missing map node_feature %q", r.ID, r.NodeFeature)
+		}
+		if r.SkillID != "" && len(p.Catalog.Skills) > 0 {
+			if _, ok := p.Catalog.Skills[r.SkillID]; !ok {
+				return fmt.Errorf("recipe %q references unknown skill_id %q", r.ID, r.SkillID)
+			}
 		}
 	}
 	initial := &sim.World{Actors: p.Actors, Cohorts: p.Cohorts, PublicTreasury: p.PublicTreasury, Polities: p.Polities, FlowGrid: p.FlowGrid}
@@ -464,6 +482,23 @@ func (p *WorldPack) Instantiate(worldIDOverride string) (*sim.World, error) {
 	}
 
 	cat := normalizeCatalog(sim.CloneCatalog(p.Catalog))
+	if p.Environment != nil {
+		cat.Environment = sim.CloneEnvironmentProfile(p.Environment)
+	}
+	if cat.Environment == nil && (p.Genre != "" || p.Name != "" || p.Description != "") {
+		cat.Environment = &sim.EnvironmentProfile{}
+	}
+	if cat.Environment != nil {
+		if cat.Environment.Genre == "" {
+			cat.Environment.Genre = p.Genre
+		}
+		if cat.Environment.Theme == "" {
+			cat.Environment.Theme = p.Name
+		}
+		if cat.Environment.Summary == "" {
+			cat.Environment.Summary = p.Description
+		}
+	}
 	if p.Governance != nil {
 		cat.Governance = *p.Governance
 	} else if cat.Governance == (sim.GovernanceSpec{}) {
@@ -536,6 +571,24 @@ func (p *WorldPack) Instantiate(worldIDOverride string) (*sim.World, error) {
 				cp[k] = v
 			}
 			ac.ProfessionXP = cp
+		}
+		if len(ac.Skills) == 0 {
+			ac.Skills = nil
+		} else {
+			cp := make(map[string]int, len(ac.Skills))
+			for k, v := range ac.Skills {
+				cp[k] = v
+			}
+			ac.Skills = cp
+		}
+		if len(ac.SkillXP) == 0 {
+			ac.SkillXP = nil
+		} else {
+			cp := make(map[string]int, len(ac.SkillXP))
+			for k, v := range ac.SkillXP {
+				cp[k] = v
+			}
+			ac.SkillXP = cp
 		}
 		if len(ac.Guilds) == 0 {
 			ac.Guilds = nil

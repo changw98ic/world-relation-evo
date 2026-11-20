@@ -76,7 +76,8 @@
         "swear_bond",
         "mediate_feud",
         "begin_rest",
-        "end_rest"
+        "end_rest",
+        "claim_world_event"
       ],
       "ritual": [
         "perform_ritual"
@@ -1498,7 +1499,8 @@
           "source": "finite timber_stand extraction: 2 resource units fund at most 2 output units",
           "external_mass_units": 2,
           "external_nutrition_units": 0
-        }
+        },
+        "skill_id": "carpentry"
       },
       {
         "id": "saw_planks",
@@ -1518,7 +1520,8 @@
         "output_qty": 2,
         "conversion": {
           "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
+        },
+        "skill_id": "carpentry"
       },
       {
         "id": "sew_winter_coat",
@@ -1629,7 +1632,8 @@
           "source": "finite herb_bed extraction: 2 resource units fund at most 2 output units",
           "external_mass_units": 2,
           "external_nutrition_units": 0
-        }
+        },
+        "skill_id": "herbal_medicine"
       },
       {
         "id": "brew_medicine",
@@ -1647,7 +1651,8 @@
         "output_qty": 2,
         "conversion": {
           "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
+        },
+        "skill_id": "herbal_medicine"
       },
       {
         "id": "distill_tonic",
@@ -1666,7 +1671,8 @@
         "output_qty": 2,
         "conversion": {
           "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
+        },
+        "skill_id": "herbal_medicine"
       },
       {
         "id": "refine_elixir_tonic",
@@ -1684,7 +1690,8 @@
         "output_qty": 3,
         "conversion": {
           "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
+        },
+        "skill_id": "herbal_medicine"
       },
       {
         "id": "transcribe_scroll",
@@ -1740,7 +1747,8 @@
         "output_qty": 1,
         "conversion": {
           "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
+        },
+        "skill_id": "martial_arts"
       },
       {
         "id": "temper_weapon",
@@ -1758,7 +1766,8 @@
         "output_qty": 1,
         "conversion": {
           "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
+        },
+        "skill_id": "martial_arts"
       },
       {
         "id": "issue_bounty_writ",
@@ -3568,7 +3577,197 @@
       "interval_ticks": 35040,
       "condition_loss": 4,
       "source": "scenario wooden-roof condition budget: 4/100 per 365-day year; NPS Preservation Brief 19 gives 15-30-year wooden-shingle service lives; condition-point interpolation uses a 25-year scenario: https://www.nps.gov/orgs/1739/upload/preservation-brief-19-wood-shingle-roofs.pdf"
-    }
+    },
+    "forms": {
+      "commoner": {
+        "id": "commoner",
+        "name": "布衣凡民",
+        "power_tier": 1,
+        "combat_bonus": 0,
+        "vigilance_bonus": 0,
+        "life_expectancy_years": 72,
+        "daily_intake_pct": 100,
+        "starvation_threshold": 6,
+        "starvation_damage": 10
+      },
+      "martial_adept": {
+        "id": "martial_adept",
+        "name": "气血武夫",
+        "power_tier": 2,
+        "combat_bonus": 16,
+        "vigilance_bonus": 6,
+        "life_expectancy_years": 90,
+        "daily_intake_pct": 165,
+        "starvation_threshold": 8,
+        "starvation_damage": 10
+      },
+      "martial_master": {
+        "id": "martial_master",
+        "name": "先天武师",
+        "power_tier": 3,
+        "combat_bonus": 38,
+        "vigilance_bonus": 14,
+        "life_expectancy_years": 115,
+        "daily_intake_pct": 220,
+        "starvation_threshold": 10,
+        "starvation_damage": 12
+      }
+    },
+    "skills": {
+      "martial_arts": {
+        "id": "martial_arts",
+        "name": "武艺拳脚",
+        "category": "combat",
+        "max_level": 6,
+        "ranks": [
+          "初习",
+          "好手",
+          "教头",
+          "宗师"
+        ],
+        "combat_bonus_per_level": 4,
+        "vigilance_bonus_per_level": 2,
+        "action_affinities": [
+          "spar",
+          "attack",
+          "hunt_threat",
+          "arrest"
+        ]
+      },
+      "carpentry": {
+        "id": "carpentry",
+        "name": "木作营造",
+        "category": "craft",
+        "max_level": 6,
+        "ranks": [
+          "学徒",
+          "木匠",
+          "大木匠",
+          "鲁班传人"
+        ],
+        "repair_bonus_per_level": 6,
+        "action_affinities": [
+          "craft",
+          "repair_house",
+          "maintain_infra"
+        ]
+      },
+      "herbal_medicine": {
+        "id": "herbal_medicine",
+        "name": "岐黄医术",
+        "category": "healing",
+        "max_level": 6,
+        "ranks": [
+          "药童",
+          "郎中",
+          "名医",
+          "国手"
+        ],
+        "heal_bonus_per_level": 6,
+        "action_affinities": [
+          "heal",
+          "medicate",
+          "craft"
+        ]
+      },
+      "commerce": {
+        "id": "commerce",
+        "name": "货殖商道",
+        "category": "trade",
+        "max_level": 6,
+        "ranks": [
+          "货郎",
+          "牙人",
+          "掌柜",
+          "巨贾"
+        ],
+        "trade_margin_per_level": 2,
+        "vigilance_bonus_per_level": 2,
+        "action_affinities": [
+          "offer",
+          "propose_agreement",
+          "accept"
+        ]
+      },
+      "water_engineering": {
+        "id": "water_engineering",
+        "name": "水利漕运",
+        "category": "engineering",
+        "max_level": 6,
+        "ranks": [
+          "河工",
+          "漕师",
+          "治水使",
+          "河道总督"
+        ],
+        "repair_bonus_per_level": 5,
+        "stealth_bonus_per_level": 2,
+        "action_affinities": [
+          "maintain_infra",
+          "move"
+        ]
+      }
+    },
+    "world_events": [
+      {
+        "id": "imperial_seal_relic",
+        "name": "古朝玉鼎现世",
+        "category": "artifact_emergence",
+        "target_features": [
+          "shrine",
+          "market",
+          "farmland"
+        ],
+        "prob_permille_per_day": 55,
+        "min_tick": 96,
+        "cooldown_ticks": 672,
+        "duration_ticks": 288,
+        "intensity": 60,
+        "reward_item": "fine_tools",
+        "reward_qty": 1,
+        "reward_coins": 35,
+        "required_power_tier": 1
+      },
+      {
+        "id": "yellow_river_dyke_breach",
+        "name": "青溪大堤决口·官道断绝",
+        "category": "terrain_shift",
+        "target_features": [
+          "canal_wharf",
+          "farmland"
+        ],
+        "prob_permille_per_day": 35,
+        "min_tick": 192,
+        "cooldown_ticks": 960,
+        "duration_ticks": 192,
+        "intensity": 70,
+        "sever_medium": "road",
+        "add_features": [
+          "water_source"
+        ],
+        "casualty_permille": 20,
+        "damage": 16
+      },
+      {
+        "id": "northern_bandit_incursion",
+        "name": "流寇大股压境",
+        "category": "external_invasion",
+        "target_features": [
+          "market",
+          "woodland"
+        ],
+        "prob_permille_per_day": 35,
+        "min_tick": 288,
+        "cooldown_ticks": 960,
+        "duration_ticks": 288,
+        "intensity": 75,
+        "invasion_threat_id": "mountain_beast",
+        "invasion_threat_boost": 35,
+        "bounty_boost": 80,
+        "casualty_permille": 18,
+        "damage": 18
+      }
+    ]
   },
   "map": {
     "districts": [
@@ -4100,7 +4299,12 @@
       },
       "goal": "Oversee provincial tax integrity and river basin relief",
       "personality": "",
-      "trust": {}
+      "trust": {},
+      "form_id": "martial_adept",
+      "skills": {
+        "martial_arts": 3,
+        "water_engineering": 4
+      }
     },
     {
       "id": "magistrate_shen",
@@ -4140,7 +4344,12 @@
       },
       "goal": "Govern Qingxi County and protect upstream farmland",
       "personality": "",
-      "trust": {}
+      "trust": {},
+      "form_id": "martial_master",
+      "skills": {
+        "martial_arts": 5,
+        "water_engineering": 3
+      }
     },
     {
       "id": "magistrate_lin",
@@ -4180,7 +4389,12 @@
       },
       "goal": "Maintain Pingyuan pier order and downstream levee readiness",
       "personality": "",
-      "trust": {}
+      "trust": {},
+      "form_id": "martial_adept",
+      "skills": {
+        "martial_arts": 4,
+        "commerce": 2
+      }
     },
     {
       "id": "farmer_chen",
@@ -4221,7 +4435,11 @@
       },
       "goal": "Irrigate upper village paddies and supply grain downstream",
       "personality": "",
-      "trust": {}
+      "trust": {},
+      "form_id": "commoner",
+      "skills": {
+        "water_engineering": 2
+      }
     },
     {
       "id": "farmer_wu",
@@ -4261,7 +4479,11 @@
       },
       "goal": "Cultivate terrace grain and trade surplus at Pingyuan market",
       "personality": "",
-      "trust": {}
+      "trust": {},
+      "form_id": "commoner",
+      "skills": {
+        "carpentry": 2
+      }
     },
     {
       "id": "herbalist_su",
@@ -4303,7 +4525,11 @@
       },
       "goal": "Gather mountain herbs and brew medicine for both counties",
       "personality": "",
-      "trust": {}
+      "trust": {},
+      "form_id": "commoner",
+      "skills": {
+        "herbal_medicine": 5
+      }
     },
     {
       "id": "merchant_zhao",
@@ -4343,7 +4569,12 @@
       },
       "goal": "Trade seeds, tools, and grain across Qingxi and Pingyuan",
       "personality": "",
-      "trust": {}
+      "trust": {},
+      "form_id": "commoner",
+      "skills": {
+        "commerce": 4,
+        "martial_arts": 1
+      }
     },
     {
       "id": "boatman_sun",
@@ -4384,7 +4615,12 @@
       },
       "goal": "Pilot river barges between Qingxi Gorge and Pingyuan Pier",
       "personality": "",
-      "trust": {}
+      "trust": {},
+      "form_id": "martial_adept",
+      "skills": {
+        "water_engineering": 4,
+        "martial_arts": 2
+      }
     },
     {
       "id": "carpenter_lu",
@@ -4424,7 +4660,12 @@
       },
       "goal": "Saw planks for levees and river barges",
       "personality": "",
-      "trust": {}
+      "trust": {},
+      "form_id": "commoner",
+      "skills": {
+        "carpentry": 5,
+        "water_engineering": 2
+      }
     }
   ],
   "cohorts": [
@@ -4446,7 +4687,8 @@
         "food": 129600,
         "seeds": 360,
         "water": 500
-      }
+      },
+      "form_id": "commoner"
     },
     {
       "id": "cohort_pingyuan_boatmen",
@@ -4466,7 +4708,8 @@
         "plank": 120,
         "tools": 90,
         "water": 300
-      }
+      },
+      "form_id": "commoner"
     },
     {
       "id": "cohort_pingyuan_merchants",
@@ -4486,7 +4729,8 @@
         "seeds": 150,
         "tools": 60,
         "water": 200
-      }
+      },
+      "form_id": "commoner"
     }
   ],
   "ecology": {
@@ -4503,6 +4747,47 @@
           "river_levee": 85
         }
       }
+    }
+  },
+  "environment": {
+    "genre": "historical",
+    "theme": "古代县域流域社会",
+    "summary": "古代王朝县域与河谷村落，包含县衙治理、御史巡察、漕运商贸与乡土农耕。",
+    "currency_name": "铜钱",
+    "actor_noun": "乡民",
+    "authority_name": "县衙",
+    "oversight_name": "御史台",
+    "forum_features": [
+      "public_forum",
+      "authority_seat",
+      "hub",
+      "market",
+      "academy",
+      "shrine",
+      "yamen"
+    ],
+    "enforcement_tags": [
+      "law"
+    ],
+    "oversight_tags": [
+      "censor"
+    ],
+    "outlaw_tags": [
+      "outlaw",
+      "raider",
+      "thief",
+      "gang"
+    ],
+    "enforcement_item": "bounty_writ",
+    "repair_item": "plank",
+    "builder_profession": "carpenter",
+    "institutions": {
+      "taxation": true,
+      "enforcement": true,
+      "oversight": true,
+      "racketeering": true,
+      "revolt": true,
+      "rituals": true
     }
   }
 }

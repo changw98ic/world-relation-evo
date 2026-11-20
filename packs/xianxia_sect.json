@@ -1,71 +1,162 @@
 {
   "id": "xianxia-sect",
-  "name": "Xianxia Sect & Spirit-Market Domain",
+  "name": "青云宗与云麓灵市",
   "genre": "xianxia",
-  "description": "Azure Cloud Sect mountain spirit-vein peaks linked by leyline to Cloudfoot Spirit-Market, featuring divine_sense, sword_flight, sound_talisman, and pill alchemy.",
-  "public_treasury": 300,
+  "description": "青云主峰灵脉绵延，宗门执法堂、玉剑峰丹符阁、青灵药谷与山下云麓灵市共存；灵石与宗门贡献并行，正道修士、外门灵植与散修与劫修围绕灵草、丹药、灵石与真传席位展开博弈。",
+  "public_treasury": 360,
+  "environment": {
+    "genre": "xianxia",
+    "theme": "青云宗与云麓灵市",
+    "summary": "修仙宗门与山下灵市生态：修士以灵米灵泉维生、炼丹绘符悟道，以灵石与宗门贡献点结算；执法堂维护门规，长老会负责稽查问责，山下云麓灵市鱼龙混杂、普通散修云集、劫修暗流涌动。",
+    "currency_name": "灵石",
+    "actor_noun": "修士",
+    "authority_name": "执法堂",
+    "oversight_name": "长老会",
+    "forum_features": [
+      "public_forum",
+      "authority_seat",
+      "exchange_hub",
+      "ritual_site",
+      "hub",
+      "market"
+    ],
+    "enforcement_tags": [
+      "enforcer"
+    ],
+    "oversight_tags": [
+      "elder_oversight"
+    ],
+    "outlaw_tags": [
+      "rogue_outlaw",
+      "raider",
+      "thief"
+    ],
+    "enforcement_item": "enforcement_token",
+    "repair_item": "spirit_wood",
+    "builder_profession": "talisman_crafter",
+    "institutions": {
+      "taxation": true,
+      "enforcement": true,
+      "oversight": true,
+      "racketeering": false,
+      "revolt": false,
+      "rituals": true
+    },
+    "personality_catalog": {
+      "flamboyant": "张扬高调，爱露锋芒、喜在人前张扬实力与财富，极易引人注目与招惹是非",
+      "meddlesome": "好管闲事，见事必问、热衷插手旁人纷争与宗门琐事，极易卷入目击事件",
+      "provocative": "桀骜挑衅，言辞锋利、喜激怒挑衅对手，极易主动起事并吸引敌意针对",
+      "reckless": "鲁莽冲动，遇事不计后果、急躁冒进，常主动挑起冲突或贸然插手险局",
+      "gregarious": "广结善缘，乐于广交八方同道、热衷串门攀谈，社交接触与往来极为频繁",
+      "inquisitive": "好奇探秘，喜打听风声、追查蹊跷与隐情，爱主动探查也易撞见突发变故",
+      "reclusive": "孤僻隐世，深居简出、极少主动与人往来，刻意远离是非与人群纷扰",
+      "low_profile": "韬光养晦，深藏不露、收敛气息与锋芒，极少引人注意也不轻易出头",
+      "aloof": "清冷疏离，拒人于千里之外、对世俗纷争兴趣缺缺，旁人难近其身",
+      "timid": "胆怯畏事，遇事退缩怯懦、不敢与人争锋，见冲突多回避绕行",
+      "indifferent": "淡漠置身事外，事不关己高高挂起，目睹变故亦冷眼旁观不愿卷入",
+      "ruthless": "狠辣决绝，出手无情、不留余地，遭遇冒犯倾向强硬镇压或借机清算",
+      "vengeful": "睚眦必报，极记旧仇、受辱必还，绝不轻饶敌手且伺机反扑",
+      "proud": "孤傲自矜，极重颜面与尊严、不屑低头妥协，易受激而强势回应",
+      "competitive": "好胜争强，事事不甘人后、喜与人较劲争锋，热衷主动切磋与争夺席位",
+      "stern": "冷峻严厉，铁面无私、不徇私情，处置违纪与异动倾向严格依规办理",
+      "dutiful": "恪尽职守，以宗门规矩与本职为先，对越界之举倾向秉公介入与追责",
+      "righteous": "嫉恶如仇，明辨是非、见不平必挺身相助，难以坐视欺压与不公",
+      "stoic": "沉稳克制，喜怒不形于色、临危不乱，遇事稳重权衡不轻易失态",
+      "cunning": "狡黠多谋，擅设局周旋与暗中布局，喜借隐蔽手段化解危局或反制对手",
+      "calculating": "精明重利，凡事计较得失与回报，见缝插针、擅在风波中趁机谋利",
+      "ambitious": "进取野心，志存高远、渴求更高地位与资源，积极经营势力并伺机上位",
+      "opportunistic": "见风使舵，灵变趋利、不拘泥立场，随时借局势变化换取筹码与实利",
+      "skeptical": "多疑审慎，不轻信旁人说辞，总先查探虚实、留后手并防备暗算",
+      "paranoid": "草木皆兵，疑心极重、总觉危机四伏，极力隐藏行迹并防备一切靠近",
+      "patient": "隐忍沉潜，能忍常人所不能忍，小不忍则乱大谋，倾向暗中蓄势伺机而动",
+      "benevolent": "仁厚慈悲，乐善好施、体恤同道，遇求助或伤病常积极呼应与帮扶",
+      "candid": "坦直磊落，有话直说、不喜绕弯子，处事光明正大、倾向正面沟通",
+      "sociable": "热络随和，善于寒暄往来、乐于交际应酬，常主动联络同道增进情谊",
+      "generous": "仗义慷慨，疏财仗义、愿济人困厄，容易赢取好感并促成互助结盟",
+      "diplomatic": "圆滑斡旋，长袖善舞、擅在各方之间说和斡旋，偏好谈判妥协与借力拉拢",
+      "easygoing": "豁达随和，不拘小节、性情宽和，面对小摩擦多愿和平化解不较真",
+      "careful": "审慎稳妥，三思而后行、注重风险评估，处理变故强调稳妥周全",
+      "cautious": "警觉避险，危机意识敏锐，察觉苗头不对倾向及时避险止损、保全自身",
+      "thrifty": "节俭持家，精打细算、珍惜灵石与资源，不喜无谓耗费与冒险投入",
+      "humble": "谦逊低调，不居功不炫耀、待人谦和，不易招人嫉恨也少起锋芒冲突"
+    },
+    "hobby_catalog": {
+      "sword_dueling": "论剑切磋，酷爱约战比试、演练剑术并研习斗法锋芒",
+      "sect_mentoring": "传道授业，乐于指点后辈、讲道授艺并主持宗门传承礼仪",
+      "alchemy_tasting": "品丹论道，痴迷炼丹试药、品鉴灵丹成色与切磋丹方",
+      "healing_charity": "行医济世，热衷悬壶救伤、照拂病弱与赠药济困",
+      "sect_patrol": "巡山护法，习惯四处巡查山门、缉拿宵小与稽核违纪",
+      "market_bargaining": "坊市淘宝，热衷逛市议价、互通有无与倒腾稀缺灵材",
+      "tea_gossip": "茶肆听风，喜在茶坊坊市闲谈打听、交换传闻与拉拢人脉",
+      "talisman_collecting": "符箓鉴赏，钟爱制符藏器、修缮灵阵洞府与品玩奇珍",
+      "spirit_gardening": "灵植培育，沉心照料灵田药圃、采撷灵草与培土引泉",
+      "shadow_raiding": "劫道夺宝，热衷伏击劫掠、强夺灵石丹药与抢占地盘",
+      "shadow_brokering": "暗市摸底，精于顺手牵羊、暗巷行贿与倒卖隐秘风声"
+    },
+    "terminology": {
+      "careful and candid": "谨慎坦诚",
+      "sociable and generous": "长袖善舞",
+      "ambitious and skeptical": "城府深沉",
+      "enforcer": "执法堂执事",
+      "elder_oversight": "长老会监察",
+      "rogue_outlaw": "黑市劫修",
+      "sword_dueling": "论剑切磋",
+      "sect_mentoring": "传道授业",
+      "alchemy_tasting": "品丹论道",
+      "healing_charity": "行医济世",
+      "sect_patrol": "巡山护法",
+      "market_bargaining": "坊市淘宝",
+      "tea_gossip": "茶肆听风",
+      "talisman_collecting": "符箓鉴赏",
+      "spirit_gardening": "灵植培育",
+      "shadow_raiding": "劫道夺宝",
+      "shadow_brokering": "暗市摸底",
+      "flamboyant": "张扬高调",
+      "meddlesome": "好管闲事",
+      "provocative": "桀骜挑衅",
+      "reckless": "鲁莽冲动",
+      "gregarious": "广结善缘",
+      "inquisitive": "好奇探秘",
+      "reclusive": "孤僻隐世",
+      "low_profile": "韬光养晦",
+      "aloof": "清冷疏离",
+      "timid": "胆怯畏事",
+      "indifferent": "淡漠置身事外",
+      "ruthless": "狠辣",
+      "vengeful": "睚眦必报",
+      "proud": "孤傲",
+      "competitive": "好胜",
+      "stern": "冷峻",
+      "dutiful": "恪职",
+      "righteous": "嫉恶如仇",
+      "stoic": "沉稳",
+      "cunning": "狡黠",
+      "calculating": "精明重利",
+      "ambitious": "进取野心",
+      "opportunistic": "见风使舵",
+      "skeptical": "多疑",
+      "paranoid": "草木皆兵",
+      "patient": "隐忍沉潜",
+      "benevolent": "仁厚",
+      "candid": "坦直",
+      "sociable": "热络",
+      "generous": "仗义慷慨",
+      "diplomatic": "圆滑斡旋",
+      "easygoing": "豁达随和",
+      "careful": "审慎",
+      "cautious": "警觉避险",
+      "thrifty": "节俭",
+      "humble": "谦逊低调"
+    }
+  },
   "catalog": {
     "tag_actions": {
-      "censor": [
-        "audit_corruption",
-        "file_appeal"
-      ],
-      "cultivator": [
-        "craft",
-        "medicate",
-        "speak",
-        "transmit_message",
-        "move_venue"
-      ],
-      "elder": [
-        "issue_decree",
-        "audit_corruption",
-        "perform_ritual"
-      ],
-      "fighter": [
-        "attack",
-        "avenge_feud",
-        "claim_turf"
-      ],
-      "gang": [
-        "raid",
-        "extort",
-        "bribe",
-        "avenge_feud",
-        "claim_turf"
-      ],
-      "healer": [
-        "heal"
-      ],
-      "hunter": [
-        "hunt_threat"
-      ],
-      "law": [
-        "arrest",
-        "hunt_threat",
-        "audit_corruption",
-        "claim_turf",
-        "frame_suspect"
-      ],
-      "martial": [
-        "spar",
-        "hunt_threat",
-        "avenge_feud",
-        "claim_turf"
-      ],
-      "pill_alchemist": [
-        "craft",
-        "heal"
-      ],
-      "raider": [
-        "raid",
-        "bribe",
-        "avenge_feud",
-        "claim_turf"
-      ],
       "resident": [
+        "equip",
+        "unequip",
         "refuel",
         "harvest",
+        "craft",
         "propose_growth_care",
         "accept_growth_care",
         "dispatch_harvest",
@@ -77,6 +168,8 @@
         "enter_house",
         "leave_house",
         "sleep",
+        "begin_rest",
+        "end_rest",
         "eat",
         "drink",
         "relieve",
@@ -88,24 +181,18 @@
         "maintain_infra",
         "join_faction",
         "join_profession",
-        "marry",
         "swear_bond",
         "mediate_feud",
-        "begin_rest",
-        "end_rest"
+        "claim_world_event"
       ],
-      "ritual": [
-        "perform_ritual"
-      ],
-      "ruler": [
-        "issue_decree"
-      ],
-      "spirit_farmer": [
-        "craft"
-      ],
-      "thief": [
-        "steal",
-        "bribe"
+      "cultivator": [
+        "craft",
+        "medicate",
+        "speak",
+        "transmit_message",
+        "move_venue",
+        "research_tech",
+        "teach_knowledge"
       ],
       "trader": [
         "propose_agreement",
@@ -121,2854 +208,49 @@
         "borrow_loan",
         "repay_loan",
         "foreclose_collateral"
+      ],
+      "fighter": [
+        "attack",
+        "avenge_feud",
+        "claim_turf",
+        "spar",
+        "hunt_threat"
+      ],
+      "healer": [
+        "heal"
+      ],
+      "enforcer": [
+        "arrest",
+        "hunt_threat",
+        "audit_corruption",
+        "claim_turf",
+        "frame_suspect"
+      ],
+      "elder_oversight": [
+        "audit_corruption",
+        "file_appeal",
+        "issue_decree",
+        "perform_ritual"
+      ],
+      "ruler": [
+        "issue_decree"
+      ],
+      "ritual": [
+        "perform_ritual"
+      ],
+      "raider": [
+        "raid",
+        "bribe",
+        "avenge_feud",
+        "claim_turf"
+      ],
+      "thief": [
+        "steal",
+        "bribe"
+      ],
+      "rogue_outlaw": [
+        "bribe"
       ]
-    },
-    "items": {
-      "bounty_writ": {
-        "id": "bounty_writ",
-        "name": "yamen bounty writ",
-        "tier": 3,
-        "tradeable": true,
-        "batch_qty": 1,
-        "batch_price": 5,
-        "offer_threshold": 2,
-        "surplus_threshold": 2,
-        "shortage_threshold": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "choice_grain": {
-        "id": "choice_grain",
-        "name": "choice grain",
-        "tier": 2,
-        "edible": true,
-        "tradeable": true,
-        "batch_qty": 2,
-        "batch_price": 4,
-        "offer_threshold": 4,
-        "surplus_threshold": 5,
-        "shortage_threshold": 2,
-        "mass_units": 1,
-        "nutrition_units": 1
-      },
-      "classic_tome": {
-        "id": "classic_tome",
-        "name": "annotated classic",
-        "tier": 4,
-        "tradeable": true,
-        "batch_qty": 1,
-        "batch_price": 8,
-        "offer_threshold": 2,
-        "surplus_threshold": 2,
-        "shortage_threshold": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "compost": {
-        "id": "compost",
-        "name": "household compost",
-        "tier": 1,
-        "tradeable": true,
-        "batch_qty": 2,
-        "batch_price": 1,
-        "offer_threshold": 5,
-        "surplus_threshold": 4,
-        "shortage_threshold": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "fine_tools": {
-        "id": "fine_tools",
-        "name": "fine tool sets",
-        "tier": 4,
-        "safety_bonus_pct": 40,
-        "combat_bonus": 2,
-        "tradeable": true,
-        "batch_qty": 1,
-        "batch_price": 8,
-        "offer_threshold": 2,
-        "surplus_threshold": 2,
-        "shortage_threshold": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "fish": {
-        "id": "fish",
-        "name": "river fish",
-        "tier": 1,
-        "edible": true,
-        "tradeable": true,
-        "batch_qty": 2,
-        "batch_price": 2,
-        "offer_threshold": 5,
-        "surplus_threshold": 6,
-        "shortage_threshold": 2,
-        "mass_units": 1,
-        "nutrition_units": 1
-      },
-      "food": {
-        "id": "food",
-        "name": "grain rations",
-        "tier": 1,
-        "edible": true,
-        "tradeable": true,
-        "batch_qty": 2,
-        "batch_price": 2,
-        "offer_threshold": 6,
-        "surplus_threshold": 8,
-        "shortage_threshold": 4,
-        "mass_units": 1,
-        "nutrition_units": 1
-      },
-      "herb": {
-        "id": "herb",
-        "name": "mountain herbs",
-        "tier": 1,
-        "tradeable": true,
-        "batch_qty": 2,
-        "batch_price": 2,
-        "offer_threshold": 4,
-        "surplus_threshold": 4,
-        "shortage_threshold": 2,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "hide": {
-        "id": "hide",
-        "name": "cured beast hide",
-        "tier": 2,
-        "tradeable": true,
-        "batch_qty": 2,
-        "batch_price": 3,
-        "offer_threshold": 3,
-        "surplus_threshold": 4,
-        "shortage_threshold": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "livestock": {
-        "id": "livestock",
-        "name": "adult cattle",
-        "tier": 2,
-        "tradeable": true,
-        "batch_qty": 1,
-        "batch_price": 5,
-        "offer_threshold": 3,
-        "surplus_threshold": 4,
-        "shortage_threshold": 1,
-        "mass_units": 6,
-        "nutrition_units": 6,
-        "living": {
-          "interval_ticks": 96,
-          "supplies": {
-            "water": 1
-          },
-          "resource_pool": "pasture_grass",
-          "resource_draw": 2,
-          "death_after_ticks": 672,
-          "source": "scenario husbandry budget: each animal drinks one water and grazes two grass daily; seven unfed days exhaust survival budget, not veterinary calibration"
-        }
-      },
-      "martial_manual": {
-        "id": "martial_manual",
-        "name": "boxing manual",
-        "tier": 3,
-        "combat_bonus": 2,
-        "tradeable": true,
-        "batch_qty": 1,
-        "batch_price": 5,
-        "offer_threshold": 2,
-        "surplus_threshold": 2,
-        "shortage_threshold": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "meat": {
-        "id": "meat",
-        "name": "cured meat",
-        "tier": 2,
-        "edible": true,
-        "tradeable": true,
-        "batch_qty": 2,
-        "batch_price": 4,
-        "offer_threshold": 4,
-        "surplus_threshold": 5,
-        "shortage_threshold": 2,
-        "mass_units": 2,
-        "nutrition_units": 2
-      },
-      "medicine": {
-        "id": "medicine",
-        "name": "herbal medicine",
-        "tier": 3,
-        "medicinal_heal": 20,
-        "disease_cure": 1,
-        "tradeable": true,
-        "batch_qty": 1,
-        "batch_price": 3,
-        "offer_threshold": 3,
-        "surplus_threshold": 3,
-        "shortage_threshold": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "ore": {
-        "id": "ore",
-        "name": "ironstone ore",
-        "tier": 1,
-        "tradeable": true,
-        "batch_qty": 2,
-        "batch_price": 2,
-        "offer_threshold": 4,
-        "surplus_threshold": 4,
-        "shortage_threshold": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "plank": {
-        "id": "plank",
-        "name": "dressed planks",
-        "tier": 2,
-        "tradeable": true,
-        "batch_qty": 2,
-        "batch_price": 3,
-        "offer_threshold": 3,
-        "surplus_threshold": 3,
-        "shortage_threshold": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "qi_pill": {
-        "id": "qi_pill",
-        "name": "Qi-Gathering Pill",
-        "tier": 4,
-        "medicinal_heal": 35,
-        "disease_cure": 2,
-        "tradeable": true,
-        "batch_qty": 1,
-        "batch_price": 14,
-        "offer_threshold": 2,
-        "surplus_threshold": 2,
-        "shortage_threshold": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "rare_herb": {
-        "id": "rare_herb",
-        "name": "spirit mountain ginseng",
-        "tier": 3,
-        "tradeable": true,
-        "batch_qty": 1,
-        "batch_price": 5,
-        "offer_threshold": 2,
-        "surplus_threshold": 3,
-        "shortage_threshold": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "sacrificial_offering": {
-        "id": "sacrificial_offering",
-        "name": "ritual grain & incense offering",
-        "tier": 3,
-        "tradeable": true,
-        "batch_qty": 1,
-        "batch_price": 5,
-        "offer_threshold": 2,
-        "surplus_threshold": 3,
-        "shortage_threshold": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "scroll": {
-        "id": "scroll",
-        "name": "copied scroll",
-        "tier": 2,
-        "tradeable": true,
-        "batch_qty": 1,
-        "batch_price": 3,
-        "offer_threshold": 2,
-        "surplus_threshold": 3,
-        "shortage_threshold": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "seeds": {
-        "id": "seeds",
-        "name": "wheat seeds",
-        "tier": 1,
-        "tradeable": true,
-        "batch_qty": 3,
-        "batch_price": 1,
-        "offer_threshold": 6,
-        "surplus_threshold": 6,
-        "shortage_threshold": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "spirit_grain": {
-        "id": "spirit_grain",
-        "name": "Spirit Rice",
-        "tier": 2,
-        "edible": true,
-        "tradeable": true,
-        "batch_qty": 2,
-        "batch_price": 4,
-        "offer_threshold": 6,
-        "surplus_threshold": 6,
-        "shortage_threshold": 2,
-        "mass_units": 2,
-        "nutrition_units": 2
-      },
-      "spirit_herb": {
-        "id": "spirit_herb",
-        "name": "Jade Spirit Herb",
-        "tier": 2,
-        "tradeable": true,
-        "batch_qty": 2,
-        "batch_price": 5,
-        "offer_threshold": 4,
-        "surplus_threshold": 4,
-        "shortage_threshold": 2,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "spirit_stone": {
-        "id": "spirit_stone",
-        "name": "Low-Grade Spirit Stone",
-        "tier": 3,
-        "tradeable": true,
-        "batch_qty": 1,
-        "batch_price": 10,
-        "offer_threshold": 3,
-        "surplus_threshold": 3,
-        "shortage_threshold": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "timber": {
-        "id": "timber",
-        "name": "rough timber",
-        "tier": 1,
-        "tradeable": true,
-        "batch_qty": 2,
-        "batch_price": 2,
-        "offer_threshold": 4,
-        "surplus_threshold": 5,
-        "shortage_threshold": 2,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "tonic": {
-        "id": "tonic",
-        "name": "herbal tonics",
-        "tier": 4,
-        "medicinal_heal": 35,
-        "disease_cure": 2,
-        "tradeable": true,
-        "batch_qty": 1,
-        "batch_price": 8,
-        "offer_threshold": 2,
-        "surplus_threshold": 2,
-        "shortage_threshold": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "tools": {
-        "id": "tools",
-        "name": "hand tools",
-        "tier": 3,
-        "safety_bonus_pct": 20,
-        "tradeable": true,
-        "batch_qty": 1,
-        "batch_price": 4,
-        "offer_threshold": 2,
-        "surplus_threshold": 2,
-        "shortage_threshold": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "water": {
-        "id": "water",
-        "name": "well water",
-        "tier": 1,
-        "potable": true,
-        "thirst_relief": 2,
-        "tradeable": true,
-        "batch_qty": 2,
-        "batch_price": 1,
-        "offer_threshold": 6,
-        "surplus_threshold": 5,
-        "shortage_threshold": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "weapon": {
-        "id": "weapon",
-        "name": "steel blades",
-        "tier": 3,
-        "combat_bonus": 5,
-        "tradeable": true,
-        "batch_qty": 1,
-        "batch_price": 5,
-        "offer_threshold": 2,
-        "surplus_threshold": 2,
-        "shortage_threshold": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "winter_coat": {
-        "id": "winter_coat",
-        "name": "quilted fur coat",
-        "tier": 3,
-        "warmth_bonus": 3,
-        "tradeable": true,
-        "batch_qty": 1,
-        "batch_price": 5,
-        "offer_threshold": 2,
-        "surplus_threshold": 2,
-        "shortage_threshold": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "paper": {
-        "id": "paper",
-        "name": "paper sheets",
-        "tier": 1,
-        "tradeable": true,
-        "batch_qty": 1,
-        "batch_price": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "ink": {
-        "id": "ink",
-        "name": "writing ink",
-        "tier": 1,
-        "tradeable": true,
-        "batch_qty": 1,
-        "batch_price": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      },
-      "calf": {
-        "id": "calf",
-        "name": "cattle calf",
-        "tier": 1,
-        "tradeable": true,
-        "batch_qty": 1,
-        "batch_price": 2,
-        "mass_units": 2,
-        "nutrition_units": 2,
-        "living": {
-          "interval_ticks": 96,
-          "supplies": {
-            "water": 1
-          },
-          "resource_pool": "pasture_grass",
-          "resource_draw": 2,
-          "death_after_ticks": 672,
-          "source": "scenario husbandry budget: each animal drinks one water and grazes two grass daily; seven unfed days exhaust survival budget, not veterinary calibration"
-        }
-      },
-      "nightsoil": {
-        "id": "nightsoil",
-        "name": "collected organic waste",
-        "tier": 1,
-        "mass_units": 1,
-        "nutrition_units": 0
-      }
-    },
-    "professions": [
-      {
-        "id": "farmer",
-        "name": "crop farmer",
-        "tier": 1,
-        "guild": "sect_steward_hall",
-        "requirements": {
-          "spirit": 6,
-          "strength": 8
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "ranks": [
-          "农耕学徒",
-          "初级农夫",
-          "司农把式"
-        ]
-      },
-      {
-        "id": "gatherer",
-        "name": "forager",
-        "tier": 1,
-        "guild": "farmers_guild",
-        "requirements": {
-          "dexterity": 6
-        },
-        "max_level": 6,
-        "yield_every": 3,
-        "ranks": [
-          "采食学徒",
-          "初级采食者",
-          "山野熟手"
-        ]
-      },
-      {
-        "id": "herder",
-        "name": "牧民",
-        "tier": 1,
-        "guild": "farmers_guild",
-        "requirements": {
-          "spirit": 7,
-          "strength": 7
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "ranks": [
-          "放牧学徒",
-          "熟手牧夫",
-          "司牧把式"
-        ]
-      },
-      {
-        "id": "fisher",
-        "name": "渔民",
-        "tier": 1,
-        "guild": "waterways_guild",
-        "requirements": {
-          "dexterity": 7,
-          "strength": 7
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "grants": [
-          "water_user"
-        ],
-        "ranks": [
-          "渔舟学徒",
-          "江河渔夫",
-          "老渔把式"
-        ]
-      },
-      {
-        "id": "boatman",
-        "name": "漕工船夫",
-        "tier": 1,
-        "guild": "waterways_guild",
-        "requirements": {
-          "spirit": 7,
-          "strength": 8
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "trade_margin": true,
-        "grants": [
-          "water_carrier",
-          "water_user"
-        ],
-        "ranks": [
-          "纤夫水手",
-          "漕船艄公",
-          "老舵头"
-        ]
-      },
-      {
-        "id": "hunter",
-        "name": "猎户",
-        "tier": 1,
-        "guild": "hunters_guild",
-        "requirements": {
-          "dexterity": 8,
-          "strength": 8
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "combat_bonus_per_level": 2,
-        "grants": [
-          "fighter",
-          "hunter"
-        ],
-        "ranks": [
-          "巡林学徒",
-          "进山猎手",
-          "熟山老猎"
-        ]
-      },
-      {
-        "id": "ritualist",
-        "name": "祠祝巫祝",
-        "tier": 1,
-        "guild": "shrine_guild",
-        "requirements": {
-          "insight": 8,
-          "spirit": 8
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "grants": [
-          "ritual"
-        ],
-        "ranks": [
-          "洒扫庙祝",
-          "司礼祝官",
-          "奉常大祝"
-        ]
-      },
-      {
-        "id": "woodcutter",
-        "name": "woodcutter",
-        "tier": 1,
-        "guild": "artisans_guild",
-        "requirements": {
-          "strength": 8
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "ranks": [
-          "伐木学徒",
-          "初级樵夫",
-          "林木匠师"
-        ]
-      },
-      {
-        "id": "carpenter",
-        "name": "carpenter",
-        "tier": 1,
-        "guild": "artisans_guild",
-        "requirements": {
-          "dexterity": 8,
-          "insight": 7
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "ranks": [
-          "木工学徒",
-          "初级木匠",
-          "营造匠师"
-        ]
-      },
-      {
-        "id": "miner",
-        "name": "miner",
-        "tier": 1,
-        "guild": "artisans_guild",
-        "requirements": {
-          "strength": 8
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "ranks": [
-          "采矿学徒",
-          "初级矿工",
-          "寻脉匠师"
-        ]
-      },
-      {
-        "id": "blacksmith",
-        "name": "blacksmith",
-        "tier": 1,
-        "guild": "artisans_guild",
-        "requirements": {
-          "insight": 8,
-          "strength": 10
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "ranks": [
-          "锻造学徒",
-          "初级铁匠",
-          "匠师"
-        ]
-      },
-      {
-        "id": "herbalist",
-        "name": "herbalist",
-        "tier": 1,
-        "guild": "alchemy_pavilion",
-        "requirements": {
-          "insight": 9,
-          "spirit": 7
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "grants": [
-          "water_user"
-        ],
-        "ranks": [
-          "采药学徒",
-          "初级药师",
-          "司药匠师"
-        ]
-      },
-      {
-        "id": "healer",
-        "name": "healer",
-        "tier": 1,
-        "guild": "alchemy_pavilion",
-        "requirements": {
-          "insight": 10,
-          "spirit": 9
-        },
-        "max_level": 6,
-        "yield_every": 3,
-        "grants": [
-          "healer",
-          "water_user"
-        ],
-        "ranks": [
-          "医馆学徒",
-          "初级医者",
-          "杏林医师"
-        ]
-      },
-      {
-        "id": "peddler",
-        "name": "peddler",
-        "tier": 1,
-        "guild": "sect_steward_hall",
-        "requirements": {
-          "insight": 7,
-          "spirit": 8
-        },
-        "max_level": 6,
-        "yield_every": 3,
-        "trade_margin": true,
-        "grants": [
-          "land_carrier"
-        ],
-        "ranks": [
-          "商铺学徒",
-          "初级行商",
-          "行商掌柜"
-        ]
-      },
-      {
-        "id": "guard",
-        "name": "guard",
-        "tier": 1,
-        "guild": "watch_guild",
-        "requirements": {
-          "spirit": 8,
-          "strength": 10
-        },
-        "max_level": 6,
-        "yield_every": 3,
-        "combat_bonus_per_level": 3,
-        "grants": [
-          "fighter",
-          "law"
-        ],
-        "ranks": [
-          "巡防学徒",
-          "初级武侯",
-          "巡守教头"
-        ]
-      },
-      {
-        "id": "scholar",
-        "name": "读书人",
-        "tier": 1,
-        "guild": "azure_cloud_sect_guild",
-        "requirements": {
-          "insight": 9,
-          "spirit": 7
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "ranks": [
-          "蒙学读书人",
-          "通经书生",
-          "宿儒"
-        ]
-      },
-      {
-        "id": "martial_artist",
-        "name": "武师",
-        "tier": 1,
-        "guild": "martial_guild",
-        "requirements": {
-          "dexterity": 8,
-          "strength": 9
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "combat_bonus_per_level": 3,
-        "grants": [
-          "fighter",
-          "martial"
-        ],
-        "ranks": [
-          "武馆学徒",
-          "趟子手",
-          "武馆拳师"
-        ]
-      },
-      {
-        "id": "constable",
-        "name": "捕快",
-        "tier": 1,
-        "guild": "azure_cloud_sect_guild",
-        "requirements": {
-          "dexterity": 8,
-          "insight": 8,
-          "strength": 9
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "combat_bonus_per_level": 3,
-        "grants": [
-          "fighter",
-          "law"
-        ],
-        "ranks": [
-          "白役差人",
-          "府衙捕快",
-          "刑名缉捕"
-        ]
-      },
-      {
-        "id": "bandit",
-        "name": "山贼",
-        "tier": 1,
-        "guild": "bandits_guild",
-        "requirements": {
-          "dexterity": 7,
-          "strength": 9
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "combat_bonus_per_level": 3,
-        "grants": [
-          "fighter",
-          "outlaw",
-          "raider"
-        ],
-        "ranks": [
-          "落草喽啰",
-          "山寨悍匪",
-          "巡山头目"
-        ]
-      },
-      {
-        "id": "thief",
-        "name": "小偷",
-        "tier": 1,
-        "guild": "gang_guild",
-        "requirements": {
-          "dexterity": 9,
-          "insight": 7
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "grants": [
-          "thief",
-          "outlaw"
-        ],
-        "ranks": [
-          "摸包小贼",
-          "穿窬惯窃",
-          "妙手空空"
-        ]
-      },
-      {
-        "id": "gangster",
-        "name": "帮众",
-        "tier": 1,
-        "guild": "gang_guild",
-        "requirements": {
-          "spirit": 8,
-          "strength": 8
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "combat_bonus_per_level": 3,
-        "grants": [
-          "fighter",
-          "outlaw",
-          "gang"
-        ],
-        "ranks": [
-          "帮派外围",
-          "红棍帮众",
-          "堂口香主"
-        ]
-      },
-      {
-        "id": "xiucai",
-        "name": "秀才",
-        "tier": 2,
-        "guild": "scholars_guild",
-        "parent_profession": "scholar",
-        "min_parent_level": 2,
-        "requirements": {
-          "insight": 11,
-          "spirit": 9
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "base_yield_bonus": 1,
-        "grants": [
-          "censor"
-        ],
-        "ranks": [
-          "新科秀才",
-          "凛膳秀才",
-          "贡生学士"
-        ]
-      },
-      {
-        "id": "master_smith",
-        "name": "匠师",
-        "tier": 2,
-        "guild": "artisans_guild",
-        "parent_profession": "blacksmith",
-        "min_parent_level": 2,
-        "requirements": {
-          "insight": 9,
-          "strength": 11
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "base_yield_bonus": 1,
-        "ranks": [
-          "初阶匠师",
-          "精锻匠师",
-          "大匠师"
-        ]
-      },
-      {
-        "id": "master_carpenter",
-        "name": "大木匠师",
-        "tier": 2,
-        "guild": "artisans_guild",
-        "parent_profession": "carpenter",
-        "min_parent_level": 2,
-        "requirements": {
-          "dexterity": 10,
-          "insight": 8
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "base_yield_bonus": 1,
-        "ranks": [
-          "司木匠师",
-          "营造大匠",
-          "都料匠师"
-        ]
-      },
-      {
-        "id": "agronomist",
-        "name": "农师",
-        "tier": 2,
-        "guild": "farmers_guild",
-        "parent_profession": "farmer",
-        "min_parent_level": 2,
-        "requirements": {
-          "insight": 8,
-          "strength": 10
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "base_yield_bonus": 1,
-        "ranks": [
-          "初阶农师",
-          "司稼农师",
-          "大司农"
-        ]
-      },
-      {
-        "id": "ranch_master",
-        "name": "牧正",
-        "tier": 2,
-        "guild": "farmers_guild",
-        "parent_profession": "herder",
-        "min_parent_level": 2,
-        "requirements": {
-          "spirit": 9,
-          "strength": 9
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "base_yield_bonus": 1,
-        "ranks": [
-          "苑囿副正",
-          "北牧监正",
-          "太仆牧师"
-        ]
-      },
-      {
-        "id": "fleet_master",
-        "name": "渔帮总舵",
-        "tier": 2,
-        "guild": "waterways_guild",
-        "parent_profession": "fisher",
-        "min_parent_level": 2,
-        "requirements": {
-          "dexterity": 9,
-          "strength": 9
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "base_yield_bonus": 1,
-        "grants": [
-          "water_user"
-        ],
-        "ranks": [
-          "渔队把头",
-          "江防渔总",
-          "水泊总舵"
-        ]
-      },
-      {
-        "id": "canal_master",
-        "name": "漕帮总舵",
-        "tier": 2,
-        "guild": "waterways_guild",
-        "parent_profession": "boatman",
-        "min_parent_level": 2,
-        "requirements": {
-          "insight": 8,
-          "spirit": 9,
-          "strength": 9
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "base_yield_bonus": 1,
-        "trade_margin": true,
-        "grants": [
-          "water_carrier",
-          "water_user"
-        ],
-        "ranks": [
-          "运河押运官",
-          "漕帮香主",
-          "通济总漕"
-        ]
-      },
-      {
-        "id": "master_hunter",
-        "name": "猎王山神卫",
-        "tier": 2,
-        "guild": "hunters_guild",
-        "parent_profession": "hunter",
-        "min_parent_level": 2,
-        "requirements": {
-          "dexterity": 10,
-          "strength": 10
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "base_yield_bonus": 1,
-        "combat_bonus_per_level": 2,
-        "grants": [
-          "fighter",
-          "hunter"
-        ],
-        "ranks": [
-          "巡山总猎",
-          "镇山猎头",
-          "百兽猎王"
-        ]
-      },
-      {
-        "id": "high_priest",
-        "name": "大司祝",
-        "tier": 2,
-        "guild": "shrine_guild",
-        "parent_profession": "ritualist",
-        "min_parent_level": 2,
-        "requirements": {
-          "insight": 10,
-          "spirit": 10
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "base_yield_bonus": 1,
-        "grants": [
-          "ritual"
-        ],
-        "ranks": [
-          "太祝令",
-          "奉常博士",
-          "社稷大宗伯"
-        ]
-      },
-      {
-        "id": "alchemist",
-        "name": "丹药师",
-        "tier": 2,
-        "guild": "healers_guild",
-        "parent_profession": "herbalist",
-        "min_parent_level": 2,
-        "requirements": {
-          "insight": 11,
-          "spirit": 8
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "base_yield_bonus": 1,
-        "grants": [
-          "water_user"
-        ],
-        "ranks": [
-          "司药丹师",
-          "炼药宗师",
-          "国医丹师"
-        ]
-      },
-      {
-        "id": "merchant_chief",
-        "name": "大掌柜",
-        "tier": 2,
-        "guild": "merchants_guild",
-        "parent_profession": "peddler",
-        "min_parent_level": 2,
-        "requirements": {
-          "insight": 9,
-          "spirit": 10
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "base_yield_bonus": 1,
-        "trade_margin": true,
-        "grants": [
-          "land_carrier"
-        ],
-        "ranks": [
-          "分号掌柜",
-          "大掌柜",
-          "商帮总管"
-        ]
-      },
-      {
-        "id": "captain",
-        "name": "都头",
-        "tier": 2,
-        "guild": "watch_guild",
-        "parent_profession": "guard",
-        "min_parent_level": 2,
-        "requirements": {
-          "spirit": 9,
-          "strength": 12
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "base_yield_bonus": 1,
-        "combat_bonus_per_level": 3,
-        "grants": [
-          "fighter",
-          "law"
-        ],
-        "ranks": [
-          "副都头",
-          "巡防都头",
-          "总巡检"
-        ]
-      },
-      {
-        "id": "martial_master",
-        "name": "武学宗师",
-        "tier": 2,
-        "guild": "martial_guild",
-        "parent_profession": "martial_artist",
-        "min_parent_level": 2,
-        "requirements": {
-          "dexterity": 9,
-          "spirit": 8,
-          "strength": 11
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "base_yield_bonus": 1,
-        "combat_bonus_per_level": 3,
-        "grants": [
-          "fighter",
-          "martial"
-        ],
-        "ranks": [
-          "内家拳师",
-          "武馆总教习",
-          "武学大宗师"
-        ]
-      },
-      {
-        "id": "chief_constable",
-        "name": "总捕头",
-        "tier": 2,
-        "guild": "yamen_guild",
-        "parent_profession": "constable",
-        "min_parent_level": 2,
-        "requirements": {
-          "dexterity": 9,
-          "insight": 9,
-          "strength": 11
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "base_yield_bonus": 1,
-        "combat_bonus_per_level": 3,
-        "grants": [
-          "fighter",
-          "law",
-          "censor"
-        ],
-        "ranks": [
-          "铁血捕头",
-          "六扇门总捕",
-          "提刑按察使"
-        ]
-      },
-      {
-        "id": "bandit_leader",
-        "name": "山大王",
-        "tier": 2,
-        "guild": "bandits_guild",
-        "parent_profession": "bandit",
-        "min_parent_level": 2,
-        "requirements": {
-          "dexterity": 8,
-          "spirit": 8,
-          "strength": 11
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "base_yield_bonus": 1,
-        "combat_bonus_per_level": 3,
-        "grants": [
-          "fighter",
-          "outlaw",
-          "raider"
-        ],
-        "ranks": [
-          "分寨瓢把子",
-          "黑风寨主",
-          "绿林总瓢把子"
-        ]
-      },
-      {
-        "id": "master_thief",
-        "name": "盗帅",
-        "tier": 2,
-        "guild": "gang_guild",
-        "parent_profession": "thief",
-        "min_parent_level": 2,
-        "requirements": {
-          "dexterity": 11,
-          "insight": 9
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "base_yield_bonus": 1,
-        "grants": [
-          "thief",
-          "outlaw"
-        ],
-        "ranks": [
-          "飞贼头目",
-          "夜行盗圣",
-          "千手盗帅"
-        ]
-      },
-      {
-        "id": "gang_boss",
-        "name": "帮主",
-        "tier": 2,
-        "guild": "gang_guild",
-        "parent_profession": "gangster",
-        "min_parent_level": 2,
-        "requirements": {
-          "insight": 8,
-          "spirit": 9,
-          "strength": 10
-        },
-        "max_level": 6,
-        "yield_every": 2,
-        "base_yield_bonus": 1,
-        "combat_bonus_per_level": 3,
-        "grants": [
-          "fighter",
-          "outlaw",
-          "gang"
-        ],
-        "ranks": [
-          "分堂舵主",
-          "双花大红棍",
-          "帮派龙头"
-        ]
-      },
-      {
-        "id": "spirit_farmer",
-        "name": "Spirit Herb Cultivator",
-        "tier": 1,
-        "guild": "sect_steward_hall",
-        "max_level": 5,
-        "yield_every": 2,
-        "base_yield_bonus": 1,
-        "grants": [
-          "spirit_farmer",
-          "water_user"
-        ],
-        "ranks": [
-          "Outer Tender",
-          "Spirit Planter",
-          "Vein Keeper"
-        ]
-      },
-      {
-        "id": "pill_alchemist",
-        "name": "Pill Alchemist",
-        "tier": 2,
-        "guild": "alchemy_pavilion",
-        "max_level": 6,
-        "yield_every": 2,
-        "base_yield_bonus": 1,
-        "grants": [
-          "pill_alchemist",
-          "healer",
-          "cultivator"
-        ],
-        "ranks": [
-          "Furnace Apprentice",
-          "Dan Master",
-          "Grand Alchemist"
-        ]
-      },
-      {
-        "id": "sword_cultivator",
-        "name": "Sword Cultivator",
-        "tier": 2,
-        "guild": "azure_cloud_sect_guild",
-        "max_level": 6,
-        "combat_bonus_per_level": 5,
-        "grants": [
-          "fighter",
-          "martial",
-          "cultivator",
-          "flying_sword"
-        ],
-        "ranks": [
-          "Qi Condensation",
-          "Foundation",
-          "Core Formation"
-        ]
-      }
-    ],
-    "recipes": [
-      {
-        "growth": {
-          "duration_ticks": 5760,
-          "maintenance_interval_ticks": 96,
-          "supplies": {
-            "water": 1
-          },
-          "source": "UMN Extension: well-managed warm-season compost 2-4 months; preset uses 60 days"
-        },
-        "id": "compost_waste",
-        "label": "Mature collected organic waste into compost",
-        "profession": "farmer",
-        "min_profession_level": 1,
-        "house_facility": "compost_pit",
-        "ticks": 2,
-        "energy_cost": 6,
-        "inputs": {
-          "nightsoil": 3
-        },
-        "output_item": "compost",
-        "output_qty": 1,
-        "conversion": {
-          "source": "configured biological assimilation from growth supplies, environment and retained parents; UMN Extension: well-managed warm-season compost 2-4 months; preset uses 60 days",
-          "external_mass_units": 0,
-          "external_nutrition_units": 0
-        }
-      },
-      {
-        "id": "save_seeds",
-        "label": "Select crop seed from stored grain",
-        "profession": "farmer",
-        "min_profession_level": 1,
-        "ticks": 1,
-        "energy_cost": 2,
-        "inputs": {
-          "food": 1
-        },
-        "output_item": "seeds",
-        "output_qty": 1,
-        "conversion": {
-          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
-      },
-      {
-        "id": "fetch_water",
-        "label": "Draw 2 buckets of water at the creek well",
-        "required_tag": "water_user",
-        "node_feature": "water_source",
-        "resource_pool": "water_table",
-        "resource_draw": 1,
-        "ticks": 2,
-        "energy_cost": 5,
-        "output_item": "water",
-        "output_qty": 2,
-        "conversion": {
-          "source": "finite water_table extraction: 1 resource units fund at most 2 output units",
-          "external_mass_units": 2,
-          "external_nutrition_units": 0
-        }
-      },
-      {
-        "growth": {
-          "duration_ticks": 5760,
-          "maintenance_interval_ticks": 96,
-          "supplies": {
-            "water": 1
-          },
-          "source": "UMN Extension: well-managed warm-season compost 2-4 months; preset uses 60 days"
-        },
-        "id": "make_compost",
-        "label": "Turn 2 compost in the yard compost pit",
-        "profession": "farmer",
-        "min_profession_level": 1,
-        "house_facility": "compost_pit",
-        "ticks": 2,
-        "energy_cost": 6,
-        "inputs": {
-          "food": 2
-        },
-        "output_item": "compost",
-        "output_qty": 2,
-        "conversion": {
-          "source": "configured biological assimilation from growth supplies, environment and retained parents; UMN Extension: well-managed warm-season compost 2-4 months; preset uses 60 days",
-          "external_mass_units": 0,
-          "external_nutrition_units": 0
-        }
-      },
-      {
-        "growth": {
-          "duration_ticks": 11520,
-          "maintenance_interval_ticks": 96,
-          "supplies": {
-            "water": 1
-          },
-          "source": "FAO crop water needs: wheat 120-150 days; preset uses 120 days; scenario care-survival budget: seven continuous days without required care ends the batch; not a measured species mortality threshold",
-          "failure_after_ticks": 672
-        },
-        "id": "farm_grain",
-        "label": "Irrigate, tend, and harvest grain in the fields",
-        "profession": "farmer",
-        "min_profession_level": 1,
-        "node_feature": "farmland",
-        "resource_pool": "soil_fertility",
-        "resource_draw": 2,
-        "ticks": 4,
-        "energy_cost": 14,
-        "inputs": {
-          "seeds": 1,
-          "water": 1
-        },
-        "bonus_input": "compost",
-        "bonus_output": 1,
-        "output_item": "food",
-        "output_qty": 1200,
-        "conversion": {
-          "source": "configured biological assimilation from growth supplies, environment and retained parents; FAO crop water needs: wheat 120-150 days; preset uses 120 days",
-          "external_mass_units": 1198,
-          "external_nutrition_units": 1201
-        }
-      },
-      {
-        "id": "thresh_choice_grain",
-        "label": "Thresh 2 choice grain for the guild stores",
-        "profession": "farmer",
-        "min_profession_level": 2,
-        "min_faction_level": 2,
-        "node_feature": "farmland",
-        "ticks": 4,
-        "energy_cost": 14,
-        "inputs": {
-          "food": 2
-        },
-        "output_item": "choice_grain",
-        "output_qty": 2,
-        "conversion": {
-          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
-      },
-      {
-        "id": "forage_food",
-        "label": "Forage wild food from field margins and woods",
-        "profession": "gatherer",
-        "min_profession_level": 1,
-        "node_feature": "forage_ground",
-        "resource_pool": "soil_fertility",
-        "resource_draw": 1,
-        "ticks": 3,
-        "energy_cost": 9,
-        "output_item": "food",
-        "output_qty": 1,
-        "conversion": {
-          "source": "finite soil_fertility extraction: 1 resource units fund at most 1 output units",
-          "external_mass_units": 1,
-          "external_nutrition_units": 1
-        }
-      },
-      {
-        "id": "fell_timber",
-        "label": "Fell and trim 2 timber in the north woods",
-        "profession": "woodcutter",
-        "min_profession_level": 1,
-        "node_feature": "woodland",
-        "resource_pool": "timber_stand",
-        "resource_draw": 2,
-        "ticks": 3,
-        "energy_cost": 12,
-        "bonus_input": "tools",
-        "bonus_output": 1,
-        "durable_bonus": true,
-        "output_item": "timber",
-        "output_qty": 2,
-        "conversion": {
-          "source": "finite timber_stand extraction: 2 resource units fund at most 2 output units",
-          "external_mass_units": 2,
-          "external_nutrition_units": 0
-        }
-      },
-      {
-        "id": "saw_planks",
-        "label": "Saw 2 timber into 2 roof planks at carpentry bench",
-        "profession": "carpenter",
-        "min_profession_level": 1,
-        "house_facility": "carpentry_bench",
-        "ticks": 3,
-        "energy_cost": 10,
-        "inputs": {
-          "timber": 2
-        },
-        "bonus_input": "tools",
-        "bonus_output": 1,
-        "durable_bonus": true,
-        "output_item": "plank",
-        "output_qty": 2,
-        "conversion": {
-          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
-      },
-      {
-        "id": "sew_winter_coat",
-        "label": "Craft 1 quilted winter fur coat from 2 cured hides",
-        "profession": "carpenter",
-        "min_profession_level": 2,
-        "house_facility": "carpentry_bench",
-        "ticks": 3,
-        "energy_cost": 10,
-        "inputs": {
-          "hide": 2
-        },
-        "output_item": "winter_coat",
-        "output_qty": 1,
-        "conversion": {
-          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
-      },
-      {
-        "id": "mine_ore",
-        "label": "Collect 2 ironstone ore from rocky woodland",
-        "profession": "miner",
-        "min_profession_level": 1,
-        "node_feature": "woodland",
-        "resource_pool": "ore_vein",
-        "resource_draw": 2,
-        "ticks": 3,
-        "energy_cost": 13,
-        "output_item": "ore",
-        "output_qty": 2,
-        "conversion": {
-          "source": "finite ore_vein extraction: 2 resource units fund at most 2 output units",
-          "external_mass_units": 2,
-          "external_nutrition_units": 0
-        }
-      },
-      {
-        "id": "deep_shaft_ore",
-        "label": "Excavate 3 rich ironstone ore from deep mountain shaft",
-        "profession": "miner",
-        "min_profession_level": 1,
-        "node_feature": "mine_shaft",
-        "resource_pool": "ore_vein",
-        "resource_draw": 3,
-        "ticks": 3,
-        "energy_cost": 13,
-        "bonus_input": "tools",
-        "bonus_output": 1,
-        "durable_bonus": true,
-        "output_item": "ore",
-        "output_qty": 3,
-        "conversion": {
-          "source": "finite ore_vein extraction: 3 resource units fund at most 3 output units",
-          "external_mass_units": 3,
-          "external_nutrition_units": 0
-        }
-      },
-      {
-        "id": "forge_tools",
-        "label": "Forge durable hand tools from ore and timber",
-        "profession": "blacksmith",
-        "min_profession_level": 1,
-        "house_facility": "forge",
-        "ticks": 4,
-        "energy_cost": 14,
-        "inputs": {
-          "ore": 1,
-          "timber": 1
-        },
-        "output_item": "tools",
-        "output_qty": 1,
-        "conversion": {
-          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
-      },
-      {
-        "id": "forge_fine_tools",
-        "label": "Forge a masterwork fine tool set for the guild",
-        "profession": "blacksmith",
-        "min_profession_level": 3,
-        "min_faction_level": 3,
-        "house_facility": "forge",
-        "ticks": 4,
-        "energy_cost": 16,
-        "inputs": {
-          "ore": 1,
-          "tools": 1
-        },
-        "output_item": "fine_tools",
-        "output_qty": 1,
-        "conversion": {
-          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
-      },
-      {
-        "id": "gather_herbs",
-        "label": "Gather 2 mountain herbs in the north woods",
-        "profession": "herbalist",
-        "min_profession_level": 1,
-        "node_feature": "herb_patch",
-        "resource_pool": "herb_bed",
-        "resource_draw": 2,
-        "ticks": 2,
-        "energy_cost": 7,
-        "output_item": "herb",
-        "output_qty": 2,
-        "conversion": {
-          "source": "finite herb_bed extraction: 2 resource units fund at most 2 output units",
-          "external_mass_units": 2,
-          "external_nutrition_units": 0
-        }
-      },
-      {
-        "id": "brew_medicine",
-        "label": "Steep herbs and well water into 2 herbal medicines",
-        "profession": "herbalist",
-        "min_profession_level": 1,
-        "house_facility": "herb_rack",
-        "ticks": 3,
-        "energy_cost": 8,
-        "inputs": {
-          "herb": 2,
-          "water": 1
-        },
-        "output_item": "medicine",
-        "output_qty": 2,
-        "conversion": {
-          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
-      },
-      {
-        "id": "distill_tonic",
-        "label": "Distill 2 potent tonics at the herb rack",
-        "profession": "herbalist",
-        "min_profession_level": 3,
-        "min_faction_level": 2,
-        "house_facility": "herb_rack",
-        "ticks": 3,
-        "energy_cost": 10,
-        "inputs": {
-          "herb": 1,
-          "medicine": 2
-        },
-        "output_item": "tonic",
-        "output_qty": 2,
-        "conversion": {
-          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
-      },
-      {
-        "id": "refine_elixir_tonic",
-        "label": "Refine 3 spirit tonics from rare mountain herbs",
-        "profession": "alchemist",
-        "min_profession_level": 1,
-        "house_facility": "herb_rack",
-        "ticks": 3,
-        "energy_cost": 10,
-        "inputs": {
-          "rare_herb": 1,
-          "water": 2
-        },
-        "output_item": "tonic",
-        "output_qty": 3,
-        "conversion": {
-          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
-      },
-      {
-        "id": "transcribe_scroll",
-        "label": "Transcribe 1 classical scroll at the academy",
-        "profession": "scholar",
-        "min_profession_level": 1,
-        "node_feature": "academy",
-        "ticks": 3,
-        "energy_cost": 8,
-        "inputs": {
-          "ink": 1,
-          "paper": 1
-        },
-        "output_item": "scroll",
-        "output_qty": 1,
-        "conversion": {
-          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
-      },
-      {
-        "id": "compile_classic",
-        "label": "Compile 1 annotated classic treatise as a xiucai",
-        "profession": "xiucai",
-        "min_profession_level": 1,
-        "node_feature": "academy",
-        "ticks": 4,
-        "energy_cost": 11,
-        "inputs": {
-          "scroll": 1
-        },
-        "output_item": "classic_tome",
-        "output_qty": 1,
-        "conversion": {
-          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
-      },
-      {
-        "id": "practice_martial_arts",
-        "label": "Drill forms and compile 1 boxing manual at the martial hall",
-        "profession": "martial_artist",
-        "min_profession_level": 1,
-        "node_feature": "martial_hall",
-        "ticks": 3,
-        "energy_cost": 10,
-        "inputs": {
-          "ink": 1,
-          "paper": 1
-        },
-        "bonus_input": "weapon",
-        "bonus_output": 1,
-        "durable_bonus": true,
-        "output_item": "martial_manual",
-        "output_qty": 1,
-        "conversion": {
-          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
-      },
-      {
-        "id": "temper_weapon",
-        "label": "Temper 1 steel blade from ore and timber at the martial hall",
-        "profession": "martial_artist",
-        "min_profession_level": 2,
-        "node_feature": "martial_hall",
-        "ticks": 4,
-        "energy_cost": 13,
-        "inputs": {
-          "ore": 1,
-          "timber": 1
-        },
-        "output_item": "weapon",
-        "output_qty": 1,
-        "conversion": {
-          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
-      },
-      {
-        "id": "issue_bounty_writ",
-        "label": "Investigate cases and issue 1 yamen bounty writ",
-        "profession": "constable",
-        "min_profession_level": 1,
-        "node_feature": "yamen",
-        "ticks": 3,
-        "energy_cost": 9,
-        "inputs": {
-          "ink": 1,
-          "paper": 1
-        },
-        "bonus_input": "scroll",
-        "bonus_output": 1,
-        "output_item": "bounty_writ",
-        "output_qty": 1,
-        "conversion": {
-          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
-      },
-      {
-        "growth": {
-          "duration_ticks": 27168,
-          "maintenance_interval_ticks": 96,
-          "supplies": {
-            "water": 1
-          },
-          "resource_pool": "pasture_grass",
-          "resource_draw": 2,
-          "parents": {
-            "livestock": 2
-          },
-          "source": "UNL Beef: cattle gestation typically 283 days; breeding pair and care inputs declared by this preset; scenario care-survival budget: seven continuous days without required care ends the batch; not a measured species mortality threshold",
-          "failure_after_ticks": 672
-        },
-        "id": "graze_livestock",
-        "label": "Graze and breed 1 pasture livestock herd",
-        "profession": "herder",
-        "min_profession_level": 1,
-        "node_feature": "pasture",
-        "resource_pool": "pasture_grass",
-        "resource_draw": 2,
-        "ticks": 3,
-        "energy_cost": 11,
-        "bonus_input": "water",
-        "bonus_output": 1,
-        "output_item": "calf",
-        "output_qty": 1,
-        "conversion": {
-          "source": "configured biological assimilation from growth supplies, environment and retained parents; UNL Beef: cattle gestation typically 283 days; breeding pair and care inputs declared by this preset",
-          "external_mass_units": 3,
-          "external_nutrition_units": 4
-        }
-      },
-      {
-        "id": "butcher_stock",
-        "label": "Dress 1 livestock into 3 cured meat rations",
-        "profession": "herder",
-        "min_profession_level": 1,
-        "node_feature": "pasture",
-        "ticks": 3,
-        "energy_cost": 10,
-        "inputs": {
-          "livestock": 1
-        },
-        "output_item": "meat",
-        "output_qty": 3,
-        "conversion": {
-          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
-      },
-      {
-        "id": "tan_pasture_hide",
-        "label": "Cure 2 hides from pasture stock",
-        "profession": "herder",
-        "min_profession_level": 2,
-        "node_feature": "pasture",
-        "ticks": 3,
-        "energy_cost": 9,
-        "inputs": {
-          "livestock": 1
-        },
-        "output_item": "hide",
-        "output_qty": 2,
-        "conversion": {
-          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
-      },
-      {
-        "id": "net_fish",
-        "label": "Cast nets and land 3 river fish at fishery waters",
-        "profession": "fisher",
-        "min_profession_level": 1,
-        "node_feature": "fishery_waters",
-        "resource_pool": "fish_stock",
-        "resource_draw": 2,
-        "ticks": 3,
-        "energy_cost": 10,
-        "bonus_input": "tools",
-        "bonus_output": 1,
-        "durable_bonus": true,
-        "output_item": "fish",
-        "output_qty": 3,
-        "conversion": {
-          "source": "finite fish_stock extraction: 2 resource units fund at most 3 output units",
-          "external_mass_units": 3,
-          "external_nutrition_units": 3
-        }
-      },
-      {
-        "id": "haul_canal_water",
-        "label": "Haul 4 barrels of clean river water at canal wharf",
-        "profession": "boatman",
-        "min_profession_level": 1,
-        "node_feature": "canal_wharf",
-        "resource_pool": "water_table",
-        "resource_draw": 2,
-        "ticks": 2,
-        "energy_cost": 7,
-        "output_item": "water",
-        "output_qty": 4,
-        "conversion": {
-          "source": "finite water_table extraction: 2 resource units fund at most 4 output units",
-          "external_mass_units": 4,
-          "external_nutrition_units": 0
-        }
-      },
-      {
-        "id": "hunt_game",
-        "label": "Track and hunt wild game for 2 cured meat rations",
-        "profession": "hunter",
-        "min_profession_level": 1,
-        "node_feature": "hunting_ground",
-        "resource_pool": "game_herd",
-        "resource_draw": 2,
-        "ticks": 3,
-        "energy_cost": 12,
-        "bonus_input": "weapon",
-        "bonus_output": 1,
-        "durable_bonus": true,
-        "output_item": "meat",
-        "output_qty": 2,
-        "conversion": {
-          "source": "finite game_herd extraction: 2 resource units fund at most 2 output units",
-          "external_mass_units": 4,
-          "external_nutrition_units": 4
-        }
-      },
-      {
-        "id": "trap_pelts",
-        "label": "Trap mountain beasts for 2 cured hides",
-        "profession": "hunter",
-        "min_profession_level": 1,
-        "node_feature": "hunting_ground",
-        "resource_pool": "game_herd",
-        "resource_draw": 1,
-        "ticks": 3,
-        "energy_cost": 11,
-        "bonus_input": "tools",
-        "bonus_output": 1,
-        "durable_bonus": true,
-        "output_item": "hide",
-        "output_qty": 2,
-        "conversion": {
-          "source": "finite game_herd extraction: 1 resource units fund at most 2 output units",
-          "external_mass_units": 2,
-          "external_nutrition_units": 0
-        }
-      },
-      {
-        "id": "forage_rare_herb",
-        "label": "Scale cliffs in hunting grounds for 1 spirit mountain ginseng",
-        "profession": "hunter",
-        "min_profession_level": 2,
-        "node_feature": "hunting_ground",
-        "resource_pool": "herb_bed",
-        "resource_draw": 2,
-        "ticks": 4,
-        "energy_cost": 12,
-        "output_item": "rare_herb",
-        "output_qty": 1,
-        "conversion": {
-          "source": "finite herb_bed extraction: 2 resource units fund at most 1 output units",
-          "external_mass_units": 1,
-          "external_nutrition_units": 0
-        }
-      },
-      {
-        "id": "prepare_offering",
-        "label": "Consecrate 2 sacrificial offerings at the grand shrine",
-        "profession": "ritualist",
-        "min_profession_level": 1,
-        "node_feature": "shrine",
-        "ticks": 3,
-        "energy_cost": 8,
-        "inputs": {
-          "food": 2
-        },
-        "bonus_input": "rare_herb",
-        "bonus_output": 1,
-        "output_item": "sacrificial_offering",
-        "output_qty": 2,
-        "conversion": {
-          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
-      },
-      {
-        "id": "gather_spirit_herb",
-        "label": "harvest jade spirit herbs",
-        "profession": "spirit_farmer",
-        "node_feature": "herb_patch",
-        "resource_pool": "herb_bed",
-        "resource_draw": 2,
-        "ticks": 2,
-        "energy_cost": 10,
-        "output_item": "spirit_herb",
-        "output_qty": 2,
-        "conversion": {
-          "source": "finite herb_bed extraction: 2 resource units fund at most 2 output units",
-          "external_mass_units": 2,
-          "external_nutrition_units": 0
-        }
-      },
-      {
-        "id": "cultivate_spirit_grain",
-        "label": "cultivate spirit rice",
-        "profession": "spirit_farmer",
-        "node_feature": "farmland",
-        "resource_pool": "soil_fertility",
-        "resource_draw": 2,
-        "ticks": 2,
-        "energy_cost": 12,
-        "inputs": {
-          "water": 1
-        },
-        "output_item": "spirit_grain",
-        "output_qty": 3,
-        "growth": {
-          "duration_ticks": 11520,
-          "maintenance_interval_ticks": 96,
-          "supplies": {
-            "water": 1
-          },
-          "source": "WorldPack cultivation cycle; configure this explicitly for accelerated spirit crops; scenario care-survival budget: seven continuous days without required care ends the batch; not a measured species mortality threshold",
-          "failure_after_ticks": 672
-        },
-        "conversion": {
-          "source": "configured biological assimilation from growth supplies, environment and retained parents; WorldPack cultivation cycle; configure this explicitly for accelerated spirit crops",
-          "external_mass_units": 5,
-          "external_nutrition_units": 6
-        }
-      },
-      {
-        "id": "refine_qi_pill",
-        "label": "refine qi-gathering pills",
-        "profession": "pill_alchemist",
-        "house_facility": "herb_rack",
-        "ticks": 2,
-        "energy_cost": 14,
-        "inputs": {
-          "spirit_herb": 2,
-          "water": 1
-        },
-        "output_item": "qi_pill",
-        "output_qty": 2,
-        "conversion": {
-          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
-      },
-      {
-        "id": "make_paper",
-        "label": "Prepare paper from timber pulp",
-        "profession": "scholar",
-        "min_profession_level": 1,
-        "node_feature": "academy",
-        "ticks": 3,
-        "energy_cost": 8,
-        "inputs": {
-          "timber": 1,
-          "water": 1
-        },
-        "output_item": "paper",
-        "output_qty": 1,
-        "conversion": {
-          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
-      },
-      {
-        "id": "make_ink",
-        "label": "Prepare writing ink from plant pigment",
-        "profession": "scholar",
-        "min_profession_level": 1,
-        "node_feature": "academy",
-        "ticks": 3,
-        "energy_cost": 8,
-        "inputs": {
-          "herb": 1,
-          "water": 1
-        },
-        "output_item": "ink",
-        "output_qty": 1,
-        "conversion": {
-          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
-        }
-      },
-      {
-        "growth": {
-          "duration_ticks": 43200,
-          "maintenance_interval_ticks": 96,
-          "supplies": {
-            "water": 1
-          },
-          "resource_pool": "pasture_grass",
-          "resource_draw": 2,
-          "source": "Penn State Extension: heifers ready for breeding at 13-15 months; preset uses 450 days; scenario care-survival budget: seven continuous days without required care ends the batch; not a measured species mortality threshold",
-          "failure_after_ticks": 672
-        },
-        "id": "raise_livestock",
-        "label": "Raise juvenile stock to breeding maturity",
-        "profession": "herder",
-        "min_profession_level": 1,
-        "node_feature": "pasture",
-        "ticks": 3,
-        "energy_cost": 11,
-        "inputs": {
-          "calf": 1
-        },
-        "output_item": "livestock",
-        "output_qty": 1,
-        "conversion": {
-          "source": "configured biological assimilation from growth supplies, environment and retained parents; Penn State Extension: heifers ready for breeding at 13-15 months; preset uses 450 days",
-          "external_mass_units": 4,
-          "external_nutrition_units": 4
-        }
-      }
-    ],
-    "tag_profiles": {
-      "agronomist": {
-        "produces": [
-          "food",
-          "choice_grain"
-        ],
-        "consumes": [
-          "nightsoil",
-          "seeds",
-          "water",
-          "compost",
-          "tools"
-        ],
-        "target_stock": {
-          "choice_grain": 6,
-          "food": 14
-        }
-      },
-      "alchemist": {
-        "produces": [
-          "herb",
-          "medicine",
-          "tonic"
-        ],
-        "consumes": [
-          "water",
-          "rare_herb",
-          "food"
-        ],
-        "target_stock": {
-          "food": 6,
-          "herb": 2,
-          "medicine": 4,
-          "tonic": 3
-        }
-      },
-      "bandit": {
-        "consumes": [
-          "food",
-          "choice_grain",
-          "weapon",
-          "medicine"
-        ],
-        "target_stock": {
-          "food": 8,
-          "medicine": 2,
-          "weapon": 1
-        },
-        "coercive_power": true
-      },
-      "bandit_leader": {
-        "consumes": [
-          "food",
-          "choice_grain",
-          "weapon",
-          "medicine",
-          "tonic"
-        ],
-        "target_stock": {
-          "food": 10,
-          "tonic": 1,
-          "weapon": 2
-        },
-        "coercive_power": true
-      },
-      "blacksmith": {
-        "produces": [
-          "tools",
-          "fine_tools"
-        ],
-        "consumes": [
-          "ore",
-          "timber",
-          "food"
-        ],
-        "target_stock": {
-          "fine_tools": 2,
-          "food": 6,
-          "ore": 2,
-          "timber": 2,
-          "tools": 3
-        }
-      },
-      "boatman": {
-        "produces": [
-          "water"
-        ],
-        "consumes": [
-          "food",
-          "fish",
-          "plank",
-          "tools"
-        ],
-        "target_stock": {
-          "food": 6,
-          "plank": 2,
-          "water": 6
-        }
-      },
-      "canal_master": {
-        "produces": [
-          "water"
-        ],
-        "consumes": [
-          "food",
-          "choice_grain",
-          "fish",
-          "plank",
-          "fine_tools"
-        ],
-        "target_stock": {
-          "food": 8,
-          "plank": 2,
-          "water": 8
-        }
-      },
-      "captain": {
-        "consumes": [
-          "food",
-          "tools",
-          "fine_tools",
-          "weapon",
-          "bounty_writ",
-          "medicine",
-          "tonic"
-        ],
-        "target_stock": {
-          "food": 6,
-          "medicine": 2,
-          "tonic": 1
-        },
-        "coercive_power": true
-      },
-      "carpenter": {
-        "produces": [
-          "plank",
-          "winter_coat"
-        ],
-        "consumes": [
-          "timber",
-          "hide",
-          "food",
-          "tools"
-        ],
-        "target_stock": {
-          "food": 6,
-          "plank": 5,
-          "timber": 2,
-          "winter_coat": 1
-        }
-      },
-      "chief_constable": {
-        "produces": [
-          "bounty_writ"
-        ],
-        "consumes": [
-          "paper",
-          "ink",
-          "food",
-          "scroll",
-          "weapon",
-          "medicine",
-          "tonic"
-        ],
-        "target_stock": {
-          "bounty_writ": 4,
-          "food": 6,
-          "weapon": 2
-        },
-        "coercive_power": true,
-        "public_trust_duty": true
-      },
-      "constable": {
-        "produces": [
-          "bounty_writ"
-        ],
-        "consumes": [
-          "paper",
-          "ink",
-          "food",
-          "scroll",
-          "weapon",
-          "medicine"
-        ],
-        "target_stock": {
-          "bounty_writ": 3,
-          "food": 6,
-          "weapon": 1
-        },
-        "coercive_power": true,
-        "public_trust_duty": true
-      },
-      "farmer": {
-        "produces": [
-          "food",
-          "choice_grain"
-        ],
-        "consumes": [
-          "nightsoil",
-          "seeds",
-          "water",
-          "compost",
-          "tools"
-        ],
-        "target_stock": {
-          "choice_grain": 4,
-          "food": 12
-        }
-      },
-      "fighter": {
-        "consumes": [
-          "food",
-          "tools",
-          "weapon"
-        ],
-        "target_stock": {
-          "food": 6
-        },
-        "coercive_power": true
-      },
-      "fisher": {
-        "produces": [
-          "fish"
-        ],
-        "consumes": [
-          "tools",
-          "food"
-        ],
-        "target_stock": {
-          "fish": 8,
-          "food": 6
-        }
-      },
-      "fleet_master": {
-        "produces": [
-          "fish"
-        ],
-        "consumes": [
-          "tools",
-          "fine_tools",
-          "food"
-        ],
-        "target_stock": {
-          "fish": 10,
-          "food": 6
-        }
-      },
-      "gang_boss": {
-        "consumes": [
-          "food",
-          "choice_grain",
-          "weapon",
-          "medicine",
-          "tonic",
-          "martial_manual"
-        ],
-        "target_stock": {
-          "food": 8,
-          "tonic": 1,
-          "weapon": 2
-        },
-        "coercive_power": true
-      },
-      "gangster": {
-        "consumes": [
-          "food",
-          "choice_grain",
-          "weapon",
-          "medicine",
-          "martial_manual"
-        ],
-        "target_stock": {
-          "food": 6,
-          "medicine": 2,
-          "weapon": 1
-        },
-        "coercive_power": true
-      },
-      "gatherer": {
-        "produces": [
-          "food"
-        ],
-        "target_stock": {
-          "food": 5
-        }
-      },
-      "guard": {
-        "consumes": [
-          "food",
-          "tools",
-          "weapon",
-          "bounty_writ",
-          "medicine"
-        ],
-        "target_stock": {
-          "food": 6,
-          "medicine": 1
-        },
-        "coercive_power": true
-      },
-      "healer": {
-        "consumes": [
-          "medicine",
-          "tonic",
-          "food"
-        ],
-        "target_stock": {
-          "food": 6,
-          "medicine": 4,
-          "tonic": 2
-        },
-        "public_trust_duty": true
-      },
-      "herbalist": {
-        "produces": [
-          "herb",
-          "medicine",
-          "tonic"
-        ],
-        "consumes": [
-          "water",
-          "food"
-        ],
-        "target_stock": {
-          "food": 6,
-          "herb": 2,
-          "medicine": 4,
-          "tonic": 2
-        }
-      },
-      "herder": {
-        "produces": [
-          "calf",
-          "livestock",
-          "meat",
-          "hide"
-        ],
-        "consumes": [
-          "calf",
-          "water",
-          "food"
-        ],
-        "target_stock": {
-          "food": 6,
-          "hide": 3,
-          "livestock": 3,
-          "meat": 6
-        }
-      },
-      "high_priest": {
-        "produces": [
-          "sacrificial_offering"
-        ],
-        "consumes": [
-          "food",
-          "choice_grain",
-          "rare_herb",
-          "classic_tome"
-        ],
-        "target_stock": {
-          "food": 6,
-          "sacrificial_offering": 6
-        },
-        "public_trust_duty": true
-      },
-      "hunter": {
-        "produces": [
-          "meat",
-          "hide",
-          "rare_herb"
-        ],
-        "consumes": [
-          "weapon",
-          "tools",
-          "medicine",
-          "food"
-        ],
-        "target_stock": {
-          "food": 6,
-          "hide": 4,
-          "meat": 6,
-          "rare_herb": 2
-        },
-        "coercive_power": true
-      },
-      "martial_artist": {
-        "produces": [
-          "martial_manual",
-          "weapon"
-        ],
-        "consumes": [
-          "paper",
-          "ink",
-          "food",
-          "ore",
-          "timber",
-          "medicine",
-          "tonic"
-        ],
-        "target_stock": {
-          "food": 6,
-          "martial_manual": 3,
-          "medicine": 2,
-          "weapon": 2
-        },
-        "coercive_power": true
-      },
-      "martial_master": {
-        "produces": [
-          "martial_manual",
-          "weapon"
-        ],
-        "consumes": [
-          "paper",
-          "ink",
-          "food",
-          "ore",
-          "timber",
-          "medicine",
-          "tonic"
-        ],
-        "target_stock": {
-          "food": 6,
-          "martial_manual": 4,
-          "tonic": 2,
-          "weapon": 3
-        },
-        "coercive_power": true
-      },
-      "master_carpenter": {
-        "produces": [
-          "plank",
-          "winter_coat"
-        ],
-        "consumes": [
-          "timber",
-          "hide",
-          "food",
-          "tools"
-        ],
-        "target_stock": {
-          "food": 6,
-          "plank": 6,
-          "timber": 2,
-          "winter_coat": 2
-        }
-      },
-      "master_hunter": {
-        "produces": [
-          "meat",
-          "hide",
-          "rare_herb"
-        ],
-        "consumes": [
-          "weapon",
-          "fine_tools",
-          "tonic",
-          "medicine",
-          "food"
-        ],
-        "target_stock": {
-          "food": 6,
-          "hide": 5,
-          "meat": 8,
-          "rare_herb": 3
-        },
-        "coercive_power": true
-      },
-      "master_smith": {
-        "produces": [
-          "tools",
-          "fine_tools"
-        ],
-        "consumes": [
-          "ore",
-          "timber",
-          "food"
-        ],
-        "target_stock": {
-          "fine_tools": 2,
-          "food": 6,
-          "ore": 2,
-          "timber": 2,
-          "tools": 4
-        }
-      },
-      "master_thief": {
-        "consumes": [
-          "food",
-          "choice_grain",
-          "medicine",
-          "tonic"
-        ],
-        "target_stock": {
-          "food": 6,
-          "tonic": 1
-        }
-      },
-      "merchant_chief": {
-        "consumes": [
-          "food",
-          "choice_grain",
-          "meat",
-          "fish",
-          "hide",
-          "winter_coat",
-          "rare_herb",
-          "sacrificial_offering",
-          "paper",
-          "ink",
-          "timber",
-          "plank",
-          "ore",
-          "tools",
-          "fine_tools",
-          "herb",
-          "medicine",
-          "tonic",
-          "scroll",
-          "classic_tome",
-          "weapon",
-          "martial_manual"
-        ],
-        "target_stock": {
-          "choice_grain": 2,
-          "classic_tome": 1,
-          "fine_tools": 1,
-          "food": 8,
-          "medicine": 2,
-          "ore": 2,
-          "plank": 2,
-          "scroll": 2,
-          "timber": 2,
-          "tonic": 1,
-          "tools": 1
-        }
-      },
-      "miner": {
-        "produces": [
-          "ore"
-        ],
-        "consumes": [
-          "food",
-          "tools"
-        ],
-        "target_stock": {
-          "food": 6,
-          "ore": 5
-        }
-      },
-      "peddler": {
-        "consumes": [
-          "food",
-          "choice_grain",
-          "meat",
-          "fish",
-          "hide",
-          "winter_coat",
-          "rare_herb",
-          "sacrificial_offering",
-          "paper",
-          "ink",
-          "timber",
-          "plank",
-          "ore",
-          "tools",
-          "fine_tools",
-          "herb",
-          "medicine",
-          "tonic",
-          "scroll",
-          "classic_tome",
-          "weapon",
-          "martial_manual"
-        ],
-        "target_stock": {
-          "choice_grain": 2,
-          "food": 8,
-          "medicine": 2,
-          "ore": 2,
-          "plank": 2,
-          "scroll": 2,
-          "timber": 2,
-          "tools": 1
-        }
-      },
-      "pill_alchemist": {
-        "produces": [
-          "qi_pill"
-        ],
-        "consumes": [
-          "spirit_herb",
-          "food",
-          "water"
-        ],
-        "target_stock": {
-          "food": 6,
-          "qi_pill": 4,
-          "spirit_herb": 4
-        }
-      },
-      "ranch_master": {
-        "produces": [
-          "calf",
-          "livestock",
-          "meat",
-          "hide"
-        ],
-        "consumes": [
-          "calf",
-          "water",
-          "food"
-        ],
-        "target_stock": {
-          "food": 6,
-          "hide": 4,
-          "livestock": 4,
-          "meat": 8
-        }
-      },
-      "resident": {
-        "consumes": [
-          "food",
-          "water",
-          "choice_grain",
-          "meat",
-          "fish",
-          "plank",
-          "winter_coat"
-        ],
-        "target_stock": {
-          "food": 6,
-          "plank": 1
-        }
-      },
-      "ritualist": {
-        "produces": [
-          "sacrificial_offering"
-        ],
-        "consumes": [
-          "food",
-          "choice_grain",
-          "rare_herb",
-          "scroll"
-        ],
-        "target_stock": {
-          "food": 6,
-          "sacrificial_offering": 4
-        },
-        "public_trust_duty": true
-      },
-      "scholar": {
-        "produces": [
-          "paper",
-          "ink",
-          "scroll"
-        ],
-        "consumes": [
-          "timber",
-          "water",
-          "herb",
-          "food"
-        ],
-        "target_stock": {
-          "food": 6,
-          "scroll": 3
-        },
-        "public_trust_duty": true
-      },
-      "spirit_farmer": {
-        "produces": [
-          "spirit_herb",
-          "spirit_grain"
-        ],
-        "consumes": [
-          "food",
-          "water",
-          "qi_pill"
-        ],
-        "target_stock": {
-          "food": 6,
-          "spirit_grain": 6,
-          "spirit_herb": 4
-        }
-      },
-      "sword_cultivator": {
-        "consumes": [
-          "qi_pill",
-          "spirit_grain",
-          "food",
-          "water",
-          "spirit_stone"
-        ],
-        "target_stock": {
-          "food": 6,
-          "qi_pill": 3
-        }
-      },
-      "thief": {
-        "consumes": [
-          "food",
-          "choice_grain",
-          "medicine"
-        ],
-        "target_stock": {
-          "food": 6,
-          "medicine": 1
-        }
-      },
-      "woodcutter": {
-        "produces": [
-          "timber"
-        ],
-        "consumes": [
-          "food",
-          "tools"
-        ],
-        "target_stock": {
-          "food": 6,
-          "timber": 6
-        }
-      },
-      "xiucai": {
-        "produces": [
-          "paper",
-          "ink",
-          "scroll",
-          "classic_tome"
-        ],
-        "consumes": [
-          "timber",
-          "water",
-          "herb",
-          "food",
-          "scroll"
-        ],
-        "target_stock": {
-          "classic_tome": 2,
-          "food": 6,
-          "scroll": 2
-        },
-        "public_trust_duty": true
-      }
     },
     "level_thresholds": [
       0,
@@ -3178,636 +460,263 @@
         "accident_multiplier_pct": 185
       }
     },
+    "lifecycle": {
+      "child_max_age": 16,
+      "elder_min_age": 120,
+      "max_expectancy": 300,
+      "fertility_min_food_per_capita": 2,
+      "annual_birth_permille": 12,
+      "elder_annual_death_permille": 15,
+      "auto_hydrate_successor": true
+    },
+    "house_wear": {
+      "interval_ticks": 35040,
+      "condition_loss": 1,
+      "source": "world setting: stone sect halls have a 100-year natural renewal scale; disaster damage is modeled separately"
+    },
+    "production": {
+      "default_field_area_m2": 1000,
+      "field_area_per_batch_m2": 400,
+      "field_area_per_farmer_m2": 1200,
+      "field_source": "青灵药谷外门灵田单批种植面积设定",
+      "facility_source": "青云宗丹符阁与灵植洞府常规炼制容量设定",
+      "facility_capacity": {
+        "pill_furnace": 2,
+        "talisman_desk": 2,
+        "spirit_nursery": 2
+      }
+    },
+    "governance": {
+      "market_tax_permille": 60,
+      "transit_customs_permille": 40,
+      "daily_poll_tax_permille": 15,
+      "subsistence_reserve_per_cap": 10,
+      "civic_stipend_per_cap": 4,
+      "tax_skim_base_permille": 100,
+      "embezzle_base_permille": 80,
+      "audit_threshold": 30,
+      "law_capability": "arrest",
+      "audit_capability": "audit_corruption",
+      "outlaw_tag": "rogue_outlaw"
+    },
     "resources": {
-      "fish_stock": {
-        "id": "fish_stock",
-        "name": "江河鱼汛",
+      "freshwater": {
+        "id": "freshwater",
+        "name": "灵泉活水",
         "node_features": [
-          "fishery_waters"
+          "water_source"
         ],
-        "regen_permille_per_day": 105,
-        "seasonal_regen_pct": {
-          "autumn": 110,
-          "spring": 120,
-          "summer": 135,
-          "winter": 65
-        },
-        "biological": true,
-        "reproduction_source": "fish_stock",
-        "maturity_ticks": 960
-      },
-      "game_herd": {
-        "id": "game_herd",
-        "name": "山野兽群",
-        "node_features": [
-          "hunting_ground"
-        ],
-        "regen_permille_per_day": 95,
-        "seasonal_regen_pct": {
-          "autumn": 120,
-          "spring": 125,
-          "summer": 115,
-          "winter": 75
-        },
-        "biological": true,
-        "reproduction_source": "game_herd",
-        "maturity_ticks": 1056
+        "potable_water": true,
+        "regen_permille_per_day": 180
       },
       "herb_bed": {
         "id": "herb_bed",
-        "name": "灵药山苗",
+        "name": "灵草药脉",
         "node_features": [
-          "herb_patch",
-          "woodland"
+          "herb_patch"
         ],
-        "regen_permille_per_day": 95,
-        "seasonal_regen_pct": {
-          "autumn": 100,
-          "spring": 135,
-          "summer": 120,
-          "winter": 50
-        },
-        "biological": true,
-        "reproduction_source": "herb_bed",
-        "maturity_ticks": 1056
-      },
-      "ore_vein": {
-        "id": "ore_vein",
-        "name": "矿脉储量",
-        "node_features": [
-          "mine_shaft",
-          "woodland"
-        ],
-        "regen_permille_per_day": 0,
-        "seasonal_regen_pct": {
-          "autumn": 100,
-          "spring": 100,
-          "summer": 100,
-          "winter": 100
-        }
-      },
-      "pasture_grass": {
-        "id": "pasture_grass",
-        "name": "牧场水草",
-        "node_features": [
-          "pasture"
-        ],
-        "regen_permille_per_day": 110,
-        "seasonal_regen_pct": {
-          "autumn": 95,
-          "spring": 140,
-          "summer": 125,
-          "winter": 50
-        },
-        "biological": true,
-        "reproduction_source": "pasture_grass",
-        "maturity_ticks": 960
+        "regen_permille_per_day": 120
       },
       "soil_fertility": {
         "id": "soil_fertility",
-        "name": "水田地力",
+        "name": "灵田地力",
         "node_features": [
           "farmland"
         ],
-        "regen_permille_per_day": 90,
-        "seasonal_regen_pct": {
-          "autumn": 100,
-          "spring": 130,
-          "summer": 115,
-          "winter": 70
-        }
+        "regen_permille_per_day": 160
       },
-      "timber_stand": {
-        "id": "timber_stand",
-        "name": "山林蓄木",
+      "spirit_timber": {
+        "id": "spirit_timber",
+        "name": "灵木古林",
         "node_features": [
-          "woodland"
+          "spirit_grove"
         ],
-        "regen_permille_per_day": 75,
-        "seasonal_regen_pct": {
-          "autumn": 90,
-          "spring": 125,
-          "summer": 120,
-          "winter": 55
-        },
-        "biological": true,
-        "reproduction_source": "timber_stand",
-        "maturity_ticks": 1344
+        "regen_permille_per_day": 100
       },
-      "water_table": {
-        "id": "water_table",
-        "name": "河井水源",
+      "spirit_vein_ore": {
+        "id": "spirit_vein_ore",
+        "name": "玄铁灵矿脉",
         "node_features": [
-          "water_source",
-          "canal_wharf"
+          "spirit_mine"
         ],
-        "potable_water": true,
-        "regen_permille_per_day": 160,
-        "seasonal_regen_pct": {
-          "autumn": 100,
-          "spring": 120,
-          "summer": 125,
-          "winter": 85
-        }
+        "regen_permille_per_day": 80
       }
     },
     "encounters": [
       {
-        "id": "mountain_beast",
-        "name": "深山猛虎豺狼",
+        "id": "spirit_beast_pack",
+        "name": "蚀灵妖狼群",
         "category": "beast",
         "node_features": [
-          "hunting_ground",
-          "woodland"
+          "herb_patch",
+          "farmland",
+          "spirit_mine"
         ],
-        "base_activity": 24,
-        "growth_per_day": 8,
-        "surge_threshold": 56,
-        "hazard_permille": 18,
-        "damage": 18,
-        "lethality_permille": 55,
-        "rare_drop_item": "hide",
-        "rare_drop_permille": 420,
         "suppressor_tags": [
-          "hunter",
-          "martial",
-          "law"
-        ],
-        "bounty_coins": 8,
-        "source_resource": "game_herd",
-        "resource_per_kill": 1
-      },
-      {
-        "id": "mountain_anomaly",
-        "name": "苍山精怪木魅",
-        "category": "anomaly",
-        "node_features": [
-          "mine_shaft",
-          "herb_patch"
-        ],
-        "base_activity": 18,
-        "growth_per_day": 7,
-        "surge_threshold": 52,
-        "hazard_permille": 14,
-        "damage": 20,
-        "lethality_permille": 50,
-        "rare_drop_item": "rare_herb",
-        "rare_drop_permille": 480,
-        "suppressor_tags": [
-          "hunter",
-          "martial",
-          "ritual"
+          "fighter",
+          "enforcer"
         ],
         "bounty_coins": 12,
-        "source_resource": "herb_bed",
-        "resource_per_kill": 1
+        "base_activity": 20,
+        "growth_per_day": 5,
+        "surge_threshold": 68,
+        "hazard_permille": 18,
+        "damage": 18,
+        "lethality_permille": 70
       },
       {
-        "id": "river_fiend",
-        "name": "大河水怪蛟鼍",
+        "id": "rogue_ambush",
+        "name": "云麓劫修暗哨",
         "category": "anomaly",
         "node_features": [
-          "fishery_waters",
-          "canal_wharf"
+          "spirit_grove",
+          "market"
         ],
-        "base_activity": 20,
-        "growth_per_day": 7,
-        "surge_threshold": 54,
-        "hazard_permille": 15,
-        "damage": 18,
-        "lethality_permille": 50,
-        "rare_drop_item": "rare_herb",
-        "rare_drop_permille": 350,
         "suppressor_tags": [
-          "hunter",
-          "law",
-          "martial"
+          "enforcer",
+          "fighter"
         ],
-        "bounty_coins": 10,
-        "source_resource": "fish_stock",
-        "resource_per_kill": 1
-      }
-    ],
-    "disasters": [
-      {
-        "id": "river_flood",
-        "name": "河决洪涝",
-        "trigger_weathers": [
-          "storm",
-          "rain"
-        ],
-        "trigger_seasons": [
-          "summer",
-          "spring"
-        ],
-        "target_features": [
-          "farmland",
-          "canal_wharf",
-          "fishery_waters"
-        ],
-        "prob_permille_per_day": 95,
-        "duration_ticks": 144,
-        "resource_damage_pct": {
-          "soil_fertility": 15
-        },
-        "house_damage": 6,
-        "sanitation_drop": 24,
-        "casualty_permille": 2,
-        "mitigated_by_infra": "levee",
-        "relief_item": "food",
-        "flow_kind": "river"
-      },
-      {
-        "id": "drought",
-        "name": "亢旱缺水",
-        "trigger_weathers": [
-          "drought_heat"
-        ],
-        "trigger_seasons": [
-          "summer",
-          "autumn"
-        ],
-        "target_features": [
-          "farmland",
-          "pasture"
-        ],
-        "prob_permille_per_day": 110,
-        "duration_ticks": 192,
-        "resource_damage_pct": {
-          "pasture_grass": 20,
-          "soil_fertility": 18,
-          "water_table": 28
-        },
-        "sanitation_drop": 10,
-        "casualty_permille": 2,
-        "mitigated_by_infra": "irrigation_well",
-        "relief_item": "water"
-      },
-      {
-        "id": "locust_swarm",
-        "name": "飞蝗蔽日",
-        "trigger_weathers": [
-          "drought_heat",
-          "clear"
-        ],
-        "trigger_seasons": [
-          "summer",
-          "autumn"
-        ],
-        "target_features": [
-          "farmland",
-          "pasture"
-        ],
-        "prob_permille_per_day": 55,
-        "duration_ticks": 96,
-        "resource_damage_pct": {
-          "pasture_grass": 18,
-          "soil_fertility": 20
-        },
-        "casualty_permille": 1,
-        "mitigated_by_infra": "granary",
-        "relief_item": "food"
-      },
-      {
-        "id": "wildfire",
-        "name": "山林大火",
-        "trigger_weathers": [
-          "drought_heat",
-          "clear"
-        ],
-        "trigger_seasons": [
-          "autumn",
-          "summer"
-        ],
-        "target_features": [
-          "woodland",
-          "hunting_ground"
-        ],
-        "prob_permille_per_day": 45,
-        "duration_ticks": 96,
-        "resource_damage_pct": {
-          "herb_bed": 20,
-          "timber_stand": 22
-        },
-        "house_damage": 5,
-        "casualty_permille": 2,
-        "mitigated_by_infra": "irrigation_well"
-      },
-      {
-        "id": "blizzard_cold",
-        "name": "严冬暴雪寒潮",
-        "trigger_weathers": [
-          "frost_snow"
-        ],
-        "trigger_seasons": [
-          "winter"
-        ],
-        "target_features": [
-          "residential",
-          "pasture",
-          "farmland"
-        ],
-        "prob_permille_per_day": 120,
-        "duration_ticks": 144,
-        "resource_damage_pct": {
-          "pasture_grass": 15
-        },
-        "house_damage": 4,
-        "casualty_permille": 2,
-        "mitigated_by_infra": "granary",
-        "relief_item": "winter_coat"
+        "bounty_coins": 15,
+        "base_activity": 18,
+        "growth_per_day": 4,
+        "surge_threshold": 70,
+        "hazard_permille": 16,
+        "damage": 20,
+        "lethality_permille": 65
       }
     ],
     "accidents": [
       {
-        "id": "mine_collapse",
-        "name": "矿井塌方透水",
+        "id": "alchemy_furnace_blast",
+        "name": "丹炉炸裂反噬",
+        "recipes": [
+          "refine_qi_pill",
+          "brew_healing_pill"
+        ],
+        "base_permille": 45,
+        "safety_infra": "spirit_array",
+        "damage": 28,
+        "lethality_permille": 120
+      },
+      {
+        "id": "talisman_qi_backlash",
+        "name": "灵符失控反噬",
+        "recipes": [
+          "inscribe_talisman",
+          "inscribe_jade_slip"
+        ],
+        "base_permille": 40,
+        "safety_infra": "spirit_array",
+        "damage": 26,
+        "lethality_permille": 110
+      },
+      {
+        "id": "gathering_wild_hazard",
+        "name": "灵矿山林采掘遇险",
         "node_features": [
-          "mine_shaft",
-          "woodland"
+          "spirit_mine",
+          "spirit_grove",
+          "herb_patch"
         ],
         "recipes": [
-          "mine_ore",
-          "deep_shaft_ore"
+          "mine_spirit_ore",
+          "fell_spirit_wood",
+          "gather_spirit_herb"
         ],
-        "base_permille": 16,
-        "safety_infra": "mine_shoring",
+        "base_permille": 28,
         "damage": 24,
-        "lethality_permille": 60
+        "lethality_permille": 95
       },
       {
-        "id": "logging_rockfall",
-        "name": "伐木滚石工伤",
-        "node_features": [
-          "woodland"
-        ],
-        "recipes": [
-          "fell_timber"
-        ],
-        "base_permille": 12,
-        "damage": 18,
-        "lethality_permille": 35
-      },
-      {
-        "id": "canal_shipwreck",
-        "name": "漕船风浪覆没",
-        "node_features": [
-          "fishery_waters",
-          "canal_wharf"
-        ],
-        "recipes": [
-          "net_fish"
-        ],
+        "id": "mountain_road_hazard",
+        "name": "山道雾瘴遇险",
         "route_mediums": [
-          "waterway"
+          "road",
+          "air"
         ],
-        "base_permille": 12,
-        "safety_infra": "levee",
+        "base_permille": 14,
+        "safety_infra": "spirit_array",
         "damage": 20,
-        "lethality_permille": 50
-      },
+        "lethality_permille": 70
+      }
+    ],
+    "disasters": [
       {
-        "id": "workshop_fire",
-        "name": "炉坊走水烫伤",
-        "recipes": [
-          "forge_tools",
-          "forge_fine_tools",
-          "temper_weapon"
+        "id": "leyline_turbulence",
+        "name": "灵脉暴动雷煞",
+        "trigger_weathers": [
+          "storm",
+          "dense_fog"
         ],
-        "base_permille": 8,
-        "damage": 15,
-        "lethality_permille": 20
+        "target_features": [
+          "ritual_site",
+          "spirit_mine",
+          "herb_patch",
+          "market"
+        ],
+        "prob_permille_per_day": 70,
+        "duration_ticks": 96,
+        "house_damage": 8,
+        "sanitation_drop": 8,
+        "casualty_permille": 25,
+        "mitigated_by_infra": "spirit_array",
+        "relief_item": "healing_pill"
       }
     ],
     "infrastructures": {
-      "granary": {
-        "id": "granary",
-        "name": "常平义仓",
-        "node_feature": "shrine",
+      "spirit_array": {
+        "id": "spirit_array",
+        "name": "护山聚灵阵",
+        "node_feature": "ritual_site",
         "node_features": [
-          "shrine",
-          "hub"
-        ],
-        "max_condition": 100,
-        "decay_per_day": 2,
-        "build_inputs": {
-          "plank": 2
-        },
-        "build_energy": 9
-      },
-      "irrigation_well": {
-        "id": "irrigation_well",
-        "name": "抗旱深井水渠",
-        "node_feature": "farmland",
-        "node_features": [
-          "farmland",
-          "pasture"
-        ],
-        "max_condition": 100,
-        "decay_per_day": 2,
-        "build_inputs": {
-          "plank": 1
-        },
-        "build_energy": 8
-      },
-      "levee": {
-        "id": "levee",
-        "name": "防洪河堤漕闸",
-        "node_feature": "canal_wharf",
-        "node_features": [
-          "canal_wharf",
-          "farmland"
-        ],
-        "max_condition": 100,
-        "decay_per_day": 3,
-        "build_inputs": {
-          "plank": 1,
-          "timber": 1
-        },
-        "build_energy": 10
-      },
-      "mine_shoring": {
-        "id": "mine_shoring",
-        "name": "矿道木石支护",
-        "node_feature": "mine_shaft",
-        "node_features": [
-          "mine_shaft",
-          "woodland"
-        ],
-        "max_condition": 100,
-        "decay_per_day": 4,
-        "build_inputs": {
-          "timber": 2
-        },
-        "build_energy": 10
-      },
-      "public_latrine": {
-        "id": "public_latrine",
-        "name": "坊市公厕积肥池",
-        "node_feature": "residential",
-        "node_features": [
-          "residential",
+          "ritual_site",
+          "martial_hall",
           "market"
         ],
-        "sanitation_role": true,
         "max_condition": 100,
-        "decay_per_day": 3,
-        "build_inputs": {
-          "plank": 1
-        },
-        "build_energy": 7
+        "decay_per_day": 2,
+        "repair_energy": 8
+      },
+      "spirit_aqueduct": {
+        "id": "spirit_aqueduct",
+        "name": "青灵引泉渠",
+        "node_feature": "farmland",
+        "max_condition": 100,
+        "decay_per_day": 2,
+        "repair_energy": 8
       }
     },
     "rituals": [
       {
-        "id": "spring_plow_rite",
-        "name": "春祈社稷劝农祭",
-        "node_feature": "shrine",
+        "id": "leyline_offering_rite",
+        "name": "青云祭脉聚灵大典",
+        "node_feature": "ritual_site",
         "required_tag": "ritual",
-        "scheduled_season": "spring",
+        "energy_cost": 12,
+        "money_cost": 5,
         "inputs": {
-          "sacrificial_offering": 1
+          "spirit_herb": 1
         },
-        "energy_cost": 8,
-        "ticks": 3,
-        "morale_boost": 12,
-        "trust_boost": 1,
-        "disaster_relief_weight_pct": 25,
-        "threat_appease_amount": 8,
-        "supernatural": true
-      },
-      {
-        "id": "summer_river_rite",
-        "name": "夏仲安澜镇水祭",
-        "node_feature": "shrine",
-        "required_tag": "ritual",
-        "scheduled_season": "summer",
-        "inputs": {
-          "sacrificial_offering": 1
-        },
-        "energy_cost": 8,
-        "ticks": 3,
-        "morale_boost": 12,
-        "trust_boost": 1,
-        "disaster_relief_weight_pct": 30,
-        "threat_appease_amount": 14,
-        "supernatural": true
-      },
-      {
-        "id": "autumn_harvest_rite",
-        "name": "秋报万宝丰年祭",
-        "node_feature": "shrine",
-        "required_tag": "ritual",
-        "scheduled_season": "autumn",
-        "inputs": {
-          "sacrificial_offering": 1
-        },
-        "energy_cost": 8,
-        "ticks": 3,
-        "morale_boost": 15,
-        "trust_boost": 2,
-        "disaster_relief_weight_pct": 25,
-        "threat_appease_amount": 10,
-        "supernatural": true
-      },
-      {
-        "id": "winter_hearth_rite",
-        "name": "冬腊祀祖迎岁祭",
-        "node_feature": "shrine",
-        "required_tag": "ritual",
-        "scheduled_season": "winter",
-        "inputs": {
-          "sacrificial_offering": 1
-        },
-        "energy_cost": 8,
-        "ticks": 3,
-        "morale_boost": 15,
-        "trust_boost": 2,
-        "disaster_relief_weight_pct": 25,
-        "threat_appease_amount": 10,
-        "supernatural": true
-      },
-      {
-        "id": "crisis_appeasement_rite",
-        "name": "禳灾祈安太牢大祭",
-        "node_feature": "shrine",
-        "required_tag": "ritual",
-        "crisis_trigger": true,
-        "inputs": {
-          "choice_grain": 1,
-          "sacrificial_offering": 1
-        },
-        "energy_cost": 10,
-        "ticks": 4,
-        "morale_boost": 18,
-        "trust_boost": 2,
-        "disaster_relief_weight_pct": 35,
-        "threat_appease_amount": 18,
-        "supernatural": true
+        "cooldown_ticks": 288,
+        "sanitation_boost": 8,
+        "corruption_drop": 6
       }
     ],
     "diseases": [
       {
-        "id": "dysentery",
-        "name": "秽水痢疾",
-        "max_sanitation_trigger": 68,
-        "contagion_permille": 14,
-        "duration_ticks": 192,
-        "health_drain_per_day": 12,
-        "lethality_permille": 22
-      },
-      {
-        "id": "cold_fever",
-        "name": "风寒伤寒",
-        "cold_trigger": true,
-        "contagion_permille": 12,
-        "duration_ticks": 144,
-        "health_drain_per_day": 10,
-        "lethality_permille": 16
-      },
-      {
-        "id": "miasma_plague",
-        "name": "灾后时疫",
-        "max_sanitation_trigger": 48,
-        "contagion_permille": 22,
-        "duration_ticks": 240,
-        "health_drain_per_day": 18,
-        "lethality_permille": 38
+        "id": "qi_deviation",
+        "name": "灵气紊乱",
+        "base_risk_permille": 4,
+        "sanitation_threshold": 50,
+        "health_drain_per_day": 6,
+        "energy_drain_per_day": 8,
+        "contagious": false
       }
     ],
-    "lifecycle": {
-      "child_max_age": 15,
-      "elder_min_age": 55,
-      "max_expectancy": 78,
-      "fertility_min_food_per_capita": 3,
-      "annual_birth_permille": 22,
-      "elder_annual_death_permille": 36,
-      "compost_item": "compost",
-      "auto_hydrate_successor": true,
-      "waste_item": "nightsoil",
-      "waste_per_food_divisor": 4,
-      "compost_recipe_id": "compost_waste"
-    },
-    "governance": {
-      "market_tax_permille": 90,
-      "transit_customs_permille": 55,
-      "daily_poll_tax_permille": 24,
-      "subsistence_reserve_per_cap": 8,
-      "civic_stipend_per_cap": 3,
-      "tax_skim_base_permille": 135,
-      "embezzle_base_permille": 110,
-      "audit_threshold": 34,
-      "racket_rate_permille": 22,
-      "bribe_share_permille": 260,
-      "law_capability": "arrest",
-      "audit_capability": "audit_corruption",
-      "racket_tag": "gang",
-      "outlaw_tag": "outlaw"
-    },
     "locomotion_modes": {
       "sword_flight": {
         "id": "sword_flight",
-        "name": "Flying Sword",
+        "name": "御剑遁光",
         "granted_by_tags": [
           "flying_sword"
         ],
@@ -3824,7 +733,7 @@
     "sensory_modes": {
       "divine_sense": {
         "id": "divine_sense",
-        "name": "Nascent Soul Divine Sense",
+        "name": "元婴神识",
         "granted_by_tags": [
           "nascent_soul"
         ],
@@ -3836,7 +745,7 @@
     "comm_channels": {
       "sound_talisman": {
         "id": "sound_talisman",
-        "name": "Jade Sound Talisman",
+        "name": "玉简传音符",
         "granted_by_tags": [
           "sound_talisman",
           "cultivator"
@@ -3850,254 +759,1122 @@
         "energy_cost": 2
       }
     },
-    "combat_profiles": [
-      {
-        "id": "nascent_soul_immortal",
-        "name": "Nascent Soul Spiritual Pressure",
-        "granted_by_tags": [
-          "nascent_soul"
-        ],
-        "tier": 3,
-        "attack_types": {
-          "physical": 15,
-          "spirit": 40
-        },
-        "defense_by_type": {
-          "physical": {
-            "immunity_below_tier": 2,
-            "reduction_pct": 60
-          }
-        },
-        "cohort_scale_damage": 18
-      },
-      {
-        "id": "spirit_sword_art",
-        "name": "Azure Flying Sword Art",
-        "granted_by_tags": [
-          "flying_sword"
-        ],
-        "tier": 2,
-        "attack_types": {
-          "physical": 18,
-          "spirit": 24
-        },
-        "defense_by_type": {
-          "physical": {
-            "reduction_pct": 25
-          }
-        }
-      }
-    ],
-    "action_specs": {
-      "guardian_array": {
-        "id": "guardian_array",
-        "name": "Sect Guardian Array",
-        "granted_by_tags": [
-          "nascent_soul"
-        ],
-        "target_kind": "venue",
-        "range_km": 10,
-        "ticks": 2,
-        "energy_cost": 6,
-        "slot_costs": {
-          "qi": 15
-        },
-        "spawn_effect": {
-          "id": "sect_guardian_ward",
-          "name": "Azure Cloud Guardian Ward",
-          "anchor_kind": "venue",
-          "duration_ticks": 24,
-          "max_integrity": 120,
-          "defense_by_type": {
-            "physical": {
-              "immunity_below_tier": 2
-            },
-            "spirit": {
-              "reduction_pct": 40
-            }
-          },
-          "absorb_damage_with_integrity": true,
-          "shielding_bonus": 40
-        }
-      },
-      "spirit_seclusion": {
-        "id": "spirit_seclusion",
-        "name": "Closed-Door Qi Seclusion",
-        "granted_by_tags": [
-          "cultivator"
-        ],
-        "target_kind": "self",
-        "ticks": 2,
-        "dormant": true,
-        "slot_gains": {
-          "qi": 25
-        }
-      }
-    },
     "state_slots": {
       "qi": {
         "id": "qi",
-        "name": "Spiritual Qi",
+        "name": "丹田真气",
+        "required_tag": "cultivator",
         "min": 0,
         "max": 100,
-        "default": 40,
+        "default": 50,
         "regen_per_tick": 1
+      },
+      "cultivation": {
+        "id": "cultivation",
+        "name": "修为积累",
+        "required_tag": "cultivator",
+        "min": 0,
+        "max": 10000,
+        "default": 800,
+        "ambient_field_key": "qi_density",
+        "ambient_absorb_divisor": 45
       }
     },
     "forms": {
-      "foundation_cultivator": {
-        "id": "foundation_cultivator",
-        "name": "Foundation Establishment Cultivator",
-        "life_expectancy_years": 240,
-        "hunger_interval_mul_pct": 200,
+      "mortal": {
+        "id": "mortal",
+        "name": "凡人",
+        "power_tier": 1,
+        "combat_bonus": 0,
+        "vigilance_bonus": 0,
+        "life_expectancy_years": 80,
+        "daily_intake_pct": 100,
+        "starvation_threshold": 6,
+        "starvation_damage": 10
+      },
+      "qi_refining": {
+        "id": "qi_refining",
+        "name": "炼气期",
+        "power_tier": 2,
+        "combat_bonus": 8,
+        "vigilance_bonus": 3,
+        "life_expectancy_years": 120,
+        "daily_intake_pct": 35,
+        "starvation_threshold": 10,
+        "starvation_damage": 6,
         "slot_metabolism": {
           "qi": 1
         },
         "innate_tags": [
           "cultivator"
         ]
+      },
+      "foundation": {
+        "id": "foundation",
+        "name": "筑基期",
+        "power_tier": 3,
+        "combat_bonus": 24,
+        "vigilance_bonus": 10,
+        "life_expectancy_years": 240,
+        "daily_intake_pct": 0,
+        "disable_hunger": true,
+        "slot_metabolism": {
+          "qi": 1
+        },
+        "innate_tags": [
+          "cultivator"
+        ]
+      },
+      "golden_core": {
+        "id": "golden_core",
+        "name": "金丹期",
+        "power_tier": 4,
+        "combat_bonus": 52,
+        "vigilance_bonus": 20,
+        "life_expectancy_years": 450,
+        "daily_intake_pct": 0,
+        "disable_hunger": true,
+        "slot_metabolism": {
+          "qi": 2
+        },
+        "innate_tags": [
+          "cultivator"
+        ]
+      },
+      "nascent_soul": {
+        "id": "nascent_soul",
+        "name": "元婴期",
+        "power_tier": 5,
+        "combat_bonus": 95,
+        "vigilance_bonus": 35,
+        "life_expectancy_years": 800,
+        "daily_intake_pct": 0,
+        "disable_hunger": true,
+        "slot_metabolism": {
+          "qi": 2
+        },
+        "innate_tags": [
+          "cultivator",
+          "nascent_soul"
+        ]
       }
     },
     "currencies": {
       "sect_merit": {
         "id": "sect_merit",
-        "name": "Azure Cloud Sect Merit",
+        "name": "青云宗门贡献点",
         "backing_item": "spirit_stone",
         "polity_id": "azure_cloud_sect"
       }
     },
     "techs": {
-      "spirit_gathering_array": {
-        "id": "spirit_gathering_array",
-        "name": "Spirit Gathering Array",
-        "granted_by_tags": [
+      "array_refinement": {
+        "id": "array_refinement",
+        "name": "聚灵阵脉提纯诀",
+        "domain": "alchemy_array",
+        "research_ticks": 6,
+        "energy_cost": 12
+      },
+      "sword_intent": {
+        "id": "sword_intent",
+        "name": "青霜剑意秘录",
+        "domain": "sword_dao",
+        "research_ticks": 6,
+        "energy_cost": 12
+      }
+    },
+    "items": {
+      "spirit_grain": {
+        "id": "spirit_grain",
+        "name": "青玉灵米",
+        "tier": 1,
+        "edible": true,
+        "mass_units": 1,
+        "nutrition_units": 2,
+        "tradeable": true,
+        "batch_qty": 2,
+        "batch_price": 4,
+        "offer_threshold": 6,
+        "surplus_threshold": 8,
+        "shortage_threshold": 3
+      },
+      "spirit_dew": {
+        "id": "spirit_dew",
+        "name": "灵泉露",
+        "tier": 1,
+        "potable": true,
+        "thirst_relief": 2,
+        "mass_units": 1,
+        "nutrition_units": 0,
+        "tradeable": true,
+        "batch_qty": 2,
+        "batch_price": 2,
+        "offer_threshold": 6,
+        "surplus_threshold": 6,
+        "shortage_threshold": 2
+      },
+      "spirit_herb": {
+        "id": "spirit_herb",
+        "name": "青玉灵草",
+        "tier": 2,
+        "mass_units": 1,
+        "nutrition_units": 0,
+        "tradeable": true,
+        "batch_qty": 2,
+        "batch_price": 5,
+        "offer_threshold": 4,
+        "surplus_threshold": 5,
+        "shortage_threshold": 2
+      },
+      "spirit_wood": {
+        "id": "spirit_wood",
+        "name": "千年青灵木",
+        "tier": 2,
+        "mass_units": 2,
+        "nutrition_units": 0,
+        "tradeable": true,
+        "batch_qty": 2,
+        "batch_price": 4,
+        "offer_threshold": 3,
+        "surplus_threshold": 4,
+        "shortage_threshold": 1
+      },
+      "spirit_ore": {
+        "id": "spirit_ore",
+        "name": "玄铁灵矿",
+        "tier": 2,
+        "mass_units": 2,
+        "nutrition_units": 0,
+        "tradeable": true,
+        "batch_qty": 2,
+        "batch_price": 5,
+        "offer_threshold": 3,
+        "surplus_threshold": 4,
+        "shortage_threshold": 1
+      },
+      "spirit_stone": {
+        "id": "spirit_stone",
+        "name": "下品灵石",
+        "tier": 3,
+        "mass_units": 1,
+        "nutrition_units": 0,
+        "dual_use_currency": "sect_merit",
+        "dual_use_rate": 10,
+        "slot_changes": {
+          "qi": 20
+        },
+        "tradeable": true,
+        "batch_qty": 1,
+        "batch_price": 10,
+        "offer_threshold": 3,
+        "surplus_threshold": 4,
+        "shortage_threshold": 1
+      },
+      "qi_pill": {
+        "id": "qi_pill",
+        "name": "聚气灵丹",
+        "tier": 4,
+        "mass_units": 1,
+        "nutrition_units": 0,
+        "medicinal_heal": 30,
+        "disease_cure": 2,
+        "slot_changes": {
+          "qi": 25,
+          "cultivation": 120
+        },
+        "tradeable": true,
+        "batch_qty": 1,
+        "batch_price": 14,
+        "offer_threshold": 2,
+        "surplus_threshold": 3,
+        "shortage_threshold": 1
+      },
+      "healing_pill": {
+        "id": "healing_pill",
+        "name": "回春护脉丹",
+        "tier": 3,
+        "mass_units": 1,
+        "nutrition_units": 0,
+        "medicinal_heal": 35,
+        "disease_cure": 2,
+        "tradeable": true,
+        "batch_qty": 1,
+        "batch_price": 9,
+        "offer_threshold": 2,
+        "surplus_threshold": 3,
+        "shortage_threshold": 1
+      },
+      "talisman": {
+        "id": "talisman",
+        "name": "传音护身符",
+        "tier": 3,
+        "mass_units": 1,
+        "nutrition_units": 0,
+        "safety_bonus_pct": 25,
+        "combat_bonus": 2,
+        "tradeable": true,
+        "batch_qty": 1,
+        "batch_price": 7,
+        "offer_threshold": 2,
+        "surplus_threshold": 3,
+        "shortage_threshold": 1
+      },
+      "spirit_blade": {
+        "id": "spirit_blade",
+        "name": "青霜飞剑",
+        "tier": 4,
+        "mass_units": 2,
+        "nutrition_units": 0,
+        "combat_bonus": 6,
+        "durability_batches": 30,
+        "tradeable": true,
+        "batch_qty": 1,
+        "batch_price": 16,
+        "offer_threshold": 2,
+        "surplus_threshold": 2,
+        "shortage_threshold": 1
+      },
+      "jade_slip": {
+        "id": "jade_slip",
+        "name": "功法玉简",
+        "tier": 3,
+        "mass_units": 1,
+        "nutrition_units": 0,
+        "tradeable": true,
+        "batch_qty": 1,
+        "batch_price": 8,
+        "offer_threshold": 2,
+        "surplus_threshold": 2,
+        "shortage_threshold": 1
+      },
+      "enforcement_token": {
+        "id": "enforcement_token",
+        "name": "青云执法令牌",
+        "tier": 3,
+        "mass_units": 1,
+        "nutrition_units": 0,
+        "tradeable": false
+      }
+    },
+    "professions": [
+      {
+        "id": "sword_cultivator",
+        "name": "剑修",
+        "tier": 1,
+        "guild": "azure_cloud_sword_hall",
+        "requirements": {
+          "strength": 9,
+          "spirit": 9
+        },
+        "max_level": 6,
+        "yield_every": 2,
+        "combat_bonus_per_level": 4,
+        "vigilance_bonus_per_level": 2,
+        "grants": [
+          "cultivator",
+          "fighter"
+        ],
+        "ranks": [
+          "外门剑修",
+          "内门剑修",
+          "真传剑修"
+        ]
+      },
+      {
+        "id": "pill_alchemist",
+        "name": "炼丹师",
+        "tier": 1,
+        "guild": "jade_pill_pavilion",
+        "requirements": {
+          "insight": 10,
+          "spirit": 9
+        },
+        "max_level": 6,
+        "yield_every": 2,
+        "grants": [
+          "cultivator",
+          "healer"
+        ],
+        "ranks": [
+          "丹房药童",
+          "炼丹师",
+          "丹道宗师"
+        ]
+      },
+      {
+        "id": "spirit_farmer",
+        "name": "灵植夫",
+        "tier": 1,
+        "guild": "outer_spirit_stewardship",
+        "requirements": {
+          "spirit": 6
+        },
+        "max_level": 6,
+        "yield_every": 2,
+        "grants": [
+          "resident"
+        ],
+        "ranks": [
+          "灵田杂役",
+          "灵植夫",
+          "灵脉司农"
+        ]
+      },
+      {
+        "id": "talisman_crafter",
+        "name": "制符师",
+        "tier": 1,
+        "guild": "jade_pill_pavilion",
+        "requirements": {
+          "dexterity": 8,
+          "insight": 8
+        },
+        "max_level": 6,
+        "yield_every": 2,
+        "grants": [
           "cultivator"
         ],
-        "research_ticks": 3,
-        "research_energy_cost": 6,
-        "facility_name": "spirit_array",
-        "adopt_inputs": {
+        "ranks": [
+          "绘符学徒",
+          "制符师",
+          "灵符大师"
+        ]
+      },
+      {
+        "id": "market_steward",
+        "name": "坊市灵商",
+        "tier": 1,
+        "guild": "outer_spirit_stewardship",
+        "requirements": {
+          "insight": 7,
+          "spirit": 6
+        },
+        "max_level": 6,
+        "yield_every": 3,
+        "trade_margin": true,
+        "grants": [
+          "trader"
+        ],
+        "ranks": [
+          "灵市伙计",
+          "坊市灵商",
+          "商盟掌柜"
+        ]
+      },
+      {
+        "id": "sect_enforcer",
+        "name": "执法弟子",
+        "tier": 1,
+        "guild": "azure_cloud_sword_hall",
+        "requirements": {
+          "strength": 9,
+          "insight": 8,
+          "spirit": 8
+        },
+        "max_level": 6,
+        "yield_every": 2,
+        "combat_bonus_per_level": 3,
+        "vigilance_bonus_per_level": 4,
+        "grants": [
+          "cultivator",
+          "fighter",
+          "enforcer"
+        ],
+        "ranks": [
+          "巡山弟子",
+          "执法执事",
+          "执法长老"
+        ]
+      },
+      {
+        "id": "rogue_raider",
+        "name": "劫修",
+        "tier": 1,
+        "guild": "cloudfoot_shadow_ring",
+        "requirements": {
+          "strength": 9,
+          "dexterity": 8
+        },
+        "max_level": 6,
+        "yield_every": 2,
+        "combat_bonus_per_level": 3,
+        "extortion_bonus_per_level": 2,
+        "grants": [
+          "cultivator",
+          "fighter",
+          "rogue_outlaw",
+          "raider"
+        ],
+        "ranks": [
+          "暗巷劫徒",
+          "劫修头目",
+          "血手魔修"
+        ]
+      },
+      {
+        "id": "wandering_cultivator",
+        "name": "散修",
+        "tier": 1,
+        "guild": "cloudfoot_shadow_ring",
+        "requirements": {
+          "dexterity": 9,
+          "insight": 8
+        },
+        "max_level": 6,
+        "yield_every": 2,
+        "grants": [
+          "cultivator"
+        ],
+        "ranks": [
+          "坊市散修",
+          "游方散修",
+          "老练散修"
+        ]
+      }
+    ],
+    "recipes": [
+      {
+        "id": "draw_spirit_dew",
+        "label": "采集灵泉露",
+        "node_feature": "water_source",
+        "resource_pool": "freshwater",
+        "resource_draw": 2,
+        "ticks": 1,
+        "energy_cost": 6,
+        "output_item": "spirit_dew",
+        "output_qty": 2,
+        "conversion": {
+          "source": "finite freshwater extraction: 2 resource units fund at most 2 spirit_dew units",
+          "external_mass_units": 2,
+          "external_nutrition_units": 0
+        }
+      },
+      {
+        "id": "gather_spirit_herb",
+        "label": "采摘青玉灵草",
+        "profession": "spirit_farmer",
+        "node_feature": "herb_patch",
+        "resource_pool": "herb_bed",
+        "resource_draw": 2,
+        "ticks": 2,
+        "energy_cost": 10,
+        "output_item": "spirit_herb",
+        "output_qty": 2,
+        "conversion": {
+          "source": "finite herb_bed extraction: 2 resource units fund at most 2 spirit_herb units",
+          "external_mass_units": 2,
+          "external_nutrition_units": 0
+        },
+        "skill_id": "spirit_farming"
+      },
+      {
+        "id": "cultivate_spirit_grain",
+        "label": "培育青玉灵米",
+        "profession": "spirit_farmer",
+        "node_feature": "farmland",
+        "resource_pool": "soil_fertility",
+        "resource_draw": 2,
+        "ticks": 2,
+        "energy_cost": 12,
+        "inputs": {
+          "spirit_dew": 1
+        },
+        "output_item": "spirit_grain",
+        "output_qty": 6,
+        "growth": {
+          "duration_ticks": 384,
+          "maintenance_interval_ticks": 96,
+          "supplies": {
+            "spirit_dew": 1
+          },
+          "source": "青云宗聚灵阵加速灵稻培育周期：4日成熟，连续4日断水失管则灵田枯败",
+          "failure_after_ticks": 384
+        },
+        "conversion": {
+          "source": "spirit crop biological assimilation from dew and soil fertility",
+          "external_mass_units": 6,
+          "external_nutrition_units": 12
+        },
+        "skill_id": "spirit_farming"
+      },
+      {
+        "id": "forage_spirit_fruit",
+        "label": "采摘灵谷野果",
+        "node_feature": "farmland",
+        "resource_pool": "soil_fertility",
+        "resource_draw": 2,
+        "ticks": 2,
+        "energy_cost": 8,
+        "output_item": "spirit_grain",
+        "output_qty": 2,
+        "conversion": {
+          "source": "wild spirit-valley edible grain and fruit foraging from fertile terraces",
+          "external_mass_units": 2,
+          "external_nutrition_units": 4
+        }
+      },
+      {
+        "id": "fell_spirit_wood",
+        "label": "采伐青灵木",
+        "node_feature": "spirit_grove",
+        "resource_pool": "spirit_timber",
+        "resource_draw": 2,
+        "ticks": 2,
+        "energy_cost": 10,
+        "output_item": "spirit_wood",
+        "output_qty": 1,
+        "conversion": {
+          "source": "finite spirit_timber extraction: 2 resource units fund 1 spirit_wood",
+          "external_mass_units": 2,
+          "external_nutrition_units": 0
+        }
+      },
+      {
+        "id": "mine_spirit_ore",
+        "label": "开采玄铁灵矿",
+        "node_feature": "spirit_mine",
+        "resource_pool": "spirit_vein_ore",
+        "resource_draw": 2,
+        "ticks": 2,
+        "energy_cost": 12,
+        "output_item": "spirit_ore",
+        "output_qty": 1,
+        "conversion": {
+          "source": "finite spirit_vein_ore extraction: 2 resource units fund 1 spirit_ore",
+          "external_mass_units": 2,
+          "external_nutrition_units": 0
+        }
+      },
+      {
+        "id": "refine_qi_pill",
+        "label": "开炉炼制聚气灵丹",
+        "profession": "pill_alchemist",
+        "house_facility": "pill_furnace",
+        "ticks": 2,
+        "energy_cost": 14,
+        "inputs": {
+          "spirit_herb": 2,
+          "spirit_dew": 1
+        },
+        "output_item": "qi_pill",
+        "output_qty": 2,
+        "conversion": {
+          "source": "alchemy conversion: 2 spirit_herb + 1 spirit_dew -> 2 qi_pill"
+        },
+        "skill_id": "alchemy"
+      },
+      {
+        "id": "brew_healing_pill",
+        "label": "炼制回春护脉丹",
+        "profession": "pill_alchemist",
+        "house_facility": "pill_furnace",
+        "ticks": 2,
+        "energy_cost": 12,
+        "inputs": {
+          "spirit_herb": 1,
+          "spirit_dew": 1
+        },
+        "output_item": "healing_pill",
+        "output_qty": 2,
+        "conversion": {
+          "source": "alchemy conversion: 1 spirit_herb + 1 spirit_dew -> 2 healing_pill"
+        },
+        "skill_id": "alchemy"
+      },
+      {
+        "id": "inscribe_talisman",
+        "label": "绘制传音护身符",
+        "profession": "talisman_crafter",
+        "house_facility": "talisman_desk",
+        "ticks": 2,
+        "energy_cost": 10,
+        "inputs": {
+          "spirit_wood": 1
+        },
+        "output_item": "talisman",
+        "output_qty": 2,
+        "conversion": {
+          "source": "talisman crafting: 1 spirit_wood (mass 2) -> 2 talisman (mass 2)"
+        },
+        "skill_id": "talisman_craft"
+      },
+      {
+        "id": "forge_spirit_blade",
+        "label": "祭炼青霜飞剑",
+        "profession": "sword_cultivator",
+        "ticks": 3,
+        "energy_cost": 16,
+        "inputs": {
+          "spirit_ore": 1,
+          "spirit_wood": 1
+        },
+        "output_item": "spirit_blade",
+        "output_qty": 1,
+        "conversion": {
+          "source": "artifact forging: 1 spirit_ore + 1 spirit_wood -> 1 spirit_blade"
+        },
+        "node_feature": "authority_seat",
+        "skill_id": "sword_art"
+      },
+      {
+        "id": "inscribe_jade_slip",
+        "label": "刻录功法玉简",
+        "profession": "sword_cultivator",
+        "node_feature": "authority_seat",
+        "ticks": 2,
+        "energy_cost": 10,
+        "inputs": {
+          "spirit_ore": 1
+        },
+        "output_item": "jade_slip",
+        "output_qty": 1,
+        "conversion": {
+          "source": "jade slip carving: 1 spirit_ore -> 1 jade_slip"
+        },
+        "skill_id": "sword_art"
+      },
+      {
+        "id": "mint_enforcement_token",
+        "label": "颁制执法令牌",
+        "profession": "sect_enforcer",
+        "node_feature": "authority_seat",
+        "ticks": 2,
+        "energy_cost": 8,
+        "inputs": {
+          "spirit_ore": 1
+        },
+        "output_item": "enforcement_token",
+        "output_qty": 1,
+        "conversion": {
+          "source": "sect enforcement writ: 1 spirit_ore -> 1 enforcement_token"
+        }
+      }
+    ],
+    "tag_profiles": {
+      "sword_cultivator": {
+        "consumes": [
+          "spirit_grain",
+          "spirit_dew",
+          "qi_pill"
+        ],
+        "target_stock": {
+          "spirit_grain": 8,
+          "spirit_dew": 4,
+          "qi_pill": 2
+        },
+        "produces": [
+          "spirit_blade"
+        ]
+      },
+      "pill_alchemist": {
+        "produces": [
+          "qi_pill",
+          "healing_pill"
+        ],
+        "consumes": [
+          "spirit_herb",
+          "spirit_dew",
+          "spirit_grain"
+        ],
+        "target_stock": {
+          "spirit_herb": 6,
+          "spirit_dew": 4,
+          "qi_pill": 2
+        }
+      },
+      "spirit_farmer": {
+        "produces": [
+          "spirit_herb",
+          "spirit_grain",
+          "spirit_dew"
+        ],
+        "consumes": [
+          "spirit_dew",
+          "spirit_grain"
+        ],
+        "target_stock": {
+          "spirit_grain": 10,
+          "spirit_dew": 6,
+          "spirit_herb": 4
+        }
+      },
+      "talisman_crafter": {
+        "produces": [
+          "talisman"
+        ],
+        "consumes": [
+          "spirit_wood",
+          "spirit_grain"
+        ],
+        "target_stock": {
+          "spirit_wood": 4,
+          "talisman": 2
+        }
+      },
+      "market_steward": {
+        "consumes": [
+          "spirit_grain",
+          "spirit_dew"
+        ],
+        "target_stock": {
+          "spirit_grain": 8,
+          "spirit_stone": 3,
+          "spirit_herb": 4,
+          "spirit_wood": 3,
+          "qi_pill": 1
+        }
+      },
+      "sect_enforcer": {
+        "consumes": [
+          "spirit_grain",
+          "spirit_dew",
+          "healing_pill"
+        ],
+        "target_stock": {
+          "spirit_grain": 8,
+          "spirit_dew": 4,
+          "enforcement_token": 1
+        }
+      },
+      "rogue_raider": {
+        "consumes": [
+          "spirit_grain",
+          "spirit_dew",
+          "healing_pill"
+        ],
+        "target_stock": {
+          "spirit_grain": 6,
+          "spirit_dew": 3,
+          "spirit_stone": 2
+        }
+      },
+      "wandering_cultivator": {
+        "consumes": [
+          "spirit_grain",
+          "spirit_dew"
+        ],
+        "target_stock": {
+          "spirit_grain": 6,
+          "spirit_dew": 3
+        }
+      }
+    },
+    "transitions": {
+      "breakthrough_foundation": {
+        "id": "breakthrough_foundation",
+        "name": "筑基破境",
+        "required_form_id": "qi_refining",
+        "required_slots": {
+          "cultivation": 4500,
+          "qi": 60
+        },
+        "item_costs": {
+          "qi_pill": 1
+        },
+        "slot_costs": {
+          "cultivation": 400,
+          "qi": 40
+        },
+        "ticks": 4,
+        "base_success_permille": 450,
+        "spirit_bonus_permille": 30,
+        "success_form_id": "foundation",
+        "success_grant_tags": [
+          "flying_sword"
+        ],
+        "reward_attributes": {
+          "spirit": 2,
+          "strength": 1
+        },
+        "failure_health_loss": 16
+      },
+      "breakthrough_golden_core": {
+        "id": "breakthrough_golden_core",
+        "name": "筑基结丹",
+        "required_form_id": "foundation",
+        "required_slots": {
+          "cultivation": 7800,
+          "qi": 80
+        },
+        "item_costs": {
+          "qi_pill": 2,
           "spirit_stone": 1
         },
-        "adopt_ticks": 2,
-        "adopt_energy_cost": 4,
-        "ambient_field_delta_per_tick": {
-          "qi_density": 1
+        "slot_costs": {
+          "cultivation": 600,
+          "qi": 50
         },
-        "production_bonus_pct": 20
+        "ticks": 6,
+        "base_success_permille": 300,
+        "spirit_bonus_permille": 30,
+        "success_form_id": "golden_core",
+        "reward_attributes": {
+          "spirit": 2,
+          "strength": 2,
+          "insight": 1
+        },
+        "failure_health_loss": 22
+      },
+      "breakthrough_nascent_soul": {
+        "id": "breakthrough_nascent_soul",
+        "name": "碎丹成婴",
+        "required_form_id": "golden_core",
+        "required_slots": {
+          "cultivation": 9600,
+          "qi": 90
+        },
+        "item_costs": {
+          "qi_pill": 3,
+          "spirit_stone": 2
+        },
+        "slot_costs": {
+          "cultivation": 800,
+          "qi": 60
+        },
+        "ticks": 8,
+        "base_success_permille": 200,
+        "spirit_bonus_permille": 25,
+        "success_form_id": "nascent_soul",
+        "success_grant_tags": [
+          "nascent_soul"
+        ],
+        "reward_attributes": {
+          "spirit": 3,
+          "strength": 2,
+          "insight": 2
+        },
+        "failure_health_loss": 28
       }
     },
-    "production": {
-      "facility_capacity": {
-        "forge": 1,
-        "carpentry_bench": 1,
-        "herb_rack": 1,
-        "compost_pit": 1
+    "skills": {
+      "sword_art": {
+        "id": "sword_art",
+        "name": "剑道",
+        "category": "combat",
+        "max_level": 6,
+        "ranks": [
+          "初窥门径",
+          "登堂入室",
+          "剑意初成",
+          "剑心通明"
+        ],
+        "combat_bonus_per_level": 4,
+        "vigilance_bonus_per_level": 2,
+        "action_affinities": [
+          "spar",
+          "attack",
+          "hunt_threat",
+          "avenge_feud"
+        ]
       },
-      "field_area_per_batch_m2": 1000,
-      "field_area_per_farmer_m2": 1000,
-      "field_source": "scenario budget: one 1000 m2 field per farmer; one simultaneous crop per field; not agronomic calibration",
-      "facility_source": "scenario equipment budget: each installed facility has one serial workstation; capacity is configured, not inferred from population"
+      "alchemy": {
+        "id": "alchemy",
+        "name": "炼丹",
+        "category": "craft",
+        "max_level": 6,
+        "ranks": [
+          "辨药学徒",
+          "成丹熟手",
+          "丹火纯青",
+          "丹道宗师"
+        ],
+        "heal_bonus_per_level": 3,
+        "action_affinities": [
+          "craft",
+          "heal"
+        ]
+      },
+      "talisman_craft": {
+        "id": "talisman_craft",
+        "name": "制符",
+        "category": "craft",
+        "max_level": 6,
+        "ranks": [
+          "画符初学",
+          "灵纹贯通",
+          "符箓大家",
+          "天符宗师"
+        ],
+        "combat_bonus_per_level": 2,
+        "repair_bonus_per_level": 3,
+        "action_affinities": [
+          "craft",
+          "maintain_infra"
+        ]
+      },
+      "spirit_farming": {
+        "id": "spirit_farming",
+        "name": "灵植",
+        "category": "gathering",
+        "max_level": 6,
+        "ranks": [
+          "识土育苗",
+          "催灵熟手",
+          "灵脉培元",
+          "百草圣手"
+        ],
+        "repair_bonus_per_level": 2,
+        "action_affinities": [
+          "craft",
+          "harvest"
+        ]
+      },
+      "array_formation": {
+        "id": "array_formation",
+        "name": "阵法",
+        "category": "array",
+        "max_level": 6,
+        "ranks": [
+          "阵纹入门",
+          "布阵老手",
+          "护山阵师",
+          "阵道宗师"
+        ],
+        "vigilance_bonus_per_level": 3,
+        "repair_bonus_per_level": 6,
+        "action_affinities": [
+          "maintain_infra",
+          "repair_house",
+          "perform_ritual"
+        ]
+      },
+      "trade_craft": {
+        "id": "trade_craft",
+        "name": "商道鉴宝",
+        "category": "trade",
+        "max_level": 6,
+        "ranks": [
+          "识货学徒",
+          "精明牙行",
+          "掌柜行家",
+          "通灵大贾"
+        ],
+        "trade_margin_per_level": 2,
+        "vigilance_bonus_per_level": 2,
+        "action_affinities": [
+          "offer",
+          "propose_agreement",
+          "accept"
+        ]
+      },
+      "movement_art": {
+        "id": "movement_art",
+        "name": "身法遁术",
+        "category": "stealth",
+        "max_level": 6,
+        "ranks": [
+          "轻身入门",
+          "踏云借风",
+          "缩地成寸",
+          "无影神遁"
+        ],
+        "stealth_bonus_per_level": 4,
+        "combat_bonus_per_level": 2,
+        "action_affinities": [
+          "steal",
+          "raid",
+          "move"
+        ]
+      },
+      "medical_dao": {
+        "id": "medical_dao",
+        "name": "医道疗伤",
+        "category": "healing",
+        "max_level": 6,
+        "ranks": [
+          "草药粗通",
+          "悬壶济世",
+          "起死回生",
+          "杏林圣手"
+        ],
+        "heal_bonus_per_level": 6,
+        "action_affinities": [
+          "heal",
+          "medicate"
+        ]
+      }
     },
-    "house_wear": {
-      "interval_ticks": 35040,
-      "condition_loss": 1,
-      "source": "world setting: stone sect halls have a 100-year natural renewal scale; disaster damage is modeled separately"
-    }
+    "world_events": [
+      {
+        "id": "ancient_spirit_treasure",
+        "name": "太古灵宝出世",
+        "category": "artifact_emergence",
+        "target_features": [
+          "spirit_mine",
+          "herb_patch",
+          "ritual_site"
+        ],
+        "prob_permille_per_day": 60,
+        "min_tick": 96,
+        "cooldown_ticks": 672,
+        "duration_ticks": 288,
+        "intensity": 65,
+        "reward_item": "qi_pill",
+        "reward_qty": 2,
+        "reward_coins": 30,
+        "required_power_tier": 2
+      },
+      {
+        "id": "leyline_rift_quake",
+        "name": "青云地壳裂开·灵脉喷涌",
+        "category": "terrain_shift",
+        "target_features": [
+          "herb_patch",
+          "spirit_mine"
+        ],
+        "prob_permille_per_day": 35,
+        "min_tick": 192,
+        "cooldown_ticks": 960,
+        "duration_ticks": 192,
+        "intensity": 72,
+        "sever_medium": "road",
+        "add_features": [
+          "spirit_mine"
+        ],
+        "resource_deposits": {
+          "spirit_vein_ore": 400
+        },
+        "casualty_permille": 18,
+        "damage": 16
+      },
+      {
+        "id": "abyssal_demon_tide",
+        "name": "域外魔潮压境",
+        "category": "external_invasion",
+        "target_features": [
+          "market",
+          "herb_patch"
+        ],
+        "prob_permille_per_day": 35,
+        "min_tick": 288,
+        "cooldown_ticks": 960,
+        "duration_ticks": 288,
+        "intensity": 78,
+        "invasion_threat_id": "spirit_beast_pack",
+        "invasion_threat_boost": 35,
+        "bounty_boost": 80,
+        "casualty_permille": 20,
+        "damage": 18
+      }
+    ]
   },
   "map": {
-    "districts": [
-      {
-        "id": "sect_summit",
-        "name": "Azure Cloud Summit",
-        "geo_region_id": "spirit_vein_peak",
-        "polity_id": "azure_cloud_sect",
-        "terrain": "mountain",
-        "features": [
-          "hub",
-          "academy",
-          "yamen",
-          "water_source",
-          "residential",
-          "shrine"
-        ]
-      },
-      {
-        "id": "sword_peak",
-        "name": "Jade Sword Peak",
-        "geo_region_id": "spirit_vein_peak",
-        "polity_id": "jade_sword_peak",
-        "terrain": "mountain",
-        "features": [
-          "martial_hall",
-          "herb_patch",
-          "water_source",
-          "residential",
-          "woodland",
-          "mine_shaft",
-          "hunting_ground"
-        ]
-      },
-      {
-        "id": "valley_bazaar",
-        "name": "Cloudfoot Spirit Bazaar",
-        "geo_region_id": "valley_spirit_market",
-        "polity_id": "spirit_valley_market",
-        "terrain": "valley",
-        "features": [
-          "market",
-          "farmland",
-          "herb_patch",
-          "water_source",
-          "residential",
-          "forage_ground",
-          "pasture",
-          "fishery_waters",
-          "canal_wharf"
-        ]
-      }
-    ],
-    "roads": [
-      {
-        "from": "sect_summit",
-        "to": "sword_peak",
-        "ticks": 2,
-        "energy_cost": 4,
-        "medium": "road",
-        "freight_capacity": 0
-      },
-      {
-        "from": "sword_peak",
-        "to": "valley_bazaar",
-        "ticks": 3,
-        "energy_cost": 5,
-        "medium": "road",
-        "freight_capacity": 0
-      },
-      {
-        "from": "sect_summit",
-        "to": "valley_bazaar",
-        "ticks": 3,
-        "energy_cost": 6,
-        "medium": "road",
-        "freight_capacity": 0
-      }
-    ],
     "geo_regions": [
       {
         "id": "spirit_vein_peak",
-        "name": "Jade Spirit-Vein Peak",
+        "name": "青云主峰灵脉",
         "coord": {
           "x": 0,
           "y": 0
         },
         "elevation_m": 1850,
-        "terrain": "spirit_peak",
+        "terrain": "mountain",
         "climate": "alpine",
         "resources": {
           "freshwater": 2400,
-          "herb_reserve": 2400,
-          "soil_fertility": 1500
+          "herb_bed": 1800,
+          "spirit_vein_ore": 1600,
+          "spirit_timber": 1200
         },
         "ambient_fields": {
           "qi_density": 95
@@ -4105,21 +1882,22 @@
       },
       {
         "id": "valley_spirit_market",
-        "name": "Cloudfoot Spirit Valley",
+        "name": "云麓药谷与灵市",
         "coord": {
-          "x": 16,
+          "x": 14,
           "y": 0
         },
-        "elevation_m": 320,
+        "elevation_m": 360,
         "terrain": "valley",
         "climate": "temperate",
         "resources": {
           "freshwater": 3200,
-          "herb_reserve": 1200,
-          "soil_fertility": 2800
+          "herb_bed": 2200,
+          "soil_fertility": 2800,
+          "spirit_timber": 1600
         },
         "ambient_fields": {
-          "qi_density": 40
+          "qi_density": 48
         }
       }
     ],
@@ -4131,36 +1909,147 @@
         "conductance_permille": 850
       }
     ],
+    "districts": [
+      {
+        "id": "sect_summit",
+        "name": "青云主峰",
+        "geo_region_id": "spirit_vein_peak",
+        "polity_id": "azure_cloud_sect",
+        "terrain": "mountain",
+        "features": [
+          "hub",
+          "authority_seat",
+          "ritual_site",
+          "public_forum",
+          "water_source",
+          "residential"
+        ],
+        "resource_capacities": {
+          "freshwater": 1200
+        }
+      },
+      {
+        "id": "sword_peak",
+        "name": "玉剑峰丹器坪",
+        "geo_region_id": "spirit_vein_peak",
+        "polity_id": "jade_sword_peak",
+        "terrain": "mountain",
+        "features": [
+          "martial_hall",
+          "spirit_mine",
+          "water_source",
+          "residential"
+        ],
+        "resource_capacities": {
+          "freshwater": 1000,
+          "spirit_vein_ore": 1400
+        }
+      },
+      {
+        "id": "spirit_terraces",
+        "name": "青灵药谷",
+        "geo_region_id": "valley_spirit_market",
+        "polity_id": "azure_cloud_sect",
+        "terrain": "valley",
+        "features": [
+          "farmland",
+          "herb_patch",
+          "spirit_grove",
+          "water_source",
+          "residential"
+        ],
+        "resource_capacities": {
+          "freshwater": 1800,
+          "herb_bed": 2000,
+          "soil_fertility": 2400,
+          "spirit_timber": 1400
+        }
+      },
+      {
+        "id": "valley_bazaar",
+        "name": "云麓灵市",
+        "geo_region_id": "valley_spirit_market",
+        "polity_id": "spirit_valley_market",
+        "terrain": "valley",
+        "features": [
+          "market",
+          "exchange_hub",
+          "public_forum",
+          "water_source",
+          "residential"
+        ],
+        "resource_capacities": {
+          "freshwater": 1400
+        }
+      }
+    ],
+    "roads": [
+      {
+        "from": "sect_summit",
+        "to": "sword_peak",
+        "ticks": 2,
+        "energy_cost": 3,
+        "medium": "air"
+      },
+      {
+        "from": "sect_summit",
+        "to": "spirit_terraces",
+        "ticks": 3,
+        "energy_cost": 5,
+        "medium": "road"
+      },
+      {
+        "from": "sword_peak",
+        "to": "spirit_terraces",
+        "ticks": 2,
+        "energy_cost": 4,
+        "medium": "road"
+      },
+      {
+        "from": "sword_peak",
+        "to": "valley_bazaar",
+        "ticks": 4,
+        "energy_cost": 6,
+        "medium": "air"
+      },
+      {
+        "from": "spirit_terraces",
+        "to": "valley_bazaar",
+        "ticks": 2,
+        "energy_cost": 3,
+        "medium": "road"
+      }
+    ],
     "venues": [
       {
-        "id": "patriarch_hall",
-        "name": "Grand Dao Hall",
+        "id": "grand_dao_hall",
+        "name": "青云执法大殿",
         "district_id": "sect_summit",
         "geo_region_id": "spirit_vein_peak",
         "polity_id": "azure_cloud_sect",
         "kind": "sect_hall",
         "features": [
           "hub",
-          "academy",
-          "yamen",
-          "water_source"
+          "authority_seat",
+          "ritual_site",
+          "public_forum"
         ]
       },
       {
-        "id": "alchemy_pavilion",
-        "name": "Jade Pill Pavilion",
+        "id": "jade_pill_pavilion",
+        "name": "玉剑丹符阁",
         "district_id": "sword_peak",
         "geo_region_id": "spirit_vein_peak",
         "polity_id": "jade_sword_peak",
         "kind": "pavilion",
         "features": [
-          "herb_patch",
+          "martial_hall",
           "water_source"
         ]
       },
       {
         "id": "warded_pill_vault",
-        "name": "Warded Spirit Vault",
+        "name": "禁制藏丹阁",
         "district_id": "sword_peak",
         "geo_region_id": "spirit_vein_peak",
         "polity_id": "jade_sword_peak",
@@ -4172,50 +2061,43 @@
         "indoor": true
       },
       {
-        "id": "spirit_bazaar",
-        "name": "Cloudfoot Spirit Bazaar",
-        "district_id": "valley_bazaar",
+        "id": "herb_terrace_yard",
+        "name": "青灵梯田药圃",
+        "district_id": "spirit_terraces",
         "geo_region_id": "valley_spirit_market",
-        "polity_id": "spirit_valley_market",
-        "kind": "market",
-        "features": [
-          "market",
-          "water_source"
-        ]
-      },
-      {
-        "id": "outer_herb_terrace",
-        "name": "Outer Spirit Terrace",
-        "district_id": "valley_bazaar",
-        "geo_region_id": "valley_spirit_market",
-        "polity_id": "spirit_valley_market",
+        "polity_id": "azure_cloud_sect",
         "kind": "terrace",
         "features": [
           "farmland",
           "herb_patch",
           "water_source"
         ]
+      },
+      {
+        "id": "cloudfoot_bazaar_square",
+        "name": "云麓灵市坊场",
+        "district_id": "valley_bazaar",
+        "geo_region_id": "valley_spirit_market",
+        "polity_id": "spirit_valley_market",
+        "kind": "market",
+        "features": [
+          "market",
+          "exchange_hub",
+          "public_forum"
+        ]
       }
     ],
     "venue_routes": [
       {
-        "from_venue": "patriarch_hall",
-        "to_venue": "alchemy_pavilion",
+        "from_venue": "grand_dao_hall",
+        "to_venue": "jade_pill_pavilion",
         "distance_km": 6,
-        "ticks": 3,
-        "energy_cost": 4,
+        "ticks": 2,
+        "energy_cost": 3,
         "medium": "air"
       },
       {
-        "from_venue": "patriarch_hall",
-        "to_venue": "warded_pill_vault",
-        "distance_km": 6,
-        "ticks": 3,
-        "energy_cost": 4,
-        "medium": "road"
-      },
-      {
-        "from_venue": "alchemy_pavilion",
+        "from_venue": "jade_pill_pavilion",
         "to_venue": "warded_pill_vault",
         "distance_km": 1,
         "ticks": 1,
@@ -4223,20 +2105,28 @@
         "medium": "road"
       },
       {
-        "from_venue": "alchemy_pavilion",
-        "to_venue": "spirit_bazaar",
-        "distance_km": 16,
-        "ticks": 6,
-        "energy_cost": 6,
-        "medium": "air"
+        "from_venue": "jade_pill_pavilion",
+        "to_venue": "herb_terrace_yard",
+        "distance_km": 8,
+        "ticks": 3,
+        "energy_cost": 4,
+        "medium": "road"
       },
       {
-        "from_venue": "spirit_bazaar",
-        "to_venue": "outer_herb_terrace",
-        "distance_km": 2,
-        "ticks": 1,
-        "energy_cost": 2,
+        "from_venue": "herb_terrace_yard",
+        "to_venue": "cloudfoot_bazaar_square",
+        "distance_km": 4,
+        "ticks": 2,
+        "energy_cost": 3,
         "medium": "road"
+      },
+      {
+        "from_venue": "jade_pill_pavilion",
+        "to_venue": "cloudfoot_bazaar_square",
+        "distance_km": 14,
+        "ticks": 4,
+        "energy_cost": 5,
+        "medium": "air"
       }
     ]
   },
@@ -4244,407 +2134,753 @@
     "nodes": [
       {
         "id": "azure_cloud_sect",
-        "name": "Azure Cloud Sect",
-        "level": "sect",
+        "name": "青云宗",
+        "kind": "sect",
         "seat_district_id": "sect_summit",
-        "seat_venue_id": "patriarch_hall",
-        "leader_actor_id": "patriarch_xuan",
-        "treasury": 260,
-        "ledger": {},
-        "market_tax_permille": 40
+        "seat_venue_id": "grand_dao_hall",
+        "treasury": 220,
+        "currencies": {
+          "sect_merit": 500
+        }
       },
       {
         "id": "jade_sword_peak",
-        "name": "Jade Sword Peak",
-        "level": "peak",
+        "name": "玉剑峰",
+        "kind": "peak",
         "de_jure_parent_id": "azure_cloud_sect",
+        "de_facto_controller_id": "azure_cloud_sect",
         "seat_district_id": "sword_peak",
-        "seat_venue_id": "alchemy_pavilion",
-        "leader_actor_id": "elder_qing",
-        "treasury": 120,
-        "ledger": {}
+        "seat_venue_id": "jade_pill_pavilion",
+        "treasury": 90
       },
       {
         "id": "spirit_valley_market",
-        "name": "Cloudfoot Spirit Market",
-        "level": "market",
+        "name": "云麓灵市",
+        "kind": "bazaar",
         "de_jure_parent_id": "azure_cloud_sect",
+        "de_facto_controller_id": "azure_cloud_sect",
         "seat_district_id": "valley_bazaar",
-        "seat_venue_id": "spirit_bazaar",
-        "leader_actor_id": "steward_han",
-        "treasury": 90,
-        "ledger": {}
+        "seat_venue_id": "cloudfoot_bazaar_square",
+        "treasury": 110
       }
     ]
   },
-  "houses": [
-    {
-      "id": "h_sect_hall",
-      "name": "Patriarch Meditation Courtyard",
-      "district": "sect_summit",
-      "owner_id": "patriarch_xuan",
-      "residents": [
-        "patriarch_xuan",
-        "sword_disciple_lin"
-      ],
-      "level": 3,
-      "comfort": 3,
-      "condition": 95
-    },
-    {
-      "id": "h_alchemy",
-      "name": "Jade Pill Furnace Yard",
-      "district": "sword_peak",
-      "owner_id": "elder_qing",
-      "residents": [
-        "elder_qing",
-        "alchemist_mo"
-      ],
-      "level": 3,
-      "comfort": 3,
-      "condition": 92,
-      "facilities": [
-        "herb_rack"
-      ]
-    },
-    {
-      "id": "h_valley",
-      "name": "Cloudfoot Spirit Inn",
-      "district": "valley_bazaar",
-      "owner_id": "steward_han",
-      "residents": [
-        "steward_han",
-        "spirit_grower_yu",
-        "mortal_peddler_wu"
-      ],
-      "level": 2,
-      "comfort": 2,
-      "condition": 88,
-      "facilities": [
-        "compost_pit"
-      ]
-    }
-  ],
   "factions": [
     {
-      "id": "azure_cloud_sect_guild",
-      "name": "Azure Cloud Sword Hall",
+      "id": "azure_cloud_sword_hall",
+      "name": "青云剑堂与执法堂",
       "district": "sect_summit",
       "professions": [
         "sword_cultivator",
-        "scholar",
-        "constable"
+        "sect_enforcer"
       ],
-      "level": 2,
-      "influence": 0
+      "level": 3,
+      "influence": 60
     },
     {
-      "id": "alchemy_pavilion",
-      "name": "Jade Pill Pavilion",
+      "id": "jade_pill_pavilion",
+      "name": "玉剑丹符阁",
       "district": "sword_peak",
       "professions": [
         "pill_alchemist",
-        "herbalist",
-        "healer"
+        "talisman_crafter"
       ],
       "level": 2,
-      "influence": 0
+      "influence": 45
     },
     {
-      "id": "sect_steward_hall",
-      "name": "Outer Spirit Stewardship",
+      "id": "outer_spirit_stewardship",
+      "name": "外门灵务与云麓商盟",
       "district": "valley_bazaar",
       "professions": [
         "spirit_farmer",
-        "farmer",
-        "peddler"
+        "market_steward"
+      ],
+      "level": 2,
+      "influence": 35
+    },
+    {
+      "id": "cloudfoot_shadow_ring",
+      "name": "云麓散修与黑市",
+      "district": "valley_bazaar",
+      "professions": [
+        "wandering_cultivator",
+        "rogue_raider"
       ],
       "level": 1,
-      "influence": 0
+      "influence": 15
+    }
+  ],
+  "houses": [
+    {
+      "id": "h_summit",
+      "name": "青云静修殿",
+      "district": "sect_summit",
+      "owner_id": "xuan_zhen",
+      "residents": [
+        "xuan_zhen",
+        "gu_jianxin",
+        "lin_qingfeng",
+        "shen_wuyue"
+      ],
+      "level": 3,
+      "comfort": 3,
+      "condition": 94
+    },
+    {
+      "id": "h_pill_yard",
+      "name": "玉剑丹庐",
+      "district": "sword_peak",
+      "owner_id": "qing_luan",
+      "residents": [
+        "qing_luan",
+        "mo_chen"
+      ],
+      "level": 3,
+      "comfort": 3,
+      "condition": 90,
+      "facilities": [
+        "pill_furnace"
+      ]
+    },
+    {
+      "id": "h_talisman_loft",
+      "name": "绘符炼器小院",
+      "district": "sword_peak",
+      "owner_id": "su_wan",
+      "residents": [
+        "su_wan"
+      ],
+      "level": 2,
+      "comfort": 2,
+      "condition": 72,
+      "facilities": [
+        "talisman_desk"
+      ]
+    },
+    {
+      "id": "h_herb_cottage",
+      "name": "青灵药庐",
+      "district": "spirit_terraces",
+      "owner_id": "yu_qing",
+      "residents": [
+        "yu_qing",
+        "lu_he",
+        "chen_a_niu"
+      ],
+      "level": 2,
+      "comfort": 2,
+      "condition": 64,
+      "facilities": [
+        "spirit_nursery"
+      ]
+    },
+    {
+      "id": "h_bazaar_inn",
+      "name": "云麓灵市客栈",
+      "district": "valley_bazaar",
+      "owner_id": "han_xiao",
+      "residents": [
+        "han_xiao",
+        "wu_shisan",
+        "zhao_xiaoer",
+        "liu_qingshan"
+      ],
+      "level": 2,
+      "comfort": 2,
+      "condition": 84
+    },
+    {
+      "id": "h_shadow_den",
+      "name": "荒谷散修破院",
+      "district": "valley_bazaar",
+      "owner_id": "xue_sha",
+      "residents": [
+        "xue_sha",
+        "ye_qi"
+      ],
+      "level": 1,
+      "comfort": 1,
+      "condition": 52
     }
   ],
   "actors": [
     {
-      "id": "patriarch_xuan",
-      "name": "Patriarch Xuan",
+      "id": "xuan_zhen",
+      "name": "玄真道人",
       "role": "sword_cultivator",
-      "tags": [
-        "resident",
-        "elder",
-        "ruler",
-        "nascent_soul",
-        "flying_sword",
-        "sound_talisman",
-        "cultivator",
-        "censor"
-      ],
+      "form_id": "nascent_soul",
+      "age_years": 168,
+      "location": "sect_summit",
+      "venue_id": "grand_dao_hall",
+      "home_id": "h_summit",
+      "inside_house": "h_summit",
       "attributes": {
         "strength": 13,
-        "dexterity": 12,
-        "insight": 14,
-        "spirit": 16
+        "dexterity": 11,
+        "insight": 12,
+        "spirit": 14
       },
       "professions": {
-        "sword_cultivator": 5
+        "sword_cultivator": 6
       },
-      "level": 0,
       "guilds": [
-        "azure_cloud_sect_guild"
+        "azure_cloud_sword_hall"
       ],
-      "location": "sect_summit",
-      "venue_id": "patriarch_hall",
-      "home_id": "h_sect_hall",
-      "age_years": 120,
+      "tags": [
+        "resident",
+        "cultivator",
+        "fighter",
+        "ruler",
+        "elder_oversight",
+        "ritual",
+        "flying_sword",
+        "nascent_soul",
+        "sound_talisman"
+      ],
       "health": 100,
-      "energy": 100,
-      "hunger": 0,
-      "sleep_trait": "",
+      "energy": 85,
       "money": 90,
       "currencies": {
         "sect_merit": 120
       },
-      "form_id": "foundation_cultivator",
       "state_slots": {
-        "qi": 60
+        "qi": 95,
+        "cultivation": 9900
       },
       "items": {
-        "food": 8,
+        "spirit_grain": 20,
+        "spirit_dew": 8,
         "qi_pill": 3,
-        "spirit_grain": 4,
-        "spirit_stone": 4,
-        "water": 4
+        "spirit_stone": 5,
+        "spirit_blade": 1,
+        "jade_slip": 2
       },
-      "goal": "Guard the Azure Cloud spirit vein and oversee outer markets",
-      "personality": "",
-      "trust": {}
+      "personality": "stoic, candid, righteous, low_profile",
+      "goal": "坐镇青云主峰维护护山聚灵阵与门规，考察内门真传人选并核查云麓灵市灵石账目",
+      "trust": {
+        "qing_luan": 3,
+        "shen_wuyue": 2,
+        "lin_qingfeng": 1
+      },
+      "hobbies": [
+        "sword_dueling",
+        "sect_mentoring"
+      ],
+      "skills": {
+        "sword_art": 6,
+        "array_formation": 4,
+        "movement_art": 3
+      }
     },
     {
-      "id": "elder_qing",
-      "name": "Elder Qing",
+      "id": "qing_luan",
+      "name": "青鸾长老",
       "role": "pill_alchemist",
-      "form_id": "foundation_cultivator",
-      "tags": [
-        "resident",
-        "elder",
-        "trader",
-        "nascent_soul",
-        "flying_sword",
-        "sound_talisman",
-        "cultivator",
-        "healer"
-      ],
-      "attributes": {
-        "strength": 9,
-        "dexterity": 11,
-        "insight": 15,
-        "spirit": 14
-      },
-      "professions": {
-        "pill_alchemist": 4
-      },
-      "level": 0,
-      "guilds": [
-        "alchemy_pavilion"
-      ],
+      "form_id": "golden_core",
+      "age_years": 112,
       "location": "sword_peak",
-      "venue_id": "alchemy_pavilion",
-      "home_id": "h_alchemy",
-      "age_years": 85,
-      "health": 100,
-      "energy": 96,
-      "hunger": 0,
-      "sleep_trait": "",
-      "money": 70,
-      "items": {
-        "food": 8,
-        "qi_pill": 3,
-        "spirit_herb": 6,
-        "water": 4
-      },
-      "goal": "Refine Qi-Gathering Pills at Jade Sword Peak",
-      "personality": "",
-      "trust": {}
-    },
-    {
-      "id": "sword_disciple_lin",
-      "name": "Disciple Lin",
-      "role": "sword_cultivator",
-      "tags": [
-        "resident",
-        "flying_sword",
-        "sound_talisman",
-        "cultivator",
-        "fighter",
-        "martial"
-      ],
-      "attributes": {
-        "strength": 12,
-        "dexterity": 12,
-        "insight": 10,
-        "spirit": 11
-      },
-      "professions": {
-        "sword_cultivator": 2
-      },
-      "level": 0,
-      "guilds": [
-        "azure_cloud_sect_guild"
-      ],
-      "location": "sect_summit",
-      "venue_id": "patriarch_hall",
-      "home_id": "h_sect_hall",
-      "age_years": 24,
-      "health": 100,
-      "energy": 92,
-      "hunger": 0,
-      "sleep_trait": "",
-      "money": 30,
-      "items": {
-        "food": 7,
-        "qi_pill": 1,
-        "water": 4,
-        "weapon": 1
-      },
-      "goal": "Patrol the mountain peak by sword flight",
-      "personality": "",
-      "trust": {}
-    },
-    {
-      "id": "alchemist_mo",
-      "name": "Alchemist Mo",
-      "role": "pill_alchemist",
-      "tags": [
-        "resident",
-        "trader",
-        "sound_talisman",
-        "cultivator",
-        "healer"
-      ],
+      "venue_id": "jade_pill_pavilion",
+      "home_id": "h_pill_yard",
+      "inside_house": "h_pill_yard",
       "attributes": {
         "strength": 8,
         "dexterity": 10,
         "insight": 13,
-        "spirit": 12
+        "spirit": 13
       },
       "professions": {
-        "pill_alchemist": 2
+        "pill_alchemist": 6
       },
-      "level": 0,
       "guilds": [
-        "alchemy_pavilion"
+        "jade_pill_pavilion"
       ],
-      "location": "sword_peak",
-      "venue_id": "alchemy_pavilion",
-      "home_id": "h_alchemy",
-      "age_years": 32,
-      "health": 100,
-      "energy": 92,
-      "hunger": 0,
-      "sleep_trait": "",
-      "money": 35,
-      "items": {
-        "food": 7,
-        "qi_pill": 2,
-        "spirit_herb": 5,
-        "water": 4
-      },
-      "goal": "Collect spirit herbs and brew healing pills",
-      "personality": "",
-      "trust": {}
-    },
-    {
-      "id": "steward_han",
-      "name": "Steward Han",
-      "role": "peddler",
       "tags": [
         "resident",
+        "cultivator",
+        "healer",
         "trader",
-        "ruler",
-        "sound_talisman",
-        "cultivator"
+        "elder_oversight",
+        "flying_sword",
+        "sound_talisman"
       ],
+      "health": 100,
+      "energy": 82,
+      "money": 75,
+      "currencies": {
+        "sect_merit": 80
+      },
+      "state_slots": {
+        "qi": 85,
+        "cultivation": 7800
+      },
+      "items": {
+        "spirit_grain": 18,
+        "spirit_dew": 6,
+        "spirit_herb": 6,
+        "qi_pill": 3,
+        "healing_pill": 2,
+        "spirit_stone": 3
+      },
+      "personality": "benevolent, careful, patient, aloof",
+      "goal": "把控玉剑丹符阁的聚气丹炼制配额，稳住青灵药谷灵草供应，防备丹方与成品外流黑市",
+      "trust": {
+        "xuan_zhen": 3,
+        "mo_chen": 2,
+        "yu_qing": 1
+      },
+      "hobbies": [
+        "alchemy_tasting",
+        "healing_charity"
+      ],
+      "skills": {
+        "alchemy": 6,
+        "medical_dao": 5,
+        "spirit_farming": 3
+      }
+    },
+    {
+      "id": "lin_qingfeng",
+      "name": "林青锋",
+      "role": "sword_cultivator",
+      "form_id": "foundation",
+      "age_years": 32,
+      "location": "sect_summit",
+      "venue_id": "grand_dao_hall",
+      "home_id": "h_summit",
+      "inside_house": "h_summit",
       "attributes": {
-        "strength": 9,
+        "strength": 11,
+        "dexterity": 10,
+        "insight": 9,
+        "spirit": 11
+      },
+      "professions": {
+        "sword_cultivator": 3
+      },
+      "guilds": [
+        "azure_cloud_sword_hall"
+      ],
+      "tags": [
+        "resident",
+        "cultivator",
+        "fighter",
+        "flying_sword",
+        "sound_talisman"
+      ],
+      "health": 100,
+      "energy": 84,
+      "money": 34,
+      "currencies": {
+        "sect_merit": 35
+      },
+      "state_slots": {
+        "qi": 68,
+        "cultivation": 4600
+      },
+      "items": {
+        "spirit_grain": 16,
+        "spirit_dew": 4,
+        "qi_pill": 1,
+        "spirit_blade": 1,
+        "spirit_stone": 1
+      },
+      "personality": "proud, competitive, flamboyant, reckless",
+      "goal": "在三十天内攒足宗门贡献与灵丹冲击真传剑首之位，并暗中追查灵市抽成克扣与劫修线索",
+      "trust": {
+        "xuan_zhen": 1,
+        "shen_wuyue": 1,
+        "han_xiao": -1
+      },
+      "hobbies": [
+        "sword_dueling",
+        "sect_patrol"
+      ],
+      "skills": {
+        "sword_art": 4,
+        "movement_art": 3
+      }
+    },
+    {
+      "id": "shen_wuyue",
+      "name": "沈无月",
+      "role": "sect_enforcer",
+      "form_id": "foundation",
+      "age_years": 38,
+      "location": "sect_summit",
+      "venue_id": "grand_dao_hall",
+      "home_id": "h_summit",
+      "inside_house": "h_summit",
+      "attributes": {
+        "strength": 11,
+        "dexterity": 10,
+        "insight": 11,
+        "spirit": 10
+      },
+      "professions": {
+        "sect_enforcer": 3
+      },
+      "guilds": [
+        "azure_cloud_sword_hall"
+      ],
+      "tags": [
+        "resident",
+        "cultivator",
+        "fighter",
+        "enforcer",
+        "flying_sword",
+        "sound_talisman"
+      ],
+      "health": 100,
+      "energy": 84,
+      "money": 38,
+      "currencies": {
+        "sect_merit": 40
+      },
+      "state_slots": {
+        "qi": 70,
+        "cultivation": 4800
+      },
+      "items": {
+        "spirit_grain": 16,
+        "spirit_dew": 4,
+        "healing_pill": 1,
+        "enforcement_token": 2,
+        "talisman": 1
+      },
+      "personality": "stern, dutiful, aloof, cautious",
+      "goal": "持执法令牌巡查药谷与云麓灵市，缉拿散修与劫修与黑市暗探，同时查明韩霄的坊市账目",
+      "trust": {
+        "xuan_zhen": 2,
+        "lin_qingfeng": 1,
+        "xue_sha": -2
+      },
+      "hobbies": [
+        "sect_patrol",
+        "sword_dueling"
+      ],
+      "skills": {
+        "sword_art": 4,
+        "array_formation": 3,
+        "movement_art": 2
+      }
+    },
+    {
+      "id": "mo_chen",
+      "name": "墨尘",
+      "role": "pill_alchemist",
+      "form_id": "qi_refining",
+      "age_years": 26,
+      "location": "sword_peak",
+      "venue_id": "jade_pill_pavilion",
+      "home_id": "h_pill_yard",
+      "inside_house": "h_pill_yard",
+      "attributes": {
+        "strength": 7,
         "dexterity": 9,
         "insight": 11,
         "spirit": 10
       },
       "professions": {
-        "peddler": 2
+        "pill_alchemist": 2
       },
-      "level": 0,
       "guilds": [
-        "sect_steward_hall"
+        "jade_pill_pavilion"
       ],
-      "location": "valley_bazaar",
-      "venue_id": "spirit_bazaar",
-      "home_id": "h_valley",
-      "age_years": 41,
-      "health": 100,
-      "energy": 90,
-      "hunger": 0,
-      "sleep_trait": "",
-      "money": 55,
-      "items": {
-        "food": 8,
-        "spirit_grain": 4,
-        "spirit_stone": 3,
-        "water": 4
-      },
-      "goal": "Manage Cloudfoot Spirit Market exchange and tribute",
-      "personality": "",
-      "trust": {}
-    },
-    {
-      "id": "spirit_grower_yu",
-      "name": "Yu Qing",
-      "role": "spirit_farmer",
       "tags": [
         "resident",
+        "cultivator",
+        "healer",
         "trader",
-        "spirit_farmer",
-        "water_user"
+        "sound_talisman"
       ],
+      "health": 100,
+      "energy": 80,
+      "money": 28,
+      "currencies": {
+        "sect_merit": 20
+      },
+      "state_slots": {
+        "qi": 56,
+        "cultivation": 2200
+      },
+      "items": {
+        "spirit_grain": 14,
+        "spirit_dew": 4,
+        "spirit_herb": 4,
+        "healing_pill": 2,
+        "qi_pill": 1
+      },
+      "personality": "ambitious, skeptical, competitive, inquisitive",
+      "goal": "设法弄到更多上品青玉灵草提高成丹率，早日晋升丹阁客卿，必要时绕过师父在坊市私换紧缺材料",
+      "trust": {
+        "qing_luan": 2,
+        "su_wan": 1,
+        "yu_qing": 1
+      },
+      "hobbies": [
+        "alchemy_tasting",
+        "market_bargaining"
+      ],
+      "skills": {
+        "alchemy": 3,
+        "spirit_farming": 2,
+        "medical_dao": 2
+      }
+    },
+    {
+      "id": "su_wan",
+      "name": "苏晚",
+      "role": "talisman_crafter",
+      "form_id": "qi_refining",
+      "age_years": 29,
+      "location": "sword_peak",
+      "venue_id": "jade_pill_pavilion",
+      "home_id": "h_talisman_loft",
+      "inside_house": "h_talisman_loft",
       "attributes": {
-        "strength": 10,
+        "strength": 8,
+        "dexterity": 11,
+        "insight": 10,
+        "spirit": 9
+      },
+      "professions": {
+        "talisman_crafter": 2
+      },
+      "guilds": [
+        "jade_pill_pavilion"
+      ],
+      "tags": [
+        "resident",
+        "cultivator",
+        "trader",
+        "sound_talisman"
+      ],
+      "health": 100,
+      "energy": 80,
+      "money": 26,
+      "currencies": {
+        "sect_merit": 18
+      },
+      "state_slots": {
+        "qi": 54,
+        "cultivation": 2100
+      },
+      "items": {
+        "spirit_grain": 14,
+        "spirit_dew": 3,
+        "spirit_wood": 2,
+        "spirit_ore": 2,
+        "talisman": 2,
+        "qi_pill": 1
+      },
+      "personality": "sociable, generous, gregarious, meddlesome",
+      "goal": "采集青灵木与玄铁灵矿，炼制护身符与飞剑供应宗门和坊市，顺手修缮自家炼器小院并攒灵石筑基",
+      "trust": {
+        "mo_chen": 1,
+        "wu_shisan": 1,
+        "lin_qingfeng": 1
+      },
+      "hobbies": [
+        "tea_gossip",
+        "talisman_collecting"
+      ],
+      "skills": {
+        "talisman_craft": 3,
+        "array_formation": 2,
+        "trade_craft": 1
+      }
+    },
+    {
+      "id": "yu_qing",
+      "name": "余青",
+      "role": "spirit_farmer",
+      "form_id": "qi_refining",
+      "age_years": 34,
+      "location": "spirit_terraces",
+      "venue_id": "herb_terrace_yard",
+      "home_id": "h_herb_cottage",
+      "inside_house": "h_herb_cottage",
+      "attributes": {
+        "strength": 9,
         "dexterity": 8,
         "insight": 9,
-        "spirit": 10
+        "spirit": 9
       },
       "professions": {
         "spirit_farmer": 2
       },
-      "level": 0,
       "guilds": [
-        "sect_steward_hall"
+        "outer_spirit_stewardship"
       ],
-      "location": "valley_bazaar",
-      "venue_id": "outer_herb_terrace",
-      "home_id": "h_valley",
-      "age_years": 28,
-      "health": 100,
-      "energy": 90,
-      "hunger": 0,
-      "sleep_trait": "",
-      "money": 22,
-      "items": {
-        "food": 7,
-        "spirit_grain": 3,
-        "spirit_herb": 4,
-        "water": 4
-      },
-      "goal": "Tend spirit herb terraces and sell herbs to the sect",
-      "personality": "",
-      "trust": {}
-    },
-    {
-      "id": "mortal_peddler_wu",
-      "name": "Mortal Trader Wu",
-      "role": "peddler",
       "tags": [
         "resident",
+        "cultivator",
+        "trader",
+        "sound_talisman"
+      ],
+      "health": 100,
+      "energy": 78,
+      "money": 20,
+      "currencies": {
+        "sect_merit": 15
+      },
+      "state_slots": {
+        "qi": 46,
+        "cultivation": 1400
+      },
+      "items": {
+        "spirit_grain": 18,
+        "spirit_dew": 5,
+        "spirit_herb": 5,
+        "spirit_wood": 1
+      },
+      "personality": "careful, thrifty, reclusive, timid",
+      "goal": "守住青灵药谷梯田与灵泉引水渠，按期交足玉剑丹符阁灵草配额，防止蚀灵妖狼与劫修盗采",
+      "trust": {
+        "lu_he": 2,
+        "qing_luan": 1,
+        "xue_sha": -1
+      },
+      "hobbies": [
+        "spirit_gardening",
+        "healing_charity"
+      ],
+      "skills": {
+        "spirit_farming": 3,
+        "medical_dao": 2
+      }
+    },
+    {
+      "id": "lu_he",
+      "name": "陆禾",
+      "role": "spirit_farmer",
+      "form_id": "qi_refining",
+      "age_years": 21,
+      "location": "spirit_terraces",
+      "venue_id": "herb_terrace_yard",
+      "home_id": "h_herb_cottage",
+      "inside_house": "h_herb_cottage",
+      "attributes": {
+        "strength": 8,
+        "dexterity": 8,
+        "insight": 8,
+        "spirit": 8
+      },
+      "professions": {
+        "spirit_farmer": 1
+      },
+      "guilds": [
+        "outer_spirit_stewardship"
+      ],
+      "tags": [
+        "resident",
+        "cultivator",
         "trader"
       ],
+      "health": 100,
+      "energy": 78,
+      "money": 12,
+      "currencies": {
+        "sect_merit": 5
+      },
+      "state_slots": {
+        "qi": 40,
+        "cultivation": 900
+      },
+      "items": {
+        "spirit_grain": 14,
+        "spirit_dew": 4,
+        "spirit_herb": 2
+      },
+      "personality": "sociable, flamboyant, meddlesome, inquisitive",
+      "goal": "一边帮余青照看灵田采药，一边在云麓灵市换到聚气灵丹与传音符，争取早日脱离外门杂役身份",
+      "trust": {
+        "yu_qing": 2,
+        "wu_shisan": 1
+      },
+      "hobbies": [
+        "spirit_gardening",
+        "tea_gossip"
+      ],
+      "skills": {
+        "spirit_farming": 2,
+        "trade_craft": 2
+      }
+    },
+    {
+      "id": "han_xiao",
+      "name": "韩霄",
+      "role": "market_steward",
+      "form_id": "foundation",
+      "age_years": 45,
+      "location": "valley_bazaar",
+      "venue_id": "cloudfoot_bazaar_square",
+      "home_id": "h_bazaar_inn",
+      "inside_house": "h_bazaar_inn",
+      "attributes": {
+        "strength": 8,
+        "dexterity": 9,
+        "insight": 12,
+        "spirit": 10
+      },
+      "professions": {
+        "market_steward": 3
+      },
+      "guilds": [
+        "outer_spirit_stewardship"
+      ],
+      "tags": [
+        "resident",
+        "cultivator",
+        "trader",
+        "ruler",
+        "sound_talisman"
+      ],
+      "health": 100,
+      "energy": 82,
+      "money": 68,
+      "currencies": {
+        "sect_merit": 45
+      },
+      "state_slots": {
+        "qi": 64,
+        "cultivation": 4100
+      },
+      "items": {
+        "spirit_grain": 18,
+        "spirit_dew": 4,
+        "spirit_stone": 4,
+        "spirit_herb": 2,
+        "talisman": 1
+      },
+      "personality": "calculating, cautious, low_profile, thrifty",
+      "goal": "坐镇云麓灵市掌握灵石兑换与灵草收购差价，在执法堂查账前把灰账抹平并稳住商盟地位",
+      "trust": {
+        "wu_shisan": 1,
+        "mo_chen": 1,
+        "shen_wuyue": -1
+      },
+      "hobbies": [
+        "market_bargaining",
+        "tea_gossip"
+      ],
+      "skills": {
+        "trade_craft": 4,
+        "talisman_craft": 2,
+        "array_formation": 1
+      }
+    },
+    {
+      "id": "wu_shisan",
+      "name": "吴十三",
+      "role": "market_steward",
+      "form_id": "qi_refining",
+      "age_years": 36,
+      "location": "valley_bazaar",
+      "venue_id": "cloudfoot_bazaar_square",
+      "home_id": "h_bazaar_inn",
+      "inside_house": "h_bazaar_inn",
       "attributes": {
         "strength": 8,
         "dexterity": 9,
@@ -4652,74 +2888,463 @@
         "spirit": 8
       },
       "professions": {
-        "peddler": 1
+        "market_steward": 2
       },
-      "level": 0,
       "guilds": [
-        "sect_steward_hall"
+        "outer_spirit_stewardship"
       ],
-      "location": "valley_bazaar",
-      "venue_id": "spirit_bazaar",
-      "home_id": "h_valley",
-      "age_years": 35,
+      "tags": [
+        "resident",
+        "cultivator",
+        "trader",
+        "sound_talisman"
+      ],
       "health": 100,
-      "energy": 90,
-      "hunger": 0,
-      "sleep_trait": "",
-      "money": 30,
-      "items": {
-        "food": 8,
-        "seeds": 3,
-        "water": 4
+      "energy": 80,
+      "money": 42,
+      "state_slots": {
+        "qi": 48,
+        "cultivation": 1600
       },
-      "goal": "Supply mortal grain and herbs in the valley bazaar",
-      "personality": "",
-      "trust": {}
+      "items": {
+        "spirit_grain": 16,
+        "spirit_dew": 4,
+        "spirit_wood": 2,
+        "spirit_ore": 1,
+        "healing_pill": 1,
+        "spirit_stone": 2
+      },
+      "personality": "generous, easygoing, gregarious, diplomatic",
+      "goal": "在青灵药谷、玉剑峰与云麓灵市之间倒腾灵草、灵木与丹药赚差价，左右逢源但绝不轻易站错队",
+      "trust": {
+        "su_wan": 1,
+        "han_xiao": 1,
+        "lu_he": 1
+      },
+      "hobbies": [
+        "tea_gossip",
+        "market_bargaining"
+      ],
+      "skills": {
+        "trade_craft": 3,
+        "movement_art": 2,
+        "medical_dao": 1
+      }
+    },
+    {
+      "id": "xue_sha",
+      "name": "血煞散人",
+      "role": "rogue_raider",
+      "form_id": "foundation",
+      "age_years": 49,
+      "location": "valley_bazaar",
+      "venue_id": "cloudfoot_bazaar_square",
+      "home_id": "h_shadow_den",
+      "inside_house": "h_shadow_den",
+      "attributes": {
+        "strength": 12,
+        "dexterity": 10,
+        "insight": 9,
+        "spirit": 10
+      },
+      "professions": {
+        "rogue_raider": 3
+      },
+      "guilds": [
+        "cloudfoot_shadow_ring"
+      ],
+      "tags": [
+        "resident",
+        "cultivator",
+        "fighter",
+        "rogue_outlaw",
+        "raider",
+        "sound_talisman"
+      ],
+      "health": 100,
+      "energy": 82,
+      "money": 24,
+      "state_slots": {
+        "qi": 66,
+        "cultivation": 4500
+      },
+      "items": {
+        "spirit_grain": 12,
+        "spirit_dew": 3,
+        "spirit_blade": 1,
+        "healing_pill": 1
+      },
+      "personality": "ruthless, proud, provocative, vengeful",
+      "goal": "盯紧落单外门弟子与青灵药谷灵草，伺机劫掠聚气丹和灵石，同时避开沈无月与玄真道人的神识搜查",
+      "trust": {
+        "ye_qi": 2,
+        "shen_wuyue": -3,
+        "xuan_zhen": -3
+      },
+      "hobbies": [
+        "shadow_raiding",
+        "sword_dueling"
+      ],
+      "skills": {
+        "sword_art": 4,
+        "movement_art": 4,
+        "array_formation": 1
+      }
+    },
+    {
+      "id": "ye_qi",
+      "name": "叶七",
+      "role": "wandering_cultivator",
+      "form_id": "qi_refining",
+      "age_years": 27,
+      "location": "valley_bazaar",
+      "venue_id": "cloudfoot_bazaar_square",
+      "home_id": "h_shadow_den",
+      "inside_house": "h_shadow_den",
+      "attributes": {
+        "strength": 7,
+        "dexterity": 12,
+        "insight": 10,
+        "spirit": 8
+      },
+      "professions": {
+        "wandering_cultivator": 2
+      },
+      "guilds": [
+        "cloudfoot_shadow_ring"
+      ],
+      "tags": [
+        "resident",
+        "cultivator",
+        "trader",
+        "rogue_outlaw",
+        "thief"
+      ],
+      "health": 100,
+      "energy": 80,
+      "money": 22,
+      "state_slots": {
+        "qi": 50,
+        "cultivation": 1900
+      },
+      "items": {
+        "spirit_grain": 12,
+        "spirit_dew": 3,
+        "talisman": 1,
+        "spirit_stone": 1
+      },
+      "personality": "cunning, cautious, paranoid, low_profile",
+      "goal": "在云麓灵市暗巷顺手牵羊窃取灵石与丹药，向韩霄或散修倒卖情报换庇护，风声紧时随时弃车保帅",
+      "trust": {
+        "xue_sha": 2,
+        "han_xiao": 1,
+        "shen_wuyue": -2
+      },
+      "hobbies": [
+        "shadow_brokering",
+        "tea_gossip"
+      ],
+      "skills": {
+        "movement_art": 4,
+        "trade_craft": 2,
+        "talisman_craft": 1
+      }
+    },
+    {
+      "id": "gu_jianxin",
+      "name": "顾剑心",
+      "role": "sect_enforcer",
+      "form_id": "golden_core",
+      "age_years": 96,
+      "location": "sect_summit",
+      "venue_id": "grand_dao_hall",
+      "home_id": "h_summit",
+      "inside_house": "h_summit",
+      "attributes": {
+        "strength": 12,
+        "dexterity": 11,
+        "insight": 12,
+        "spirit": 13
+      },
+      "professions": {
+        "sect_enforcer": 5
+      },
+      "guilds": [
+        "azure_cloud_sword_hall"
+      ],
+      "tags": [
+        "resident",
+        "cultivator",
+        "fighter",
+        "enforcer",
+        "elder_oversight",
+        "flying_sword",
+        "sound_talisman"
+      ],
+      "health": 100,
+      "energy": 85,
+      "money": 64,
+      "currencies": {
+        "sect_merit": 90
+      },
+      "state_slots": {
+        "qi": 88,
+        "cultivation": 8100
+      },
+      "items": {
+        "spirit_grain": 10,
+        "spirit_dew": 4,
+        "qi_pill": 2,
+        "healing_pill": 2,
+        "enforcement_token": 2,
+        "spirit_blade": 1,
+        "talisman": 1
+      },
+      "personality": "stern, righteous, stoic, dutiful",
+      "goal": "以金丹执剑长老身份镇守执法堂、督查山门法度，震慑云麓劫修并护持山下凡俗灵市安宁",
+      "trust": {
+        "xuan_zhen": 3,
+        "shen_wuyue": 2,
+        "qing_luan": 2,
+        "xue_sha": -3
+      },
+      "hobbies": [
+        "sect_patrol",
+        "sect_mentoring"
+      ],
+      "skills": {
+        "sword_art": 5,
+        "array_formation": 4,
+        "movement_art": 3
+      }
+    },
+    {
+      "id": "chen_a_niu",
+      "name": "陈阿牛",
+      "role": "spirit_farmer",
+      "form_id": "mortal",
+      "age_years": 28,
+      "location": "spirit_terraces",
+      "venue_id": "herb_terrace_yard",
+      "home_id": "h_herb_cottage",
+      "inside_house": "h_herb_cottage",
+      "attributes": {
+        "strength": 9,
+        "dexterity": 7,
+        "insight": 7,
+        "spirit": 6
+      },
+      "professions": {
+        "spirit_farmer": 1
+      },
+      "guilds": [
+        "outer_spirit_stewardship"
+      ],
+      "tags": [
+        "resident",
+        "trader"
+      ],
+      "health": 100,
+      "energy": 78,
+      "money": 10,
+      "items": {
+        "spirit_grain": 14,
+        "spirit_dew": 4,
+        "spirit_herb": 2
+      },
+      "personality": "careful, thrifty, humble, timid",
+      "goal": "作为无灵根凡俗佃农在青灵药谷耕种挑水换取口粮，见仙师低头避让、盼免遭妖兽与饥荒",
+      "trust": {
+        "yu_qing": 2,
+        "lu_he": 1,
+        "zhao_xiaoer": 2
+      },
+      "hobbies": [
+        "spirit_gardening"
+      ],
+      "skills": {
+        "spirit_farming": 2
+      }
+    },
+    {
+      "id": "zhao_xiaoer",
+      "name": "赵小二",
+      "role": "market_steward",
+      "form_id": "mortal",
+      "age_years": 24,
+      "location": "valley_bazaar",
+      "venue_id": "cloudfoot_bazaar_square",
+      "home_id": "h_bazaar_inn",
+      "inside_house": "h_bazaar_inn",
+      "attributes": {
+        "strength": 7,
+        "dexterity": 8,
+        "insight": 8,
+        "spirit": 6
+      },
+      "professions": {
+        "market_steward": 1
+      },
+      "guilds": [
+        "outer_spirit_stewardship"
+      ],
+      "tags": [
+        "resident",
+        "trader"
+      ],
+      "health": 100,
+      "energy": 78,
+      "money": 14,
+      "items": {
+        "spirit_grain": 14,
+        "spirit_dew": 4,
+        "spirit_wood": 1
+      },
+      "personality": "gregarious, sociable, diplomatic, cautious",
+      "goal": "在云麓灵市客栈当凡人跑堂伙计，迎送八方修士与行商赚取碎钱与口粮，遇斗法立刻躲避",
+      "trust": {
+        "han_xiao": 2,
+        "wu_shisan": 2,
+        "chen_a_niu": 2
+      },
+      "hobbies": [
+        "tea_gossip",
+        "market_bargaining"
+      ],
+      "skills": {
+        "trade_craft": 2
+      }
+    },
+    {
+      "id": "liu_qingshan",
+      "name": "柳青山",
+      "role": "market_steward",
+      "form_id": "mortal",
+      "age_years": 31,
+      "location": "valley_bazaar",
+      "venue_id": "cloudfoot_bazaar_square",
+      "home_id": "h_bazaar_inn",
+      "inside_house": "h_bazaar_inn",
+      "attributes": {
+        "strength": 9,
+        "dexterity": 8,
+        "insight": 8,
+        "spirit": 6
+      },
+      "professions": {
+        "market_steward": 1
+      },
+      "guilds": [
+        "outer_spirit_stewardship"
+      ],
+      "tags": [
+        "resident",
+        "trader"
+      ],
+      "health": 100,
+      "energy": 80,
+      "money": 16,
+      "items": {
+        "spirit_grain": 12,
+        "spirit_dew": 4,
+        "spirit_herb": 1
+      },
+      "personality": "inquisitive, candid, reckless, generous",
+      "goal": "作为凡人走山脚夫常年往返云麓灵市与青灵药谷挑运草木灵粮，胆大爱打听仙家传闻",
+      "trust": {
+        "zhao_xiaoer": 2,
+        "wu_shisan": 1,
+        "chen_a_niu": 1
+      },
+      "hobbies": [
+        "market_bargaining",
+        "tea_gossip"
+      ],
+      "skills": {
+        "trade_craft": 2,
+        "movement_art": 1
+      }
     }
   ],
   "cohorts": [
     {
-      "id": "cohort_outer_disciples",
-      "name": "Mortal Outer Herb Tenders",
-      "district": "valley_bazaar",
-      "faction_id": "sect_steward_hall",
+      "id": "cohort_outer_growers",
+      "name": "青灵外门灵植众",
+      "district": "spirit_terraces",
+      "faction_id": "outer_spirit_stewardship",
       "profession": "spirit_farmer",
+      "form_id": "qi_refining",
       "tier": 1,
       "prof_level": 1,
-      "rank": "Outer Tender",
-      "population": 140,
-      "avg_energy": 84,
+      "rank": "灵田杂役",
+      "population": 120,
+      "avg_energy": 82,
       "avg_hunger": 0,
       "money_pool": 1400,
       "item_pool": {
-        "food": 900,
-        "spirit_grain": 300,
-        "spirit_herb": 240,
-        "water": 400
+        "spirit_grain": 720,
+        "spirit_herb": 220,
+        "spirit_dew": 360
       }
     },
     {
-      "id": "cohort_peak_attendants",
-      "name": "Sword Peak Mortal Porters",
+      "id": "cohort_pill_apprentices",
+      "name": "玉剑丹房弟子众",
       "district": "sword_peak",
-      "faction_id": "alchemy_pavilion",
-      "profession": "herbalist",
+      "faction_id": "jade_pill_pavilion",
+      "profession": "pill_alchemist",
+      "form_id": "qi_refining",
       "tier": 1,
-      "prof_level": 1,
-      "rank": "Apprentice",
-      "population": 60,
+      "prof_level": 2,
+      "rank": "炼丹师",
+      "population": 50,
       "avg_energy": 84,
       "avg_hunger": 0,
-      "money_pool": 700,
+      "money_pool": 1100,
       "item_pool": {
-        "food": 400,
-        "herb": 150,
-        "water": 200
+        "spirit_grain": 900,
+        "spirit_herb": 180,
+        "qi_pill": 40,
+        "spirit_dew": 200
+      }
+    },
+    {
+      "id": "cohort_valley_mortals",
+      "name": "云麓山下凡俗市井众",
+      "district": "valley_bazaar",
+      "faction_id": "outer_spirit_stewardship",
+      "profession": "market_steward",
+      "form_id": "mortal",
+      "tier": 0,
+      "prof_level": 1,
+      "rank": "坊市凡民",
+      "population": 160,
+      "avg_energy": 80,
+      "avg_hunger": 0,
+      "money_pool": 900,
+      "item_pool": {
+        "spirit_grain": 1000,
+        "spirit_dew": 480
       }
     }
   ],
-  "ecology": {
-    "enabled": true,
-    "scale_pop": 207
+  "knowledge": {
+    "records": {
+      "array_refinement": {
+        "tech_id": "array_refinement",
+        "discoverer_id": "xuan_zhen",
+        "known_actors": [
+          "xuan_zhen",
+          "qing_luan"
+        ]
+      },
+      "sword_intent": {
+        "tech_id": "sword_intent",
+        "discoverer_id": "xuan_zhen",
+        "known_actors": [
+          "xuan_zhen"
+        ]
+      }
+    }
   }
 }
