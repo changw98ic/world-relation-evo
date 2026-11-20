@@ -129,6 +129,7 @@ type Actor struct {
 	Trust            map[string]int    `json:"trust"`
 	Task             *Task             `json:"task,omitempty"`
 	Memories         []Memory          `json:"memories,omitempty"`
+	Ambitions        []ActorAmbition   `json:"ambitions,omitempty"`
 }
 
 // IdentityTags returns the actor's social tags plus held profession IDs for economic profile lookups.
@@ -187,6 +188,9 @@ type World struct {
 	SpotlightRumor    *SpotlightRumorState     `json:"spotlight_rumor,omitempty"`
 	ActiveEffects     []ActiveEffect           `json:"active_effects,omitempty"`
 	ActiveWorldEvents []ActiveWorldEvent       `json:"active_world_events,omitempty"`
+	Parties           []Party                  `json:"parties,omitempty"`
+	Diplomacy         *DiplomacyState          `json:"diplomacy,omitempty"`
+	Secrets           []ActorSecret            `json:"secrets,omitempty"`
 	FlowGrid          *FlowGridState           `json:"flow_grid,omitempty"`
 	LedgerAudit      *LedgerAuditState        `json:"ledger_audit,omitempty"`
 	Knowledge        *KnowledgeBook           `json:"knowledge,omitempty"`
@@ -298,6 +302,9 @@ type Perception struct {
 	LocalCohorts           []CohortView          `json:"local_cohorts,omitempty"`
 	ActiveEffects          []ActiveEffect        `json:"active_effects,omitempty"`
 	ActiveWorldEvents      []ActiveWorldEvent    `json:"active_world_events,omitempty"`
+	Parties                []Party               `json:"parties,omitempty"`
+	FactionDiplomacy       []FactionDiplomacy    `json:"faction_diplomacy,omitempty"`
+	KnownSecrets           []ActorSecret         `json:"known_secrets,omitempty"`
 	Offers                 []Offer               `json:"offers,omitempty"`
 	Interactions           []InteractionView     `json:"interactions,omitempty"`
 	OfferBlockReasons      map[int64]string      `json:"offer_block_reasons,omitempty"`
@@ -887,6 +894,9 @@ func (w *World) View(id string) Perception {
 	}
 	p.ActiveEffects = w.perceivedActiveEffects(a, w.ActiveEffects)
 	p.ActiveWorldEvents = w.perceivedActiveWorldEvents(a)
+	p.Parties = w.perceivedParties(a)
+	p.FactionDiplomacy = w.perceivedFactionDiplomacy(a)
+	p.KnownSecrets = w.perceivedSecrets(a)
 	for _, c := range w.Cohorts {
 		if c.Population > 0 && c.District == a.Location {
 			p.LocalCohorts = append(p.LocalCohorts, CohortView{
@@ -1527,6 +1537,9 @@ func (w *World) Step(ctx context.Context, d Decider) ([]Event, error) {
 	events = append(events, w.StepRelationsAndTurf(w.ensureRelations())...)
 	events = append(events, w.StepJusticeAndRevolt(w.ensureJusticeRevolt())...)
 	events = append(events, w.ensureRelations().ObserveCausalRelationEvents(w, events)...)
+	events = append(events, w.stepParties()...)
+	events = append(events, w.stepDiplomacy(events)...)
+	events = append(events, w.stepAmbitionsAndSecrets(events)...)
 
 	for i := range w.Actors {
 		w.refreshActor(&w.Actors[i])
@@ -2116,7 +2129,7 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 		if enc == nil {
 			return nil
 		}
-		suppressed := 8 + CombatPowerWithCatalog(w.Catalog, *a)/4
+		suppressed := 8 + (CombatPowerWithCatalog(w.Catalog, *a)+w.partyCombatSupportBonus(*a))/4
 		curAct := ds.ThreatActivity[enc.ID]
 		if suppressed > curAct {
 			suppressed = curAct
@@ -2159,6 +2172,7 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 			"drop_item":    enc.RareDropItem,
 			"drop_qty":     dropQty,
 		})}
+		events = append(events, w.settlePartyRewardSplit(a, bounty, "threat_hunted")...)
 		return append(events, w.grantCombatXP(a, x, 8, 3)...)
 	case "perform_ritual":
 		var rit *RitualSpec
@@ -2459,6 +2473,39 @@ func (w *World) Apply(id string, x Action) []Event {
 
 	case "claim_world_event":
 		return w.applyClaimWorldEvent(a, x)
+
+	case "form_party":
+		return w.applyFormParty(a, x)
+
+	case "join_party":
+		return w.applyJoinParty(a, x)
+
+	case "leave_party":
+		return w.applyLeaveParty(a, x)
+
+	case "betray_party":
+		return w.applyBetrayParty(a, x)
+
+	case "propose_alliance":
+		return w.applyProposeAlliance(a, x)
+
+	case "declare_war":
+		return w.applyDeclareWar(a, x)
+
+	case "make_peace":
+		return w.applyMakePeace(a, x)
+
+	case "set_ambition":
+		return w.applySetAmbition(a, x)
+
+	case "investigate_actor":
+		return w.applyInvestigateActor(a, x)
+
+	case "blackmail":
+		return w.applyBlackmail(a, x)
+
+	case "expose_secret":
+		return w.applyExposeSecret(a, x)
 
 	case "move":
 		if a.InsideHouse != "" {

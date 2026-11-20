@@ -381,6 +381,9 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 	a.Trust = cloneIntMap(a.Trust)
 	a.StateSlots = cloneIntMap(a.StateSlots)
 	a.Currencies = cloneInt64Map(a.Currencies)
+	if a.Ambitions != nil {
+		a.Ambitions = append([]ActorAmbition(nil), a.Ambitions...)
+	}
 	if a.Items == nil {
 		a.Items = map[string]int{}
 	}
@@ -413,6 +416,9 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 	}
 	p.ActiveEffects = w.perceivedActiveEffects(a, idx.activeEffectsSnap)
 	p.ActiveWorldEvents = w.perceivedActiveWorldEvents(a)
+	p.Parties = w.perceivedParties(a)
+	p.FactionDiplomacy = w.perceivedFactionDiplomacy(a)
+	p.KnownSecrets = w.perceivedSecrets(a)
 	if cohorts := idx.cohortsByDistrict[a.Location]; len(cohorts) > 0 {
 		p.LocalCohorts = append([]CohortView(nil), cohorts...)
 	}

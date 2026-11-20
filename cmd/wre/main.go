@@ -68,6 +68,8 @@ func runArgs(args []string, stdout, stderr io.Writer) error {
 			return runExpandResponses(args[1:], stdout, stderr)
 		case "expand-rulebook":
 			return runExpandRulebook(args[1:], stdout, stderr)
+		case "chronicle":
+			return runChronicle(args[1:], stdout, stderr)
 		}
 	}
 	return runSim(args, stdout, stderr)

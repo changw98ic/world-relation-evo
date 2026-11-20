@@ -470,7 +470,11 @@ func (w *World) applyClaimWorldEvent(a *Actor, x Action) []Event {
 		"reward_coins": ev.RewardCoins,
 		"observation":  obs,
 	}, witnesses...)
-	return []Event{claimEv}
+	outEvs := []Event{claimEv}
+	if ev.RewardCoins > 0 {
+		outEvs = append(outEvs, w.settlePartyRewardSplit(a, ev.RewardCoins, "world_event_claimed")...)
+	}
+	return outEvs
 }
 
 // perceivedActiveWorldEvents returns only active world events that actor `a` is currently

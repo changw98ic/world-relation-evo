@@ -1943,7 +1943,9 @@ func (s *RulebookSelector) tryEnvAndDeathReactionLocked(p sim.Perception, option
 			if m.Observation != nil {
 				eventCat = m.Observation.ObjectID
 			}
-		case "disaster_struck", "threat_surge", "macro_anomaly", "wild_encounter":
+		case "disaster_struck", "threat_surge", "macro_anomaly", "wild_encounter",
+			"party_betrayed", "faction_war_declared", "alliance_formed", "peace_treaty_signed",
+			"secret_discovered", "blackmailed", "secret_exposed", "ambition_completed":
 			triggerKind = m.Kind
 		case "speech", "channel_message":
 			if m.Source == a.ID || m.Statement == nil {

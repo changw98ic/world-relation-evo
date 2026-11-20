@@ -183,7 +183,18 @@
         "join_profession",
         "swear_bond",
         "mediate_feud",
-        "claim_world_event"
+        "claim_world_event",
+        "form_party",
+        "join_party",
+        "leave_party",
+        "betray_party",
+        "propose_alliance",
+        "declare_war",
+        "make_peace",
+        "set_ambition",
+        "investigate_actor",
+        "blackmail",
+        "expose_secret"
       ],
       "cultivator": [
         "craft",

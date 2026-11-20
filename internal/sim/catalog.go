@@ -273,7 +273,7 @@ func DefaultCatalog() Catalog {
 		HouseWear:  func() *HouseWearRule { rule := DefaultHouseWearRule(); return &rule }(),
 		Production: DefaultProductionSpec(),
 		TagActions: map[string][]string{
-			"resident": {"equip", "unequip", "refuel", "harvest", "claim_world_event", "propose_growth_care", "accept_growth_care", "dispatch_harvest", "start_plan", "abandon_plan", "wait", "move", "move_venue", "enter_house", "leave_house", "sleep", "begin_rest", "end_rest", "eat", "drink", "relieve", "medicate", "speak", "repair_house", "transfer_house", "upgrade_house", "maintain_infra", "join_faction", "join_profession", "marry", "swear_bond", "mediate_feud"},
+			"resident": {"equip", "unequip", "refuel", "harvest", "claim_world_event", "form_party", "join_party", "leave_party", "betray_party", "propose_alliance", "declare_war", "make_peace", "set_ambition", "investigate_actor", "blackmail", "expose_secret", "propose_growth_care", "accept_growth_care", "dispatch_harvest", "start_plan", "abandon_plan", "wait", "move", "move_venue", "enter_house", "leave_house", "sleep", "begin_rest", "end_rest", "eat", "drink", "relieve", "medicate", "speak", "repair_house", "transfer_house", "upgrade_house", "maintain_infra", "join_faction", "join_profession", "marry", "swear_bond", "mediate_feud"},
 			"trader":   {"propose_agreement", "accept_agreement", "reject_agreement", "fulfill_agreement", "accept_loan", "reject_loan", "cancel_loan", "offer", "accept", "reject", "borrow_loan", "repay_loan", "foreclose_collateral"},
 			"fighter":  {"attack", "avenge_feud", "claim_turf"},
 			"healer":   {"heal"},

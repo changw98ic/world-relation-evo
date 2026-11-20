@@ -928,6 +928,9 @@ func Options(p sim.Perception) []Option {
 			}
 		}
 	}
+	addPartyOptions(p, allowed, add)
+	addDiplomacyOptions(p, allowed, add)
+	addAmbitionOptions(p, allowed, add)
 	return options
 }
 

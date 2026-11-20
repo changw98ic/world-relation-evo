@@ -353,7 +353,16 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 		return
 	}
 
-	// 8c. Ecological & civic duties: seasonal/crisis rituals, threat hunting, and public-works repair.
+	// 8c. Ecological, party, diplomatic, ambition & civic duties.
+	if planDiplomacyAction(p, consider) {
+		return
+	}
+	if planPartyAction(p, consider) {
+		return
+	}
+	if planAmbitionAction(p, consider) {
+		return
+	}
 	if act, ok := planEcologyRitualAndInfra(p); ok && consider(act) {
 		return
 	}
