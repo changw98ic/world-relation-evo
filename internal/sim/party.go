@@ -14,6 +14,7 @@ type Party struct {
 	TargetDistrict string   `json:"target_district,omitempty"`
 	MemberIDs      []string `json:"member_ids"`
 	CreatedTick    int64    `json:"created_tick"`
+	CreatedEventID int64    `json:"created_event_id,omitempty"`
 	ExpiresTick    int64    `json:"expires_tick"`
 	LootPolicy     string   `json:"loot_policy,omitempty"` // "equal" | "leader_share"
 }
@@ -65,18 +66,23 @@ func (w *World) stepParties() []Event {
 		// Allow a newly formed solo party up to 1 day to recruit before disbanding.
 		soloStale := len(alive) == 1 && w.Tick-p.CreatedTick >= TicksPerDay
 		if len(alive) == 0 || expired || soloStale {
+			payload := map[string]any{
+				"text":     fmt.Sprintf("Party %s (%s) disbanded", p.Name, p.Purpose),
+				"party_id": p.ID,
+				"purpose":  p.Purpose,
+				"expired":  expired,
+			}
+			if p.CreatedEventID > 0 {
+				payload["cause_event_id"] = p.CreatedEventID
+				payload["root_event_id"] = p.CreatedEventID
+			}
 			ev := Event{
 				ID:      w.NextID,
 				Tick:    w.Tick,
 				ActorID: p.LeaderID,
 				Kind:    "party_disbanded",
 				Action:  Action{Kind: "leave_party", TargetID: p.ID},
-				Payload: map[string]any{
-					"text":     fmt.Sprintf("Party %s (%s) disbanded", p.Name, p.Purpose),
-					"party_id": p.ID,
-					"purpose":  p.Purpose,
-					"expired":  expired,
-				},
+				Payload: payload,
 			}
 			w.NextID++
 			events = append(events, ev)
@@ -98,7 +104,7 @@ func (w *World) stepParties() []Event {
 	return events
 }
 
-// perceivedParties returns active parties that actor a belongs to OR whose leader is in the same district.
+// perceivedParties returns active parties that actor a belongs to OR whose leader is directly observable.
 func (w *World) perceivedParties(a Actor) []Party {
 	if w == nil || len(w.Parties) == 0 {
 		return nil
@@ -110,7 +116,7 @@ func (w *World) perceivedParties(a Actor) []Party {
 		}
 		visible := ActorHasTag(p.MemberIDs, a.ID)
 		if !visible {
-			if leader := w.actor(p.LeaderID); leader != nil && !leader.Dead && leader.Location == a.Location {
+			if leader := w.actor(p.LeaderID); leader != nil && CanObserveActor(a, *leader, w.Tick) {
 				visible = true
 			}
 		}
@@ -130,9 +136,9 @@ func normalizePartyPurpose(raw string) string {
 	}
 }
 
-func (w *World) applyFormParty(a *Actor, x Action) []Event {
+func (w *World) applyFormParty(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	if a.InsideHouse != "" {
 		return fail("step outdoors to form a party")
@@ -163,7 +169,7 @@ func (w *World) applyFormParty(a *Actor, x Action) []Event {
 			}
 		}
 	}
-	a.Energy -= 3
+	tx.setEnergy(a, a.Energy-3, x.Kind)
 	p := Party{
 		ID:             partyID,
 		Name:           fmt.Sprintf("%s's %s party", a.Name, purpose),
@@ -177,17 +183,11 @@ func (w *World) applyFormParty(a *Actor, x Action) []Event {
 	}
 	w.Parties = append(w.Parties, p)
 	if recruited != nil {
-		if a.Trust == nil {
-			a.Trust = map[string]int{}
-		}
-		if recruited.Trust == nil {
-			recruited.Trust = map[string]int{}
-		}
-		a.Trust[recruited.ID]++
-		recruited.Trust[a.ID]++
+		tx.MutateTrust(a, recruited.ID, 1)
+		tx.MutateTrust(recruited, a.ID, 1)
 	}
 	observers := w.awakeSamePlaceObservers(*a, a.ID)
-	ev := w.record(a, x, "party_formed", map[string]any{
+	ev := tx.record(a, x, "party_formed", map[string]any{
 		"text":            fmt.Sprintf("%s formed %s targeting %s (%d members)", a.Name, p.Name, targetDist, len(members)),
 		"party_id":        p.ID,
 		"leader_id":       p.LeaderID,
@@ -196,12 +196,13 @@ func (w *World) applyFormParty(a *Actor, x Action) []Event {
 		"loot_policy":     p.LootPolicy,
 		"members":         append([]string(nil), members...),
 	}, observers...)
+	w.Parties[len(w.Parties)-1].CreatedEventID = ev.ID
 	return []Event{ev}
 }
 
-func (w *World) applyJoinParty(a *Actor, x Action) []Event {
+func (w *World) applyJoinParty(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	if a.Energy < 2 {
 		return fail("insufficient energy to join party")
@@ -234,30 +235,29 @@ func (w *World) applyJoinParty(a *Actor, x Action) []Event {
 	if leader.Trust[a.ID] < -1 {
 		return fail("party leader does not trust applicant")
 	}
-	a.Energy -= 2
+	tx.setEnergy(a, a.Energy-2, x.Kind)
 	p.MemberIDs = appendUnique(p.MemberIDs, a.ID)
-	if leader.Trust == nil {
-		leader.Trust = map[string]int{}
-	}
-	if a.Trust == nil {
-		a.Trust = map[string]int{}
-	}
-	leader.Trust[a.ID]++
-	a.Trust[leader.ID]++
+	tx.MutateTrust(leader, a.ID, 1)
+	tx.MutateTrust(a, leader.ID, 1)
 	observers := w.awakeSamePlaceObservers(*a, a.ID)
-	ev := w.record(a, x, "party_joined", map[string]any{
+	joinData := map[string]any{
 		"text":      fmt.Sprintf("%s joined %s led by %s (%d members)", a.Name, p.Name, leader.Name, len(p.MemberIDs)),
 		"party_id":  p.ID,
 		"leader_id": p.LeaderID,
 		"purpose":   p.Purpose,
 		"members":   append([]string(nil), p.MemberIDs...),
-	}, observers...)
+	}
+	if p.CreatedEventID > 0 {
+		joinData["cause_event_id"] = p.CreatedEventID
+		joinData["root_event_id"] = p.CreatedEventID
+	}
+	ev := tx.record(a, x, "party_joined", joinData, observers...)
 	return []Event{ev}
 }
 
-func (w *World) applyLeaveParty(a *Actor, x Action) []Event {
+func (w *World) applyLeaveParty(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	partyIdx := -1
 	for i := range w.Parties {
@@ -272,11 +272,16 @@ func (w *World) applyLeaveParty(a *Actor, x Action) []Event {
 	p := w.Parties[partyIdx]
 	remaining := removeString(p.MemberIDs, a.ID)
 	observers := w.awakeSamePlaceObservers(*a, a.ID)
-	ev := w.record(a, x, "party_left", map[string]any{
+	leaveData := map[string]any{
 		"text":      fmt.Sprintf("%s left %s", a.Name, p.Name),
 		"party_id":  p.ID,
 		"remaining": len(remaining),
-	}, observers...)
+	}
+	if p.CreatedEventID > 0 {
+		leaveData["cause_event_id"] = p.CreatedEventID
+		leaveData["root_event_id"] = p.CreatedEventID
+	}
+	ev := tx.record(a, x, "party_left", leaveData, observers...)
 	if len(remaining) <= 1 {
 		w.Parties = append(w.Parties[:partyIdx], w.Parties[partyIdx+1:]...)
 	} else {
@@ -291,9 +296,9 @@ func (w *World) applyLeaveParty(a *Actor, x Action) []Event {
 	return []Event{ev}
 }
 
-func (w *World) applyBetrayParty(a *Actor, x Action) []Event {
+func (w *World) applyBetrayParty(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	if a.Energy < 6 {
 		return fail("insufficient energy to betray party")
@@ -338,7 +343,7 @@ func (w *World) applyBetrayParty(a *Actor, x Action) []Event {
 		witnessIDs = append(witnessIDs, peer.ID)
 	}
 	observers = append(observers, target)
-	a.Energy -= 6
+	tx.setEnergy(a, a.Energy-6, x.Kind)
 	// Exact 0-error coin seizure from target to betrayer.
 	stolen := 0
 	if target.Money > 0 {
@@ -350,13 +355,12 @@ func (w *World) applyBetrayParty(a *Actor, x Action) []Event {
 			stolen = 30
 		}
 		w.AssessAndRecordOffense(*target, *a, "betray_party", 30, stolen, target.Money, 0, "hostile")
-		target.Money -= stolen
-		a.Money += stolen
+		tx.TransferCurrency(target, a, "coins", int64(stolen), x.Kind)
 		a.IllicitGain += stolen
 	} else {
 		w.AssessAndRecordOffense(*target, *a, "betray_party", 30, 0, target.Money, 0, "hostile")
 	}
-	dmg, absorbed, immune, broken := w.applyMeleeHit(a, target, x, maxInt(6, minInt(20, CombatPowerWithCatalog(w.Catalog, *a)/3)))
+	dmg, absorbed, immune, broken := w.applyMeleeHit(tx, a, target, x, maxInt(6, minInt(20, CombatPowerWithCatalog(w.Catalog, *a)/3)))
 
 	// Expel betrayer from party (or disband if <=1 remains).
 	remaining := removeString(p.MemberIDs, a.ID)
@@ -384,13 +388,10 @@ func (w *World) applyBetrayParty(a *Actor, x Action) []Event {
 	}
 	for _, mid := range remaining {
 		if m := w.actor(mid); m != nil && !m.Dead && (m.ID == target.ID || SamePlace(*a, *m)) {
-			if m.Trust == nil {
-				m.Trust = map[string]int{}
-			}
-			m.Trust[a.ID] -= 5
+			tx.MutateTrust(m, a.ID, -5)
 		}
 	}
-	betrayEv := w.record(a, x, "party_betrayed", map[string]any{
+	betrayData := map[string]any{
 		"text":           fmt.Sprintf("%s betrayed %s in %s, ambushing %s (-%d HP) and seizing %d coins", a.Name, p.Name, a.Location, target.Name, dmg, stolen),
 		"party_id":       p.ID,
 		"victim_id":      target.ID,
@@ -401,11 +402,16 @@ func (w *World) applyBetrayParty(a *Actor, x Action) []Event {
 		"witnesses":      witnessIDs,
 		"damage":         dmg,
 		"observation":    obs,
-	}, observers...)
+	}
+	if p.CreatedEventID > 0 {
+		betrayData["cause_event_id"] = p.CreatedEventID
+		betrayData["root_event_id"] = p.CreatedEventID
+	}
+	betrayEv := tx.record(a, x, "party_betrayed", betrayData, observers...)
 
 	events := append(broken, betrayEv)
-	events = append(events, w.ensureRelations().recordGrudge(w, target.ID, a.ID, "party_betrayed", 50, betrayEv.ID, betrayEv.ID)...)
-	events = append(events, w.finishMeleeHit(a, target, x, dmg, "party betrayal", betrayEv)...)
+	events = append(events, w.ensureRelations().recordGrudge(tx, w, target.ID, a.ID, "party_betrayed", 50, betrayEv.ID, betrayEv.ID)...)
+	events = append(events, w.finishMeleeHit(tx, a, target, x, dmg, "party betrayal", betrayEv)...)
 	return events
 }
 
@@ -462,7 +468,7 @@ func (w *World) partyEscortRiskReductionPct(a Actor, destination string) int {
 
 // settlePartyRewardSplit distributes earned coins fairly among co-located living party mates
 // via exact actor-to-actor transfers (0 net minting -> 100% ledger conservation).
-func (w *World) settlePartyRewardSplit(a *Actor, coins int, source Event) []Event {
+func (w *World) settlePartyRewardSplit(tx *WorldTx, a *Actor, coins int, source Event) []Event {
 	if w == nil || a == nil || a.Dead || coins < 2 {
 		return nil
 	}
@@ -511,25 +517,18 @@ func (w *World) settlePartyRewardSplit(a *Actor, coins int, source Event) []Even
 		return nil
 	}
 
-	a.Money -= totalPaid
-	if a.Trust == nil {
-		a.Trust = map[string]int{}
-	}
 	var observers []*Actor
 	for _, m := range mates {
 		cut := shares[m.ID]
 		if cut <= 0 {
 			continue
 		}
-		m.Money += cut
-		if m.Trust == nil {
-			m.Trust = map[string]int{}
-		}
-		a.Trust[m.ID]++
-		m.Trust[a.ID]++
+		tx.TransferCurrency(a, m, "coins", int64(cut), source.Action.Kind)
+		tx.MutateTrust(a, m.ID, 1)
+		tx.MutateTrust(m, a.ID, 1)
 		observers = append(observers, m)
 	}
-	ev := w.record(a, Action{Kind: "wait", TargetID: p.ID, Quantity: totalPaid}, "party_loot_split", map[string]any{
+	ev := w.recordWithTx(tx, a, Action{Kind: "wait", TargetID: p.ID, Quantity: totalPaid}, "party_loot_split", map[string]any{
 		"text":           fmt.Sprintf("%s shared %d coins (%s) across %d party members of %s", a.Name, totalPaid, source.Kind, len(mates), p.Name),
 		"party_id":       p.ID,
 		"reason":         source.Kind,

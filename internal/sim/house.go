@@ -202,7 +202,15 @@ func SleepRecoveryTenths(a Actor, house *House, tick int64) (int, string) {
 		notes = append(notes, "injured")
 	}
 
+	// Genre-neutral food reserve anxiety: count any edible item held (not just hardcoded "food").
 	food := a.Items["food"]
+	if food == 0 {
+		for itemID, qty := range a.Items {
+			if qty > 0 && itemID != "water" && itemID != "fresh_water" && itemID != "medicine" && itemID != "plank" {
+				food += qty
+			}
+		}
+	}
 	if food < 2 {
 		tenths -= 4
 		notes = append(notes, "low_food_anxiety")

@@ -70,18 +70,18 @@ type PlaybookBaseOption struct {
 }
 
 type PlaybookScenario struct {
-	ID              string                   `json:"id"`
-	CollisionType   string                   `json:"collision_type"`
-	Title           string                   `json:"title"`
-	LikelihoodScore int                      `json:"likelihood_score"`
-	LikelihoodTier  string                   `json:"likelihood_tier"`
-	DayWindow       [2]int                   `json:"day_window"`
-	SharedLocation  string                   `json:"shared_location,omitempty"`
-	SharedItems     []string                 `json:"shared_items,omitempty"`
-	ParticipantIDs  []string                 `json:"participant_ids"`
-	TriggerOptions  []PlaybookTriggerRef     `json:"trigger_options"`
-	Responses       []PlaybookCounterEntry   `json:"responses"`
-	Summary         string                   `json:"collision_summary,omitempty"`
+	ID              string                 `json:"id"`
+	CollisionType   string                 `json:"collision_type"`
+	Title           string                 `json:"title"`
+	LikelihoodScore int                    `json:"likelihood_score"`
+	LikelihoodTier  string                 `json:"likelihood_tier"`
+	DayWindow       [2]int                 `json:"day_window"`
+	SharedLocation  string                 `json:"shared_location,omitempty"`
+	SharedItems     []string               `json:"shared_items,omitempty"`
+	ParticipantIDs  []string               `json:"participant_ids"`
+	TriggerOptions  []PlaybookTriggerRef   `json:"trigger_options"`
+	Responses       []PlaybookCounterEntry `json:"responses"`
+	Summary         string                 `json:"collision_summary,omitempty"`
 }
 
 type PlaybookTriggerRef struct {
@@ -447,28 +447,28 @@ type PlaybookDecisionEvent struct {
 }
 
 type PlaybookRunStats struct {
-	TotalDecisions      int            `json:"total_decisions"`
-	CounterDecisions    int            `json:"counter_decisions"`
-	BaseDecisions       int            `json:"base_decisions"`
-	TravelForCounter    int            `json:"travel_for_counter"`
-	TravelForBase       int            `json:"travel_for_base"`
-	RulesSurvival       int            `json:"rules_survival"`
-	RulesFallback       int            `json:"rules_fallback"`
-	ExactMatches        int            `json:"exact_matches"`
-	SemanticFallbacks   int            `json:"semantic_fallbacks"`
-	UniqueBaseOptions   int            `json:"unique_base_options_fired"`
-	TotalBaseOptions    int            `json:"total_base_options_loaded"`
-	UniqueCounters      int            `json:"unique_counters_fired"`
-	TotalCounters       int            `json:"total_counters_loaded"`
-	ScenariosActivated  int            `json:"scenarios_activated"`
-	TotalScenarios      int            `json:"total_scenarios_loaded"`
-	ByStance            map[string]int `json:"by_stance"`
-	ByCategory          map[string]int `json:"by_category"`
-	ByScenario          map[string]int `json:"by_scenario"`
-	ByActorBase         map[string]int `json:"by_actor_base"`
-	ByActorCounter      map[string]int `json:"by_actor_counter"`
-	ByExecutedKind      map[string]int `json:"by_executed_kind"`
-	ByIntendedKind      map[string]int `json:"by_intended_kind"`
+	TotalDecisions     int            `json:"total_decisions"`
+	CounterDecisions   int            `json:"counter_decisions"`
+	BaseDecisions      int            `json:"base_decisions"`
+	TravelForCounter   int            `json:"travel_for_counter"`
+	TravelForBase      int            `json:"travel_for_base"`
+	RulesSurvival      int            `json:"rules_survival"`
+	RulesFallback      int            `json:"rules_fallback"`
+	ExactMatches       int            `json:"exact_matches"`
+	SemanticFallbacks  int            `json:"semantic_fallbacks"`
+	UniqueBaseOptions  int            `json:"unique_base_options_fired"`
+	TotalBaseOptions   int            `json:"total_base_options_loaded"`
+	UniqueCounters     int            `json:"unique_counters_fired"`
+	TotalCounters      int            `json:"total_counters_loaded"`
+	ScenariosActivated int            `json:"scenarios_activated"`
+	TotalScenarios     int            `json:"total_scenarios_loaded"`
+	ByStance           map[string]int `json:"by_stance"`
+	ByCategory         map[string]int `json:"by_category"`
+	ByScenario         map[string]int `json:"by_scenario"`
+	ByActorBase        map[string]int `json:"by_actor_base"`
+	ByActorCounter     map[string]int `json:"by_actor_counter"`
+	ByExecutedKind     map[string]int `json:"by_executed_kind"`
+	ByIntendedKind     map[string]int `json:"by_intended_kind"`
 }
 
 type PlaybookLog struct {
@@ -615,10 +615,11 @@ func cloneIntMap(src map[string]int) map[string]int {
 }
 
 // Select implements Selector with a 4-tier hierarchy:
-//   Tier 0: Physiological survival & circadian rest (RuleSelector)
-//   Tier 1: Reactive combination counter-options when a scenario activates
-//   Tier 2: Proactive 30-day character options (with multi-step travel intent)
-//   Tier 3: Generic RuleSelector economic/social fallback
+//
+//	Tier 0: Physiological survival & circadian rest (RuleSelector)
+//	Tier 1: Reactive combination counter-options when a scenario activates
+//	Tier 2: Proactive 30-day character options (with multi-step travel intent)
+//	Tier 3: Generic RuleSelector economic/social fallback
 func (s *PlaybookSelector) Select(ctx context.Context, p sim.Perception, options []Option) (string, error) {
 	if s == nil || s.Playbook == nil {
 		return RuleSelector{trace: s.Trace}.Select(ctx, p, options)
@@ -1303,15 +1304,7 @@ func matchPlaybookAction(p sim.Perception, options []Option, spec PlaybookAction
 }
 
 func isTargetedActionKind(kind string) bool {
-	switch kind {
-	case "speak", "transmit_message", "offer", "propose_agreement", "accept", "reject",
-		"accept_agreement", "attack", "spar", "steal", "extort", "raid", "bribe",
-		"audit_corruption", "arrest", "frame_suspect", "file_appeal", "heal",
-		"swear_bond", "marry", "avenge_feud", "teach_knowledge", "borrow_loan":
-		return true
-	default:
-		return false
-	}
+	return sim.DefaultCatalog().IsTargetedActionKind(kind)
 }
 
 func bestOptionForKind(options []Option, kind string, spec PlaybookActionSpec, targetActors, targetItems map[string]bool, requireTargetMatch bool) *Option {

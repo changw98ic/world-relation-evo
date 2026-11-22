@@ -9,6 +9,7 @@ import (
 // SpotlightRumorSpec defines genre-decoupled configuration parameters for dynamic
 // actor-cohort spotlight hydration/dehydration and bidirectional rumor/panic resonance.
 type SpotlightRumorSpec struct {
+	ExplicitZero               bool  `json:"explicit_zero,omitempty"`
 	MaxFocalActors             int   `json:"max_focal_actors"`
 	TargetFocalActors          int   `json:"target_focal_actors"`
 	DailyPromotionCap          int   `json:"daily_promotion_cap"`
@@ -18,6 +19,7 @@ type SpotlightRumorSpec struct {
 	RumorTTLTicks              int64 `json:"rumor_ttl_ticks"`
 	PanicDurationTicks         int64 `json:"panic_duration_ticks"`
 	PanicDemandBoostPermille   int   `json:"panic_demand_boost_permille"`
+	explicitFields             map[string]bool
 }
 
 // DefaultSpotlightRumorSpec returns the baseline spotlight and rumor resonance parameters.
@@ -38,36 +40,15 @@ func DefaultSpotlightRumorSpec() SpotlightRumorSpec {
 // EffectiveSpotlightRumorSpec normalizes zero/negative fields to safe defaults.
 func EffectiveSpotlightRumorSpec(s SpotlightRumorSpec) SpotlightRumorSpec {
 	def := DefaultSpotlightRumorSpec()
-	if s.MaxFocalActors <= 0 {
-		s.MaxFocalActors = def.MaxFocalActors
-	}
-	if s.TargetFocalActors <= 0 {
-		s.TargetFocalActors = minInt(def.TargetFocalActors, s.MaxFocalActors)
-	}
-	if s.TargetFocalActors > s.MaxFocalActors {
-		s.TargetFocalActors = s.MaxFocalActors
-	}
-	if s.DailyPromotionCap <= 0 {
-		s.DailyPromotionCap = def.DailyPromotionCap
-	}
-	if s.DailyDemotionCap <= 0 {
-		s.DailyDemotionCap = def.DailyDemotionCap
-	}
-	if s.MinCohortPopulation <= 0 {
-		s.MinCohortPopulation = def.MinCohortPopulation
-	}
-	if s.RumorCorroborationSpeakers <= 0 {
-		s.RumorCorroborationSpeakers = def.RumorCorroborationSpeakers
-	}
-	if s.RumorTTLTicks <= 0 {
-		s.RumorTTLTicks = def.RumorTTLTicks
-	}
-	if s.PanicDurationTicks <= 0 {
-		s.PanicDurationTicks = def.PanicDurationTicks
-	}
-	if s.PanicDemandBoostPermille <= 0 {
-		s.PanicDemandBoostPermille = def.PanicDemandBoostPermille
-	}
+	s.MaxFocalActors = resolveSpecNumber(s.MaxFocalActors, def.MaxFocalActors, s.ExplicitZero || s.explicitFields["max_focal_actors"])
+	s.TargetFocalActors = resolveSpecNumber(s.TargetFocalActors, def.TargetFocalActors, s.ExplicitZero || s.explicitFields["target_focal_actors"])
+	s.DailyPromotionCap = resolveSpecNumber(s.DailyPromotionCap, def.DailyPromotionCap, s.ExplicitZero || s.explicitFields["daily_promotion_cap"])
+	s.DailyDemotionCap = resolveSpecNumber(s.DailyDemotionCap, def.DailyDemotionCap, s.ExplicitZero || s.explicitFields["daily_demotion_cap"])
+	s.MinCohortPopulation = resolveSpecNumber(s.MinCohortPopulation, def.MinCohortPopulation, s.ExplicitZero || s.explicitFields["min_cohort_population"])
+	s.RumorCorroborationSpeakers = resolveSpecNumber(s.RumorCorroborationSpeakers, def.RumorCorroborationSpeakers, s.ExplicitZero || s.explicitFields["rumor_corroboration_speakers"])
+	s.RumorTTLTicks = resolveSpecNumber(s.RumorTTLTicks, def.RumorTTLTicks, s.ExplicitZero || s.explicitFields["rumor_ttl_ticks"])
+	s.PanicDurationTicks = resolveSpecNumber(s.PanicDurationTicks, def.PanicDurationTicks, s.ExplicitZero || s.explicitFields["panic_duration_ticks"])
+	s.PanicDemandBoostPermille = resolveSpecNumber(s.PanicDemandBoostPermille, def.PanicDemandBoostPermille, s.ExplicitZero || s.explicitFields["panic_demand_boost_permille"])
 	return s
 }
 
@@ -316,15 +297,14 @@ func (w *World) processRumorSpeech(sr *SpotlightRumorState, ev Event) (Event, bo
 	if delivered, exists := extractStringSlicePayload(ev.Payload, "delivered_to"); exists && len(delivered) == 0 {
 		return Event{}, false
 	}
-	source := relPayloadString(ev.Payload, "witness_id")
-	if source == "" {
-		source = ev.ActorID
-		// A relay of an unverified statement still has an original speaker.
+	speakerID := relPayloadString(ev.Payload, "witness_id")
+	if speakerID == "" {
+		speakerID = ev.ActorID
 		if original := relPayloadString(ev.Payload, "report_source_id"); original != "" {
-			source = original
+			speakerID = original
 		}
 	}
-	speaker := w.actor(source)
+	speaker := w.actor(speakerID)
 	distID := relPayloadString(ev.Payload, "district")
 	if distID == "" && speaker != nil && speaker.Location != "" {
 		distID = speaker.Location
@@ -353,6 +333,7 @@ func (w *World) processRumorSpeech(sr *SpotlightRumorState, ev Event) (Event, bo
 		return Event{}, false
 	}
 
+	verified := payloadInt64(ev.Payload, "fact_event_id") > 0
 	rumorKey := distID + "|" + topic + "|" + item
 	r := sr.ActiveRumors[rumorKey]
 	if r == nil {
@@ -372,14 +353,14 @@ func (w *World) processRumorSpeech(sr *SpotlightRumorState, ev Event) (Event, bo
 
 	alreadySpoke := false
 	for _, s := range r.Speakers {
-		if s == source {
+		if s == speakerID {
 			alreadySpoke = true
 			break
 		}
 	}
 	highTrust := w.isHighTrustPublicFigure(speaker)
 	if !alreadySpoke {
-		r.Speakers = append(r.Speakers, source)
+		r.Speakers = append(r.Speakers, speakerID)
 		weight := 1
 		if highTrust {
 			weight = 2
@@ -405,12 +386,15 @@ func (w *World) processRumorSpeech(sr *SpotlightRumorState, ev Event) (Event, bo
 	newBoost := minInt(800, curBoost+sr.Spec.PanicDemandBoostPermille)
 	sr.PanicDemandPermille[distID][item] = newBoost
 
+	// Unverified rumors must not directly mutate objective district state; only verified reports impact MoraleBonus.
 	moraleAfter := 0
 	if w.DistrictStates != nil {
 		if ds, ok := w.DistrictStates[distID]; ok {
-			ds.MoraleBonus = maxInt(-25, ds.MoraleBonus-4)
+			if verified {
+				ds.MoraleBonus = maxInt(-25, ds.MoraleBonus-4)
+				w.DistrictStates[distID] = ds
+			}
 			moraleAfter = ds.MoraleBonus
-			w.DistrictStates[distID] = ds
 		}
 	}
 
@@ -442,6 +426,7 @@ func (w *World) processRumorSpeech(sr *SpotlightRumorState, ev Event) (Event, bo
 			"speaker_count":         len(r.Speakers),
 			"demand_boost_permille": newBoost,
 			"morale_bonus":          moraleAfter,
+			"verified":              verified,
 			"panic_until":           r.PanicUntil,
 			"basis_event_id":        ev.ID,
 			"cause_event_id":        ev.ID,
@@ -595,11 +580,12 @@ func (w *World) StepDynamicSpotlight(sr *SpotlightRumorState) []Event {
 	})
 
 	demoted := 0
+	targetFocalActors := min(spec.TargetFocalActors, spec.MaxFocalActors)
 	for _, cand := range demoteCands {
 		if demoted >= spec.DailyDemotionCap {
 			break
 		}
-		needRoom := livingCount > spec.TargetFocalActors || (livingCount >= spec.MaxFocalActors && len(hotCohorts) > 0)
+		needRoom := livingCount > targetFocalActors || (livingCount >= spec.MaxFocalActors && len(hotCohorts) > 0)
 		if !needRoom {
 			break
 		}

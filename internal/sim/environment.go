@@ -42,20 +42,20 @@ func (t *InstitutionToggles) RitualsEnabled() bool {
 // semantic tags, forum features, and display terminology so simulation settlement,
 // candidate generation, and offline option expansion never hardcode any era or theme.
 type EnvironmentProfile struct {
-	Genre            string              `json:"genre,omitempty"`
-	Theme            string              `json:"theme,omitempty"`
-	Summary          string              `json:"summary,omitempty"`
-	CurrencyName     string              `json:"currency_name,omitempty"`
-	ActorNoun        string              `json:"actor_noun,omitempty"`
-	AuthorityName    string              `json:"authority_name,omitempty"`
-	OversightName    string              `json:"oversight_name,omitempty"`
-	ForumFeatures    []string            `json:"forum_features,omitempty"`
-	EnforcementTags  []string            `json:"enforcement_tags,omitempty"`
-	OversightTags    []string            `json:"oversight_tags,omitempty"`
-	OutlawTags        []string            `json:"outlaw_tags,omitempty"`
-	EnforcementItem   string              `json:"enforcement_item,omitempty"`
-	RepairItem        string              `json:"repair_item,omitempty"`
-	BuilderProfession string              `json:"builder_profession,omitempty"`
+	Genre              string              `json:"genre,omitempty"`
+	Theme              string              `json:"theme,omitempty"`
+	Summary            string              `json:"summary,omitempty"`
+	CurrencyName       string              `json:"currency_name,omitempty"`
+	ActorNoun          string              `json:"actor_noun,omitempty"`
+	AuthorityName      string              `json:"authority_name,omitempty"`
+	OversightName      string              `json:"oversight_name,omitempty"`
+	ForumFeatures      []string            `json:"forum_features,omitempty"`
+	EnforcementTags    []string            `json:"enforcement_tags,omitempty"`
+	OversightTags      []string            `json:"oversight_tags,omitempty"`
+	OutlawTags         []string            `json:"outlaw_tags,omitempty"`
+	EnforcementItem    string              `json:"enforcement_item,omitempty"`
+	RepairItem         string              `json:"repair_item,omitempty"`
+	BuilderProfession  string              `json:"builder_profession,omitempty"`
 	Institutions       *InstitutionToggles `json:"institutions,omitempty"`
 	ActionLabels       map[string]string   `json:"action_labels,omitempty"`
 	Terminology        map[string]string   `json:"terminology,omitempty"`
@@ -141,7 +141,6 @@ func DefaultEnvironmentProfile() EnvironmentProfile {
 		EnforcementTags:   []string{"law"},
 		OversightTags:     []string{"censor"},
 		OutlawTags:        []string{"outlaw", "raider", "thief", "gang"},
-		EnforcementItem:   "bounty_writ",
 		RepairItem:        "plank",
 		BuilderProfession: "carpenter",
 	}
@@ -151,10 +150,10 @@ func DefaultEnvironmentProfile() EnvironmentProfile {
 // populated from backward-compatible defaults.
 func (c Catalog) EffectiveEnvironment() EnvironmentProfile {
 	def := DefaultEnvironmentProfile()
-	if c.Environment == nil {
-		return def
+	env := def
+	if c.Environment != nil {
+		env = *c.Environment
 	}
-	env := *c.Environment
 	if env.Genre == "" {
 		env.Genre = def.Genre
 	}
@@ -183,7 +182,11 @@ func (c Catalog) EffectiveEnvironment() EnvironmentProfile {
 		env.OutlawTags = def.OutlawTags
 	}
 	if env.EnforcementItem == "" {
-		env.EnforcementItem = def.EnforcementItem
+		for id, item := range c.Items {
+			if item.EnforcementWrit && (env.EnforcementItem == "" || id < env.EnforcementItem) {
+				env.EnforcementItem = id
+			}
+		}
 	}
 	if env.RepairItem == "" {
 		env.RepairItem = def.RepairItem

@@ -4,9 +4,16 @@ import "testing"
 
 func TestEnvironmentProfileDefaultsAndInstitutionToggles(t *testing.T) {
 	var empty Catalog
-	env := empty.EffectiveEnvironment()
+	env := DefaultCatalog().EffectiveEnvironment()
 	if env.EnforcementItem != "bounty_writ" {
 		t.Fatalf("default enforcement_item = %q, want bounty_writ", env.EnforcementItem)
+	}
+	if got := empty.EffectiveEnvironment().EnforcementItem; got != "" {
+		t.Fatalf("empty catalog resolved an undeclared enforcement writ %q", got)
+	}
+	writs := Catalog{Items: map[string]ItemSpec{"patrol_permit": {EnforcementWrit: true}}}
+	if got := writs.EffectiveEnvironment().EnforcementItem; got != "patrol_permit" {
+		t.Fatalf("catalog did not resolve its declared enforcement writ: %q", got)
 	}
 	if env.RepairItem != "plank" {
 		t.Fatalf("default repair_item = %q, want plank", env.RepairItem)
@@ -96,5 +103,28 @@ func TestEnvironmentProfileDefaultsAndInstitutionToggles(t *testing.T) {
 	}
 	if got := custom.SelectLootItem(Actor{Items: map[string]int{"spirit_grain": 3, "qi_pill": 1}}); got != "qi_pill" {
 		t.Fatalf("SelectLootItem = %q, want qi_pill (highest value tradeable item)", got)
+	}
+}
+
+func TestHouseRepairUsesConfiguredAndGrantedBuilderProfessions(t *testing.T) {
+	w := lawWorld()
+	w.Catalog.Environment = &EnvironmentProfile{BuilderProfession: "engineer", RepairItem: "wood"}
+	w.Catalog.TagActions["repairer"] = []string{"repair_house"}
+	w.Catalog.Professions = []Profession{
+		{ID: "engineer", MaxLevel: 6},
+		{ID: "senior_engineer", MaxLevel: 6, ParentProfession: "engineer"},
+		{ID: "assembler", MaxLevel: 6, Grants: []string{"repairer"}},
+	}
+	a := &w.Actors[0]
+	a.Professions = map[string]int{"engineer": 1, "senior_engineer": 2, "assembler": 1, "carpenter": 5}
+	a.Items["wood"] = 1
+	w.Houses = []House{{ID: "h", District: a.Location, OwnerID: a.ID, Condition: 10}}
+
+	lawOK(t, w.Apply(a.ID, Action{Kind: "repair_house", HouseID: "h"}))
+	for a.Task != nil {
+		lawOK(t, w.Advance(a.ID))
+	}
+	if got := w.Houses[0].Condition; got != 60 {
+		t.Fatalf("repair should add 30 plus 5 per declared builder level, got %d", got)
 	}
 }

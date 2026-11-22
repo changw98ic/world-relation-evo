@@ -58,6 +58,7 @@ type EquipSlotSpec struct {
 
 // ItemSpec defines generic item properties. Tier is the goods grade (1–5).
 type ItemSpec struct {
+	EnforcementWrit    bool                   `json:"enforcement_writ,omitempty"`
 	MassUnits          int64                  `json:"mass_units,omitempty"`
 	NutritionUnits     int64                  `json:"nutrition_units,omitempty"`
 	Living             *LivingRule            `json:"living,omitempty"`
@@ -341,7 +342,7 @@ func DefaultCatalog() Catalog {
 				Tradeable: true, BatchQty: 1, BatchPrice: 5, OfferThreshold: 2, SurplusThreshold: 2, ShortageThreshold: 1},
 			"martial_manual": {ID: "martial_manual", Name: "boxing manual", Tier: 3, CombatBonus: 2,
 				Tradeable: true, BatchQty: 1, BatchPrice: 5, OfferThreshold: 2, SurplusThreshold: 2, ShortageThreshold: 1},
-			"bounty_writ": {ID: "bounty_writ", Name: "yamen bounty writ", Tier: 3,
+			"bounty_writ": {ID: "bounty_writ", EnforcementWrit: true, Name: "yamen bounty writ", Tier: 3,
 				Tradeable: true, BatchQty: 1, BatchPrice: 5, OfferThreshold: 2, SurplusThreshold: 2, ShortageThreshold: 1},
 			"livestock": {ID: "livestock", Name: "adult cattle", Tier: 2, Living: DefaultCattleLivingRule(),
 				Tradeable: true, BatchQty: 1, BatchPrice: 5, OfferThreshold: 3, SurplusThreshold: 4, ShortageThreshold: 1},

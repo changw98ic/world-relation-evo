@@ -208,19 +208,14 @@ func runSim(args []string, stdout, stderr io.Writer) (runErr error) {
 			} else {
 				w = sim.LargeWorld(effectiveID, *pop)
 			}
-			if err = db.Save(ctx, w, nil); err != nil {
+			if err = db.SaveTick(ctx, w, nil, nil, *checkpointEvery > 0); err != nil {
 				return err
-			}
-			if *checkpointEvery > 0 {
-				if err = db.SaveCheckpoint(ctx, w); err != nil {
-					return err
-				}
 			}
 		} else if err != nil {
 			return err
 		} else if *checkpointEvery > 0 {
 			if _, _, cpErr := db.LoadNearestCheckpoint(ctx, w.ID, w.Tick); errors.Is(cpErr, sql.ErrNoRows) {
-				if err = db.SaveCheckpoint(ctx, w); err != nil {
+				if err = db.SaveTick(ctx, w, nil, nil, true); err != nil {
 					return err
 				}
 			} else if cpErr != nil {
@@ -319,16 +314,9 @@ func runSim(args []string, stdout, stderr io.Writer) (runErr error) {
 			persisted = store.CompactEvents(events)
 		}
 		if db != nil {
-			if err = db.Save(ctx, w, persisted); err != nil {
+			shouldCheckpoint := *checkpointEvery > 0 && w.Tick%int64(*checkpointEvery) == 0
+			if err = db.SaveTick(ctx, w, persisted, &tickLog, shouldCheckpoint); err != nil {
 				return err
-			}
-			if err = db.SaveDecisionLog(ctx, w.ID, tickLog); err != nil {
-				return err
-			}
-			if *checkpointEvery > 0 && w.Tick%int64(*checkpointEvery) == 0 {
-				if err = db.SaveCheckpoint(ctx, w); err != nil {
-					return err
-				}
 			}
 			if err := evidence.Record("tick_persisted", tickLog.Tick, "", map[string]any{"world_id": w.ID, "tick": w.Tick}); err != nil {
 				return err
@@ -443,9 +431,11 @@ func runSim(args []string, stdout, stderr io.Writer) (runErr error) {
 func buildDecider(mode, playbookDir, rulebookPath, rulebookOverlay string, w *sim.World, evidence *runtrace.Writer) (sim.Decider, *agent.PlaybookSelector, *agent.RulebookSelector, error) {
 	switch mode {
 	case "rules":
-		pipeline := agent.Offline()
-		pipeline.Trace = evidence
-		return pipeline, nil, nil, nil
+		return agent.DecisionPipeline{
+			Builder:  agent.DefaultCandidateBuilder{},
+			Selector: agent.RuleDecisionSelector{},
+			Trace:    evidence,
+		}, nil, nil, nil
 	case "playbook":
 		if strings.TrimSpace(playbookDir) == "" {
 			return nil, nil, nil, fmt.Errorf("playbook mode requires -playbook-dir <expand-options-dir>")
@@ -455,8 +445,9 @@ func buildDecider(mode, playbookDir, rulebookPath, rulebookOverlay string, w *si
 			return nil, nil, nil, err
 		}
 		sel := agent.NewPlaybookSelector(pb, evidence)
-		return agent.Pipeline{
-			Selector: sel,
+		return agent.DecisionPipeline{
+			Builder:  agent.DefaultCandidateBuilder{},
+			Selector: agent.PlaybookDecisionSelector{Selector: sel},
 			Trace:    evidence,
 		}, sel, nil, nil
 	case "rulebook":
@@ -465,8 +456,9 @@ func buildDecider(mode, playbookDir, rulebookPath, rulebookOverlay string, w *si
 			return nil, nil, nil, err
 		}
 		sel := agent.NewRulebookSelector(rb, evidence)
-		return agent.Pipeline{
-			Selector: sel,
+		return agent.DecisionPipeline{
+			Builder:  agent.DefaultCandidateBuilder{},
+			Selector: agent.RulebookDecisionSelector{Selector: sel},
 			Trace:    evidence,
 		}, nil, sel, nil
 	case "jev":
@@ -483,16 +475,26 @@ func buildDecider(mode, playbookDir, rulebookPath, rulebookOverlay string, w *si
 			return nil, nil, nil, fmt.Errorf("jev mode requires WRE_JEV_KEY")
 		}
 		var advisor *agent.RulebookSelector
+		var ruleSet agent.RuleSet
 		if strings.TrimSpace(rulebookPath) != "" || strings.TrimSpace(rulebookOverlay) != "" {
 			rb, err := agent.LoadRulebookWithOverlay(rulebookPath, rulebookOverlay, w)
 			if err != nil {
 				return nil, nil, nil, err
 			}
+			compiled, err := (agent.DefaultRuleCompiler{}).Compile(rb, w.Catalog)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("compile rulebook for jev: %w", err)
+			}
+			ruleSet = compiled
 			advisor = agent.NewRulebookSelector(rb, evidence)
 		}
-		return agent.Pipeline{
-			Selector: agent.Jev{Endpoint: jevURL, Name: jevName, APIKey: key, Trace: evidence, RulebookAdvisor: advisor},
-			Trace:    evidence,
+		return agent.DecisionPipeline{
+			Builder: agent.DefaultCandidateBuilder{},
+			Rules:   ruleSet,
+			Selector: agent.JevDecisionSelector{
+				Jev: agent.Jev{Endpoint: jevURL, Name: jevName, APIKey: key, Trace: evidence, RulebookAdvisor: advisor},
+			},
+			Trace: evidence,
 		}, nil, advisor, nil
 	default:
 		return nil, nil, nil, fmt.Errorf("unknown decider %q", mode)
@@ -550,11 +552,11 @@ func runInspect(args []string, stdout, stderr io.Writer) error {
 			if err != nil {
 				return nil, fmt.Errorf("read state-file %q: %w", *stateFile, err)
 			}
-			var w sim.World
-			if err := json.Unmarshal(raw, &w); err != nil {
+			w, err := sim.DecodeWorldSnapshot(raw)
+			if err != nil {
 				return nil, fmt.Errorf("decode state-file %q: %w", *stateFile, err)
 			}
-			return &w, nil
+			return w, nil
 		}
 		if *worldID == "" {
 			return nil, fmt.Errorf("inspect requires -state-file or -world")

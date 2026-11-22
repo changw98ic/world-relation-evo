@@ -8,6 +8,7 @@ import (
 // MarketCreditSpec declares genre-decoupled parameters for dynamic supply/demand pricing,
 // speculative hoarding, usury credit, collateral foreclosure, and land/workshop annexation.
 type MarketCreditSpec struct {
+	ExplicitZero              bool   `json:"explicit_zero,omitempty"`
 	MinPricePermille          int    `json:"min_price_permille,omitempty"`
 	MaxPricePermille          int    `json:"max_price_permille,omitempty"`
 	HoardSurplusMultiplier    int    `json:"hoard_surplus_multiplier,omitempty"`
@@ -21,6 +22,7 @@ type MarketCreditSpec struct {
 	SubsistenceFloorPerCap    int    `json:"subsistence_floor_per_cap,omitempty"`
 	CreditorReservePerCap     int    `json:"creditor_reserve_per_cap,omitempty"`
 	TraderTag                 string `json:"trader_tag,omitempty"`
+	explicitFields            map[string]bool
 }
 
 // DefaultMarketCreditSpec returns balanced defaults for dynamic pricing, hoarding, usury, and annexation.
@@ -45,50 +47,26 @@ func DefaultMarketCreditSpec() MarketCreditSpec {
 // EffectiveMarketCreditSpec fills omitted or invalid fields in s from DefaultMarketCreditSpec.
 func EffectiveMarketCreditSpec(s MarketCreditSpec) MarketCreditSpec {
 	def := DefaultMarketCreditSpec()
-	if s.MinPricePermille <= 0 {
-		s.MinPricePermille = def.MinPricePermille
-	}
-	if s.MaxPricePermille <= 0 {
-		s.MaxPricePermille = def.MaxPricePermille
-	}
-	if s.MaxPricePermille < s.MinPricePermille {
+	s.MinPricePermille = resolveSpecNumber(s.MinPricePermille, def.MinPricePermille, s.ExplicitZero || s.explicitFields["min_price_permille"])
+	s.MaxPricePermille = resolveSpecNumber(s.MaxPricePermille, def.MaxPricePermille, s.ExplicitZero || s.explicitFields["max_price_permille"])
+	s.HoardSurplusMultiplier = resolveSpecNumber(s.HoardSurplusMultiplier, def.HoardSurplusMultiplier, s.ExplicitZero || s.explicitFields["hoard_surplus_multiplier"])
+	s.HoardTriggerPermille = resolveSpecNumber(s.HoardTriggerPermille, def.HoardTriggerPermille, s.ExplicitZero || s.explicitFields["hoard_trigger_permille"])
+	s.HoardReleasePermille = resolveSpecNumber(s.HoardReleasePermille, def.HoardReleasePermille, s.ExplicitZero || s.explicitFields["hoard_release_permille"])
+	s.DailyLoanInterestPermille = resolveSpecNumber(s.DailyLoanInterestPermille, def.DailyLoanInterestPermille, s.ExplicitZero || s.explicitFields["daily_loan_interest_permille"])
+	s.LoanTermTicks = resolveSpecNumber(s.LoanTermTicks, def.LoanTermTicks, s.ExplicitZero || s.explicitFields["loan_term_ticks"])
+	s.MaxTenantSharePermille = resolveSpecNumber(s.MaxTenantSharePermille, def.MaxTenantSharePermille, s.ExplicitZero || s.explicitFields["max_tenant_share_permille"])
+	s.DailyRentPermille = resolveSpecNumber(s.DailyRentPermille, def.DailyRentPermille, s.ExplicitZero || s.explicitFields["daily_rent_permille"])
+	s.HouseDailyRentPerLevel = resolveSpecNumber(s.HouseDailyRentPerLevel, def.HouseDailyRentPerLevel, s.ExplicitZero || s.explicitFields["house_daily_rent_per_level"])
+	s.SubsistenceFloorPerCap = resolveSpecNumber(s.SubsistenceFloorPerCap, def.SubsistenceFloorPerCap, s.ExplicitZero || s.explicitFields["subsistence_floor_per_cap"])
+	s.CreditorReservePerCap = resolveSpecNumber(s.CreditorReservePerCap, def.CreditorReservePerCap, s.ExplicitZero || s.explicitFields["creditor_reserve_per_cap"])
+	if !s.explicitFields["max_price_permille"] && s.MaxPricePermille < s.MinPricePermille {
 		s.MaxPricePermille = s.MinPricePermille
 	}
-	if s.HoardSurplusMultiplier <= 0 {
-		s.HoardSurplusMultiplier = def.HoardSurplusMultiplier
-	}
-	if s.HoardTriggerPermille <= 0 {
-		s.HoardTriggerPermille = def.HoardTriggerPermille
-	}
-	if s.HoardReleasePermille <= 0 {
-		s.HoardReleasePermille = def.HoardReleasePermille
-	}
-	if s.HoardReleasePermille < s.HoardTriggerPermille {
+	if !s.ExplicitZero && !s.explicitFields["hoard_release_permille"] && s.HoardReleasePermille < s.HoardTriggerPermille {
 		s.HoardReleasePermille = s.HoardTriggerPermille + 200
-	}
-	if s.DailyLoanInterestPermille <= 0 {
-		s.DailyLoanInterestPermille = def.DailyLoanInterestPermille
-	}
-	if s.LoanTermTicks <= 0 {
-		s.LoanTermTicks = def.LoanTermTicks
-	}
-	if s.MaxTenantSharePermille <= 0 {
-		s.MaxTenantSharePermille = def.MaxTenantSharePermille
 	}
 	if s.MaxTenantSharePermille > 950 {
 		s.MaxTenantSharePermille = 950
-	}
-	if s.DailyRentPermille <= 0 {
-		s.DailyRentPermille = def.DailyRentPermille
-	}
-	if s.HouseDailyRentPerLevel <= 0 {
-		s.HouseDailyRentPerLevel = def.HouseDailyRentPerLevel
-	}
-	if s.SubsistenceFloorPerCap <= 0 {
-		s.SubsistenceFloorPerCap = def.SubsistenceFloorPerCap
-	}
-	if s.CreditorReservePerCap <= 0 {
-		s.CreditorReservePerCap = def.CreditorReservePerCap
 	}
 	if s.TraderTag == "" {
 		s.TraderTag = def.TraderTag
@@ -109,6 +87,8 @@ type LoanRecord struct {
 	Repaid              int64  `json:"repaid,omitempty"`
 	RatePermille        int    `json:"rate_permille"`
 	IssuedTick          int64  `json:"issued_tick"`
+	IssuedEventID       int64  `json:"issued_event_id,omitempty"`
+	RootEventID         int64  `json:"root_event_id,omitempty"`
 	DueTick             int64  `json:"due_tick"`
 	CollateralHouse     string `json:"collateral_house,omitempty"`
 	Status              string `json:"status"` // "active", "repaid", "foreclosed", "defaulted"
@@ -717,11 +697,31 @@ func (w *World) stepMerchantHoarding(mc *MarketCreditState, spec MarketCreditSpe
 		a := &w.Actors[i]
 		if a.Dead {
 			if bag := mc.HoardedStock[a.ID]; len(bag) > 0 {
-				if a.Items == nil {
-					a.Items = map[string]int{}
+				var recipientCohort *PopulationCohort
+				for ci := range w.Cohorts {
+					if w.Cohorts[ci].District == a.Location && w.Cohorts[ci].Population > 0 {
+						recipientCohort = &w.Cohorts[ci]
+						break
+					}
 				}
-				for itemID, qty := range bag {
-					a.Items[itemID] += int(qty)
+				if recipientCohort != nil {
+					if recipientCohort.ItemPool == nil {
+						recipientCohort.ItemPool = map[string]int64{}
+					}
+					for itemID, qty := range bag {
+						if qty > 0 {
+							recipientCohort.ItemPool[itemID] += qty
+						}
+					}
+				} else {
+					if a.Items == nil {
+						a.Items = map[string]int{}
+					}
+					for itemID, qty := range bag {
+						if qty > 0 {
+							a.Items[itemID] += int(qty)
+						}
+					}
 				}
 				delete(mc.HoardedStock, a.ID)
 			}
@@ -805,52 +805,29 @@ func (w *World) stepMerchantHoarding(mc *MarketCreditState, spec MarketCreditSpe
 
 // ApplyMarketCreditAction handles focal Actor usury credit actions:
 // Requests, bilateral acceptance/rejection, borrower cancellation, repayment and foreclosure.
-func (w *World) ApplyMarketCreditAction(mc *MarketCreditState, actorID string, x Action) ([]Event, bool) {
-	switch x.Kind {
-	case "borrow_loan", "accept_loan", "reject_loan", "cancel_loan", "repay_loan", "foreclose_collateral":
-	default:
-		return nil, false
-	}
+func (w *World) ApplyMarketCreditAction(state *MarketCreditState, actorID string, x Action) ([]Event, bool) {
+	return w.applyMarketCreditSubsystem(state, actorID, x)
+}
 
-	a := w.actor(actorID)
-	if a == nil {
-		return nil, true
-	}
-	if a.Items == nil {
-		a.Items = map[string]int{}
-	}
-	if a.Trust == nil {
-		a.Trust = map[string]int{}
-	}
+func (w *World) applyMarketCreditActionTx(tx *WorldTx, mc *MarketCreditState, a *Actor, x Action) []Event {
 	emit := func(kind, text string, data map[string]any, observers ...*Actor) []Event {
 		if data == nil {
 			data = map[string]any{}
 		}
 		data["text"] = text
-		return []Event{w.record(a, x, kind, data, observers...)}
+		return []Event{tx.record(a, x, kind, data, observers...)}
 	}
 	fail := func(reason string) []Event {
 		return emit("action_failed", reason, nil)
 	}
-
 	if mc == nil {
-		return fail("market credit ledger unavailable"), true
+		return fail("market credit ledger unavailable")
 	}
 	spec := mc.ensureInit()
 
-	if a.Dead {
-		return fail("actor is dead"), true
-	}
-	if w.Tick < a.JailedUntil {
-		return fail("actor is imprisoned in the Yamen jail"), true
-	}
-	if a.Task != nil {
-		return fail("actor is already busy with " + a.Task.Action.Kind), true
-	}
-
 	switch x.Kind {
 	case "borrow_loan", "accept_loan", "reject_loan", "cancel_loan":
-		return w.applyPersonalCredit(mc, a, x, spec), true
+		return w.applyPersonalCredit(tx, mc, a, x, spec)
 
 	case "repay_loan":
 		idx := -1
@@ -869,16 +846,16 @@ func (w *World) ApplyMarketCreditAction(mc *MarketCreditState, actorID string, x
 			break
 		}
 		if idx < 0 {
-			return fail("no matching active loan to repay"), true
+			return fail("no matching active loan to repay")
 		}
 		l := &mc.Loans[idx]
 		owed := l.Principal + l.AccruedInterest - l.Repaid
 		if owed <= 0 {
 			l.Status = "repaid"
-			return fail("loan is already settled"), true
+			return fail("loan is already settled")
 		}
 		if a.Money <= 0 {
-			return fail("insufficient coins to repay loan"), true
+			return fail("insufficient coins to repay loan")
 		}
 		pay := int64(x.Quantity)
 		if pay <= 0 {
@@ -891,16 +868,14 @@ func (w *World) ApplyMarketCreditAction(mc *MarketCreditState, actorID string, x
 			pay = int64(a.Money)
 		}
 		lender := w.actor(l.LenderID)
-		a.Money -= int(pay)
 		if lender != nil && !lender.Dead {
-			lender.Money += int(pay)
-			if lender.Trust == nil {
-				lender.Trust = map[string]int{}
-			}
-			lender.Trust[a.ID]++
+			tx.TransferCurrency(a, lender, "coins", pay, x.Kind)
+			tx.MutateTrust(lender, a.ID, 1)
 		} else if lc := w.findCohort(l.LenderCohortID); lc != nil && lc.Population > 0 {
+			tx.moveCurrency(a, "coins", -pay, lc.ID, x.Kind)
 			lc.MoneyPool += pay
 		} else {
+			tx.moveCurrency(a, "coins", -pay, "treasury", x.Kind)
 			w.creditTreasury(pay, "fee")
 		}
 		l.Repaid += pay
@@ -913,14 +888,21 @@ func (w *World) ApplyMarketCreditAction(mc *MarketCreditState, actorID string, x
 		if lender != nil && !lender.Dead {
 			obs = append(obs, lender)
 		}
-		return emit("loan_repaid", fmt.Sprintf("%s repaid %d coins on loan #%d (remaining %d, status %s)", a.Name, pay, l.ID, rem, l.Status), map[string]any{
+		repayData := map[string]any{
 			"loan_id":        l.ID,
 			"lender_id":      l.LenderID,
 			"borrower_id":    l.BorrowerID,
 			"coins":          pay,
 			"remaining_owed": rem,
 			"status":         l.Status,
-		}, obs...), true
+		}
+		if l.IssuedEventID > 0 {
+			repayData["cause_event_id"] = l.IssuedEventID
+		}
+		if l.RootEventID > 0 {
+			repayData["root_event_id"] = l.RootEventID
+		}
+		return emit("loan_repaid", fmt.Sprintf("%s repaid %d coins on loan #%d (remaining %d, status %s)", a.Name, pay, l.ID, rem, l.Status), repayData, obs...)
 
 	case "foreclose_collateral":
 		idx := -1
@@ -942,26 +924,26 @@ func (w *World) ApplyMarketCreditAction(mc *MarketCreditState, actorID string, x
 			break
 		}
 		if idx < 0 {
-			return fail("no matching active loan to foreclose"), true
+			return fail("no matching active loan to foreclose")
 		}
 		l := &mc.Loans[idx]
 		if w.Tick < l.DueTick {
-			return fail("loan is not overdue yet"), true
+			return fail("loan is not overdue yet")
 		}
 		rem := l.Principal + l.AccruedInterest - l.Repaid
 		if rem <= 0 {
 			l.Status = "repaid"
-			return fail("loan has no remaining balance"), true
+			return fail("loan has no remaining balance")
 		}
 		borrower := w.actor(l.BorrowerID)
 		borrowerCohort := w.findCohort(l.BorrowerCohortID)
 		if l.CollateralHouse == "" {
-			return fail("loan has no agreed collateral house"), true
+			return fail("loan has no agreed collateral house")
 		}
 		h := w.house(l.CollateralHouse)
 		borrowerAlive := (borrower != nil && !borrower.Dead) || (borrower == nil && borrowerCohort != nil && borrowerCohort.Population > 0)
 		if h == nil || !borrowerAlive || h.OwnerID != l.BorrowerID {
-			return fail("no foreclosable collateral house owned by borrower"), true
+			return fail("no foreclosable collateral house owned by borrower")
 		}
 
 		oldOwner := h.OwnerID
@@ -986,24 +968,28 @@ func (w *World) ApplyMarketCreditAction(mc *MarketCreditState, actorID string, x
 		var obs []*Actor
 		if borrower != nil {
 			borrowerName = borrower.Name
-			if borrower.Trust == nil {
-				borrower.Trust = map[string]int{}
-			}
-			borrower.Trust[a.ID] -= 3
-			a.Trust[borrower.ID] -= 1
+			tx.MutateTrust(borrower, a.ID, -3)
+			tx.MutateTrust(a, borrower.ID, -1)
 			obs = append(obs, borrower)
 		}
-		return emit("house_foreclosed", fmt.Sprintf("%s foreclosed %s from %s over overdue loan #%d (tenant rent %d/day)", a.Name, h.Name, borrowerName, l.ID, dailyRent), map[string]any{
+		forecloseData := map[string]any{
 			"loan_id":      l.ID,
 			"house_id":     h.ID,
 			"old_owner_id": oldOwner,
 			"new_owner_id": a.ID,
 			"tenant_id":    l.BorrowerID,
 			"daily_rent":   dailyRent,
-		}, obs...), true
+		}
+		if l.IssuedEventID > 0 {
+			forecloseData["cause_event_id"] = l.IssuedEventID
+		}
+		if l.RootEventID > 0 {
+			forecloseData["root_event_id"] = l.RootEventID
+		}
+		return emit("house_foreclosed", fmt.Sprintf("%s foreclosed %s from %s over overdue loan #%d (tenant rent %d/day)", a.Name, h.Name, borrowerName, l.ID, dailyRent), forecloseData, obs...)
 	}
 
-	return nil, false
+	return nil
 }
 
 // StepMarketAndCredit advances dynamic district pricing, merchant hoarding/release,
@@ -1155,15 +1141,19 @@ func (w *World) stepDailyCreditAndAnnexation(mc *MarketCreditState, spec MarketC
 		if availRent > 0 {
 			paid := minInt64(rent, availRent)
 			if paid > 0 {
-				if tenant != nil {
-					tenant.Money -= int(paid)
-				} else {
+				switch {
+				case tenant != nil && owner != nil:
+					transferActorCoinsClean(tenant, owner, int(paid))
+				case tenant != nil:
+					w.adjustActorCurrency(tenant, "coins", -paid, false)
+					ownerCohort.MoneyPool += paid
+				case owner != nil:
 					tenantCohort.MoneyPool -= paid
 					ten.TenantCohortFunds -= paid
-				}
-				if owner != nil {
-					owner.Money += int(paid)
-				} else {
+					w.adjustActorCurrency(owner, "coins", paid, false)
+				default:
+					tenantCohort.MoneyPool -= paid
+					ten.TenantCohortFunds -= paid
 					ownerCohort.MoneyPool += paid
 				}
 				ten.LastRentTick = w.Tick
@@ -1600,11 +1590,23 @@ func (w *World) WealthGiniPermille(mc *MarketCreditState) int {
 		if c.Population <= 0 {
 			continue
 		}
-		wealth := maxInt64(0, c.MoneyPool)
-		p := int64(c.Population)
-		buckets = append(buckets, wealthBucket{pop: p, wealth: wealth})
-		totalPop += p
-		totalWealth += wealth
+		anon := w.anonymousCohort(*c)
+		if anon.Population > 0 {
+			wealth := maxInt64(0, c.MoneyPool)
+			p := int64(anon.Population)
+			buckets = append(buckets, wealthBucket{pop: p, wealth: wealth})
+			totalPop += p
+			totalWealth += wealth
+		}
+		for _, m := range c.Members {
+			if m.Dead {
+				continue
+			}
+			mw := int64(maxInt(0, m.Money))
+			buckets = append(buckets, wealthBucket{pop: 1, wealth: mw})
+			totalPop++
+			totalWealth += mw
+		}
 	}
 
 	if totalPop <= 0 || totalWealth <= 0 || len(buckets) <= 1 {

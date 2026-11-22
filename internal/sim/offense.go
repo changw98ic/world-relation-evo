@@ -83,13 +83,29 @@ func ComputeActionOffense(baseOffense, demandRatioPct int, attitude string, prio
 // ActorOffenseThreshold computes a victim's breaking threshold based on personality traits,
 // power/tier asymmetry relative to the offender, and fear of leverage/exposure.
 func (w *World) ActorOffenseThreshold(offender, victim Actor, leverageSeverity int) int {
+	return offenseThreshold(
+		victim.Personality, leverageSeverity,
+		w.Catalog.PerceivedPowerTier(offender), w.Catalog.ActorPowerTier(victim),
+		w.Catalog.PerceivedCombatPower(offender), CombatPowerWithCatalog(w.Catalog, victim),
+	)
+}
+
+func (p Perception) ObservedOffenseThreshold(victim Neighbor, leverageSeverity int) int {
+	return offenseThreshold(
+		victim.Personality, leverageSeverity,
+		p.Catalog.PerceivedPowerTier(p.Self), victim.PowerTier,
+		p.Catalog.PerceivedCombatPower(p.Self), victim.CombatPower,
+	)
+}
+
+func offenseThreshold(personality string, leverageSeverity, oTier, vTier, oPower, vPower int) int {
 	threshold := 50
 	switch {
-	case personalityContainsAny(victim.Personality, "timid", "meek", "coward", "胆怯", "懦弱"):
+	case personalityContainsAny(personality, "timid", "meek", "coward", "胆怯", "懦弱"):
 		threshold += 45
-	case personalityContainsAny(victim.Personality, "cautious", "humble", "easygoing", "patient", "警觉", "谦逊", "隐忍", "随和"):
+	case personalityContainsAny(personality, "cautious", "humble", "easygoing", "patient", "警觉", "谦逊", "隐忍", "随和"):
 		threshold += 25
-	case personalityContainsAny(victim.Personality, "proud", "ruthless", "vengeful", "reckless", "righteous", "孤傲", "狠辣", "睚眦", "鲁莽", "嫉恶"):
+	case personalityContainsAny(personality, "proud", "ruthless", "vengeful", "reckless", "righteous", "孤傲", "狠辣", "睚眦", "鲁莽", "嫉恶"):
 		threshold -= 25
 	}
 
@@ -97,10 +113,6 @@ func (w *World) ActorOffenseThreshold(offender, victim Actor, leverageSeverity i
 		threshold += leverageSeverity / 4
 	}
 
-	oTier := w.Catalog.ActorPowerTier(offender)
-	vTier := w.Catalog.ActorPowerTier(victim)
-	oPower := CombatPowerWithCatalog(w.Catalog, offender)
-	vPower := CombatPowerWithCatalog(w.Catalog, victim)
 	powerShift := (oTier-vTier)*15 + maxInt(-25, minInt(25, (oPower-vPower)/3))
 	threshold += powerShift
 
@@ -228,10 +240,7 @@ func (w *World) BlackmailAssessment(victim, offender Actor, secret ActorSecret, 
 		demand = maxInt(2, minInt(20, secret.Severity/4))
 	}
 	attitude := normalizeOffenseAttitude(x.Text)
-	base := 10
-	if attitude == "subtle" && demand <= 3 {
-		base = 6
-	}
+	base := blackmailBaseOffense(demand, attitude)
 	key := "blackmail:" + secret.ID
 	if settle {
 		return w.AssessAndRecordOffense(victim, offender, key, base, demand, victim.Money, secret.Severity, attitude)
@@ -241,4 +250,16 @@ func (w *World) BlackmailAssessment(victim, offender Actor, secret ActorSecret, 
 
 func (w *World) extortionDemand(offender, victim Actor) int {
 	return minInt(victim.Money, minInt(w.Catalog.ExtortionFee(offender), victim.Money/3+1))
+}
+
+// BlackmailMinimumOffense bounds the current offense using a zero demand ratio.
+func BlackmailMinimumOffense(demand int, attitude string, priorRepeats int) int {
+	return ComputeActionOffense(blackmailBaseOffense(demand, attitude), 0, attitude, priorRepeats)
+}
+
+func blackmailBaseOffense(demand int, attitude string) int {
+	if attitude == "subtle" && demand <= 3 {
+		return 6
+	}
+	return 10
 }

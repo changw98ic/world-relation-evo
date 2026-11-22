@@ -5,8 +5,57 @@ import (
 	"math"
 )
 
-// Perception and serial settlement use the same current delivery conditions.
-// A simultaneous competing action can still invalidate an otherwise valid offer.
+// perceivedOfferBlockReason evaluates only publicly observable and self-owned
+// offer constraints for Perception, never peeking at a counterparty's private
+// wallet or private inventory before an accept attempt is submitted.
+// OfferAcceptanceBlockReason checks the viewer's own holdings and the goods on display.
+func (p Perception) OfferAcceptanceBlockReason(offer Offer) string {
+	a := p.Self
+	if offer.Expires < p.Tick {
+		return "offer has expired"
+	}
+	peer := p.localNeighbor(offer.Counterparty(a.ID))
+	if peer == nil || peer.Jailed || p.Tick < a.JailedUntil {
+		return "seller is not available at the buyer's location"
+	}
+	currency := offer.Currency
+	if currency == "" {
+		currency = "coins"
+	}
+	spec := p.Catalog.Items[offer.Item]
+	if !spec.Tradeable {
+		return fmt.Sprintf("item %s is not tradeable", offer.Item)
+	}
+	if !itemAcceptsCurrency(spec, currency) {
+		return fmt.Sprintf("item %s does not accept currency %s", offer.Item, currency)
+	}
+	buyerTags := peer.Tags
+	if a.ID == offer.Buyer {
+		buyerTags = p.EffectiveTags()
+	}
+	if spec.BuyerRequiredTag != "" && !ActorHasTag(buyerTags, spec.BuyerRequiredTag) {
+		return fmt.Sprintf("buyer %s lacks required tag %s for %s", offer.Buyer, spec.BuyerRequiredTag, offer.Item)
+	}
+	if p.Polity != nil && ActorHasTag(p.Polity.EmbargoItems, offer.Item) {
+		return "item is embargoed by local polity decree: " + offer.Item
+	}
+	quantity := p.Continuity.DisplayedGoods[offer.ID]
+	if a.ID == offer.Seller {
+		quantity = a.Items[offer.Item]
+	}
+	if quantity < offer.Quantity {
+		return "seller no longer holds the offered quantity"
+	}
+	balance := a.Currencies[currency]
+	if currency == "coins" {
+		balance = int64(a.Money)
+	}
+	if a.ID == offer.Buyer && balance < int64(offer.Price) {
+		return "buyer cannot pay the offered price"
+	}
+	return ""
+}
+
 func (w *World) offerSettlementBlockReason(buyer Actor, offer Offer) string {
 	seller := w.actor(offer.Seller)
 	if offer.Expires < w.Tick {

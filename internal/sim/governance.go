@@ -8,6 +8,7 @@ import (
 // GovernanceSpec defines declarative fiscal taxation, institutional corruption & censorate oversight,
 // and syndicate protection-racket mechanics without hardcoding historical setting names.
 type GovernanceSpec struct {
+	ExplicitZero             bool   `json:"explicit_zero,omitempty"`
 	MarketTaxPermille        int    `json:"market_tax_permille,omitempty"`
 	TransitCustomsPermille   int    `json:"transit_customs_permille,omitempty"`
 	DailyPollTaxPermille     int    `json:"daily_poll_tax_permille,omitempty"`
@@ -22,6 +23,7 @@ type GovernanceSpec struct {
 	AuditCapability          string `json:"audit_capability,omitempty"`
 	RacketTag                string `json:"racket_tag,omitempty"`
 	OutlawTag                string `json:"outlaw_tag,omitempty"`
+	explicitFields           map[string]bool
 }
 
 func DefaultGovernanceSpec() GovernanceSpec {
@@ -47,36 +49,16 @@ func DefaultGovernanceSpec() GovernanceSpec {
 func (c Catalog) EffectiveGovernance() GovernanceSpec {
 	g := c.Governance
 	def := DefaultGovernanceSpec()
-	if g.MarketTaxPermille <= 0 {
-		g.MarketTaxPermille = def.MarketTaxPermille
-	}
-	if g.TransitCustomsPermille <= 0 {
-		g.TransitCustomsPermille = def.TransitCustomsPermille
-	}
-	if g.DailyPollTaxPermille <= 0 {
-		g.DailyPollTaxPermille = def.DailyPollTaxPermille
-	}
-	if g.SubsistenceReservePerCap <= 0 {
-		g.SubsistenceReservePerCap = def.SubsistenceReservePerCap
-	}
-	if g.CivicStipendPerCap <= 0 {
-		g.CivicStipendPerCap = def.CivicStipendPerCap
-	}
-	if g.TaxSkimBasePermille <= 0 {
-		g.TaxSkimBasePermille = def.TaxSkimBasePermille
-	}
-	if g.EmbezzleBasePermille <= 0 {
-		g.EmbezzleBasePermille = def.EmbezzleBasePermille
-	}
-	if g.AuditThreshold <= 0 {
-		g.AuditThreshold = def.AuditThreshold
-	}
-	if g.RacketRatePermille <= 0 {
-		g.RacketRatePermille = def.RacketRatePermille
-	}
-	if g.BribeSharePermille <= 0 {
-		g.BribeSharePermille = def.BribeSharePermille
-	}
+	g.MarketTaxPermille = resolveSpecNumber(g.MarketTaxPermille, def.MarketTaxPermille, g.ExplicitZero || g.explicitFields["market_tax_permille"])
+	g.TransitCustomsPermille = resolveSpecNumber(g.TransitCustomsPermille, def.TransitCustomsPermille, g.ExplicitZero || g.explicitFields["transit_customs_permille"])
+	g.DailyPollTaxPermille = resolveSpecNumber(g.DailyPollTaxPermille, def.DailyPollTaxPermille, g.ExplicitZero || g.explicitFields["daily_poll_tax_permille"])
+	g.SubsistenceReservePerCap = resolveSpecNumber(g.SubsistenceReservePerCap, def.SubsistenceReservePerCap, g.ExplicitZero || g.explicitFields["subsistence_reserve_per_cap"])
+	g.CivicStipendPerCap = resolveSpecNumber(g.CivicStipendPerCap, def.CivicStipendPerCap, g.ExplicitZero || g.explicitFields["civic_stipend_per_cap"])
+	g.TaxSkimBasePermille = resolveSpecNumber(g.TaxSkimBasePermille, def.TaxSkimBasePermille, g.ExplicitZero || g.explicitFields["tax_skim_base_permille"])
+	g.EmbezzleBasePermille = resolveSpecNumber(g.EmbezzleBasePermille, def.EmbezzleBasePermille, g.ExplicitZero || g.explicitFields["embezzle_base_permille"])
+	g.AuditThreshold = resolveSpecNumber(g.AuditThreshold, def.AuditThreshold, g.ExplicitZero || g.explicitFields["audit_threshold"])
+	g.RacketRatePermille = resolveSpecNumber(g.RacketRatePermille, def.RacketRatePermille, g.ExplicitZero || g.explicitFields["racket_rate_permille"])
+	g.BribeSharePermille = resolveSpecNumber(g.BribeSharePermille, def.BribeSharePermille, g.ExplicitZero || g.explicitFields["bribe_share_permille"])
 	if g.LawCapability == "" {
 		g.LawCapability = def.LawCapability
 	}
@@ -307,6 +289,8 @@ func (w *World) stepCohortDailyTaxation() []Event {
 	if clock.Hour != 12 || clock.Minute != 0 || len(w.Cohorts) == 0 {
 		return nil
 	}
+	restore := w.detachCohortMembers()
+	defer restore()
 	gov := w.Catalog.EffectiveGovernance()
 	var totalAssessed, totalNetTreasury, totalSkimmed, totalSurcharge int64
 	var taxedCohorts, taxedPopulation int
@@ -332,27 +316,18 @@ func (w *World) stepCohortDailyTaxation() []Event {
 		if pollPermille <= 0 {
 			continue
 		}
-		assessed := (taxable * int64(pollPermille)) / 1000
-		if w.JusticeRevolt != nil && w.JusticeRevolt.IsDistrictTaxStriking(c.District, w.Tick) {
-			assessed /= 4
-		}
+		taxStriking := w.JusticeRevolt != nil && w.JusticeRevolt.IsDistrictTaxStriking(c.District, w.Tick)
+		assessed := SettlementTaxAssessment(taxable, pollPermille, taxStriking)
 		if assessed < 1 {
 			continue
 		}
 
-		// Corrupt collectors levy extra meltage/assessment surcharges (火耗羡余) when local corruption is elevated
+		// Corrupt collectors levy extra meltage/assessment surcharges when local corruption is elevated
 		var surcharge int64
 		collector := w.findCollectorCohort(c.District)
 		if collector != nil && w.DistrictStates != nil {
-			if ds, hasDS := w.DistrictStates[c.District]; hasDS && ds.Corruption >= 12 {
-				surPermille := 90 + ds.Corruption*3 // 9%..39% surcharge on top of official tax
-				if surPermille > 350 {
-					surPermille = 350
-				}
-				surcharge = (assessed * int64(surPermille)) / 1000
-				if assessed+surcharge > taxable/4 {
-					surcharge = maxInt64(0, taxable/4-assessed)
-				}
+			if ds, hasDS := w.DistrictStates[c.District]; hasDS {
+				surcharge = SettlementCorruptionSurcharge(assessed, taxable, ds.Corruption)
 			}
 		}
 		totalDue := assessed + surcharge
@@ -469,6 +444,11 @@ func (w *World) stepCohortProtectionRackets() []Event {
 	if (clock.Hour != 10 && clock.Hour != 16) || clock.Minute != 0 || len(w.Cohorts) == 0 {
 		return nil
 	}
+	if !w.Catalog.EffectiveEnvironment().Institutions.RacketeeringEnabled() {
+		return nil
+	}
+	restore := w.detachCohortMembers()
+	defer restore()
 	gov := w.Catalog.EffectiveGovernance()
 
 	// Gather active syndicate racket cohorts (e.g. gangster & gang_boss)
@@ -703,6 +683,11 @@ func (w *World) stepCohortBriberyAndCollusion() []Event {
 	if clock.Hour != 19 || clock.Minute != 0 || len(w.Cohorts) == 0 {
 		return nil
 	}
+	if !w.Catalog.EffectiveEnvironment().Institutions.EnforcementEnabled() {
+		return nil
+	}
+	restore := w.detachCohortMembers()
+	defer restore()
 	gov := w.Catalog.EffectiveGovernance()
 	var events []Event
 
@@ -756,8 +741,7 @@ func (w *World) stepCohortBriberyAndCollusion() []Event {
 
 		bBailed := 0
 		if outlaw.Jailed > 0 && bribe >= 30 {
-			bBailed = minInt(outlaw.Jailed, maxInt(1, outlaw.Jailed/5))
-			outlaw.Jailed -= bBailed
+			bBailed = w.releaseCohortJailed(outlaw, maxInt(1, outlaw.Jailed/5))
 		}
 
 		bribeEv := Event{

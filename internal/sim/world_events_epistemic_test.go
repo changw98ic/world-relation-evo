@@ -28,7 +28,7 @@ func TestEpistemicDeathNewsPropagationAndDelayedVendetta(t *testing.T) {
 	mentor.Location, apprentice.Location = dSafe, dSafe
 	mentor.Skills = map[string]int{"sword_art": 4}
 	apprentice.Skills = map[string]int{"sword_art": 1}
-	w.applyTeachSkill(mentor, Action{Kind: "teach_knowledge", SkillID: "sword_art", TargetID: apprentice.ID}, apprentice)
+	w.applyTeachSkill(w.BeginTx(mentor.ID, ActionIntent{}), mentor, Action{Kind: "teach_knowledge", SkillID: "sword_art", TargetID: apprentice.ID}, apprentice)
 
 	// Murder happens in dWild: witness is on-site, mentor is far away in dSafe!
 	mentor.Location = dSafe

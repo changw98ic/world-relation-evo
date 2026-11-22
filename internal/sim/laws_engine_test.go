@@ -162,7 +162,8 @@ func TestLawSpaceTravelCannotUseStationaryEndpointSanitation(t *testing.T) {
 			w.Catalog.Lifecycle.WasteItem = "nightsoil"
 			w.Catalog.Lifecycle.WastePerFoodDivisor = 2
 			w.Catalog.Items["nightsoil"] = ItemSpec{ID: "nightsoil", MassUnits: 1}
-			w.DistrictStates = map[string]DistrictState{"home": {Sanitation: 80, Infrastructure: map[string]int{"public_latrine": 100}, NightsoilPool: 3}}
+			w.Catalog.Infrastructures = map[string]InfrastructureSpec{"recycler": {ID: "recycler", SanitationRole: true, MaxCondition: 100}}
+			w.DistrictStates = map[string]DistrictState{"home": {Sanitation: 80, Infrastructure: map[string]int{"recycler": 100}, NightsoilPool: 3}}
 			w.Actors[0].Waste, w.Actors[0].DigestedFood = 2, 4
 			if travel {
 				lawOK(t, w.Apply("a", Action{Kind: "move", Location: "away"}))

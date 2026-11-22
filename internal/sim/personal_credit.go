@@ -5,15 +5,16 @@ import "fmt"
 // LoanRequest contains the engine's concrete terms, pending the lender's decision.
 // No money or property moves until that character accepts these same terms.
 type LoanRequest struct {
-	ID              int64  `json:"id"`
-	BorrowerID      string `json:"borrower_id"`
-	LenderID        string `json:"lender_id"`
-	Principal       int    `json:"principal"`
-	RatePermille    int    `json:"rate_permille"`
-	TermTicks       int    `json:"term_ticks"`
-	CollateralHouse string `json:"collateral_house,omitempty"`
-	RequestedTick   int64  `json:"requested_tick"`
-	Status          string `json:"status"`
+	ID               int64  `json:"id"`
+	BorrowerID       string `json:"borrower_id"`
+	LenderID         string `json:"lender_id"`
+	Principal        int    `json:"principal"`
+	RatePermille     int    `json:"rate_permille"`
+	TermTicks        int    `json:"term_ticks"`
+	CollateralHouse  string `json:"collateral_house,omitempty"`
+	RequestedTick    int64  `json:"requested_tick"`
+	RequestedEventID int64  `json:"requested_event_id,omitempty"`
+	Status           string `json:"status"`
 }
 
 // QuotePersonalLoan computes a small subsistence loan; selection models choose
@@ -38,12 +39,12 @@ func (mc *MarketCreditState) PendingLoanRequests(actorID string) []LoanRequest {
 	return requests
 }
 
-func (w *World) applyPersonalCredit(mc *MarketCreditState, a *Actor, x Action, spec MarketCreditSpec) []Event {
+func (w *World) applyPersonalCredit(tx *WorldTx, mc *MarketCreditState, a *Actor, x Action, spec MarketCreditSpec) []Event {
 	emit := func(kind string, data map[string]any, other *Actor) []Event {
-		return []Event{w.record(a, x, kind, data, other)}
+		return []Event{tx.record(a, x, kind, data, other)}
 	}
 	fail := func(text string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": text})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": text})}
 	}
 	b := w.actor(x.TargetID)
 	if x.Kind == "cancel_loan" {
@@ -55,7 +56,12 @@ func (w *World) applyPersonalCredit(mc *MarketCreditState, a *Actor, x Action, s
 				if b != nil && !b.Dead && SamePlace(*a, *b) {
 					observer = b
 				}
-				return emit("loan_cancelled", map[string]any{"text": fmt.Sprintf("%s withdrew loan request #%d", a.Name, r.ID), "request": *r}, observer)
+				cancelData := map[string]any{"text": fmt.Sprintf("%s withdrew loan request #%d", a.Name, r.ID), "request": *r}
+				if r.RequestedEventID > 0 {
+					cancelData["cause_event_id"] = r.RequestedEventID
+					cancelData["root_event_id"] = r.RequestedEventID
+				}
+				return emit("loan_cancelled", cancelData, observer)
 			}
 		}
 		return fail("no pending request from this borrower to this lender")
@@ -84,7 +90,11 @@ func (w *World) applyPersonalCredit(mc *MarketCreditState, a *Actor, x Action, s
 		}
 		r := LoanRequest{ID: mc.allocLoanID(), BorrowerID: a.ID, LenderID: b.ID, Principal: amount, RatePermille: spec.DailyLoanInterestPermille, TermTicks: spec.LoanTermTicks, CollateralHouse: collateral, RequestedTick: w.Tick, Status: "pending"}
 		mc.LoanRequests = append(mc.LoanRequests, r)
-		return emit("loan_requested", map[string]any{"text": fmt.Sprintf("%s requested %d coins from %s at %d‰/day for %d ticks, collateral %s", a.Name, r.Principal, b.Name, r.RatePermille, r.TermTicks, r.CollateralHouse), "request": r}, b)
+		evs := emit("loan_requested", map[string]any{"text": fmt.Sprintf("%s requested %d coins from %s at %d‰/day for %d ticks, collateral %s", a.Name, r.Principal, b.Name, r.RatePermille, r.TermTicks, r.CollateralHouse), "request": r}, b)
+		if len(evs) > 0 {
+			mc.LoanRequests[len(mc.LoanRequests)-1].RequestedEventID = evs[0].ID
+		}
+		return evs
 	}
 	for i := range mc.LoanRequests {
 		r := &mc.LoanRequests[i]
@@ -93,7 +103,12 @@ func (w *World) applyPersonalCredit(mc *MarketCreditState, a *Actor, x Action, s
 		}
 		if x.Kind == "reject_loan" {
 			r.Status = "rejected"
-			return emit("loan_rejected", map[string]any{"text": fmt.Sprintf("%s rejected %s’s loan request", a.Name, b.Name), "request": *r}, b)
+			rejData := map[string]any{"text": fmt.Sprintf("%s rejected %s’s loan request", a.Name, b.Name), "request": *r}
+			if r.RequestedEventID > 0 {
+				rejData["cause_event_id"] = r.RequestedEventID
+				rejData["root_event_id"] = r.RequestedEventID
+			}
+			return emit("loan_rejected", rejData, b)
 		}
 		if a.Money < r.Principal {
 			return fail("lender has insufficient coins for agreed terms")
@@ -108,12 +123,23 @@ func (w *World) applyPersonalCredit(mc *MarketCreditState, a *Actor, x Action, s
 				return fail("requested collateral is no longer owned by borrower")
 			}
 		}
-		a.Money -= r.Principal
-		b.Money += r.Principal
+		tx.TransferCurrency(a, b, "coins", int64(r.Principal), x.Kind)
 		r.Status = "accepted"
-		loan := LoanRecord{ID: r.ID, LenderID: a.ID, BorrowerID: b.ID, Principal: int64(r.Principal), RatePermille: r.RatePermille, IssuedTick: w.Tick, DueTick: w.Tick + int64(r.TermTicks), CollateralHouse: r.CollateralHouse, Status: "active"}
+		loan := LoanRecord{ID: r.ID, LenderID: a.ID, BorrowerID: b.ID, Principal: int64(r.Principal), RatePermille: r.RatePermille, IssuedTick: w.Tick, DueTick: w.Tick + int64(r.TermTicks), CollateralHouse: r.CollateralHouse, Status: "active", RootEventID: r.RequestedEventID}
+		issueData := map[string]any{"text": fmt.Sprintf("%s accepted %s’s request and lent %d coins, due tick %d", a.Name, b.Name, r.Principal, loan.DueTick), "loan_id": loan.ID, "request": *r, "lender_id": a.ID, "borrower_id": b.ID, "principal": loan.Principal, "rate_permille": loan.RatePermille, "due_tick": loan.DueTick, "collateral_house": loan.CollateralHouse}
+		if r.RequestedEventID > 0 {
+			issueData["cause_event_id"] = r.RequestedEventID
+			issueData["root_event_id"] = r.RequestedEventID
+		}
+		evs := emit("loan_issued", issueData, b)
+		if len(evs) > 0 {
+			loan.IssuedEventID = evs[0].ID
+			if loan.RootEventID == 0 {
+				loan.RootEventID = evs[0].ID
+			}
+		}
 		mc.Loans = append(mc.Loans, loan)
-		return emit("loan_issued", map[string]any{"text": fmt.Sprintf("%s accepted %s’s request and lent %d coins, due tick %d", a.Name, b.Name, r.Principal, loan.DueTick), "loan_id": loan.ID, "request": *r, "lender_id": a.ID, "borrower_id": b.ID, "principal": loan.Principal, "rate_permille": loan.RatePermille, "due_tick": loan.DueTick, "collateral_house": loan.CollateralHouse}, b)
+		return evs
 	}
 	return fail("no pending request from this borrower to this lender")
 }

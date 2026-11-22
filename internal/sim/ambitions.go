@@ -252,9 +252,9 @@ func normalizeAmbitionKind(raw string) string {
 	}
 }
 
-func (w *World) applySetAmbition(a *Actor, x Action) []Event {
+func (w *World) applySetAmbition(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	kind := normalizeAmbitionKind(x.Item)
 	targetID := x.TargetID
@@ -305,7 +305,7 @@ func (w *World) applySetAmbition(a *Actor, x Action) []Event {
 		StartedTick: w.Tick,
 	}
 	a.Ambitions = append(a.Ambitions, amb)
-	ev := w.record(a, x, "ambition_adopted", map[string]any{
+	ev := tx.record(a, x, "ambition_adopted", map[string]any{
 		"text":         fmt.Sprintf("%s adopted long-term ambition: %s (target=%s, goal=%d)", a.Name, amb.Kind, amb.TargetID, amb.TargetValue),
 		"ambition_id":  amb.ID,
 		"kind":         amb.Kind,
@@ -315,9 +315,9 @@ func (w *World) applySetAmbition(a *Actor, x Action) []Event {
 	return []Event{ev}
 }
 
-func (w *World) applyInvestigateActor(a *Actor, x Action) []Event {
+func (w *World) applyInvestigateActor(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	if a.Energy < 5 {
 		return fail("insufficient energy to investigate actor")
@@ -326,7 +326,7 @@ func (w *World) applyInvestigateActor(a *Actor, x Action) []Event {
 	if target == nil || target.Dead || target.ID == a.ID || !SamePlace(*a, *target) {
 		return fail("investigation target must be co-located and alive")
 	}
-	a.Energy -= 5
+	tx.setEnergy(a, a.Energy-5, x.Kind)
 
 	secretIdx := -1
 	for i := range w.Secrets {
@@ -337,7 +337,7 @@ func (w *World) applyInvestigateActor(a *Actor, x Action) []Event {
 		}
 	}
 	if secretIdx < 0 {
-		return []Event{w.record(a, x, "investigation_inconclusive", map[string]any{
+		return []Event{tx.record(a, x, "investigation_inconclusive", map[string]any{
 			"text":      fmt.Sprintf("%s investigated %s and uncovered no new secret", a.Name, target.Name),
 			"target_id": target.ID,
 		})}
@@ -355,7 +355,7 @@ func (w *World) applyInvestigateActor(a *Actor, x Action) []Event {
 	}
 	roll := int(worldHash(w.ID, w.Tick, "inv:"+a.ID+":"+target.ID) % 100)
 	if roll >= prob {
-		return []Event{w.record(a, x, "investigation_inconclusive", map[string]any{
+		return []Event{tx.record(a, x, "investigation_inconclusive", map[string]any{
 			"text":      fmt.Sprintf("%s investigated %s but found no conclusive proof", a.Name, target.Name),
 			"target_id": target.ID,
 		})}
@@ -374,7 +374,7 @@ func (w *World) applyInvestigateActor(a *Actor, x Action) []Event {
 		Quantity:  s.Severity,
 		Proceeds:  s.IllicitProceeds,
 	}
-	ev := w.record(a, x, "secret_discovered", map[string]any{
+	ev := tx.record(a, x, "secret_discovered", map[string]any{
 		"text":          fmt.Sprintf("%s uncovered %s's secret (%s, severity %d)", a.Name, target.Name, w.formatSecretDesc(*s), s.Severity),
 		"secret_id":     s.ID,
 		"owner_id":      s.OwnerID,
@@ -388,9 +388,9 @@ func (w *World) applyInvestigateActor(a *Actor, x Action) []Event {
 	return append([]Event{ev}, holdEvs...)
 }
 
-func (w *World) applyBlackmail(a *Actor, x Action) []Event {
+func (w *World) applyBlackmail(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	if a.Energy < 4 {
 		return fail("insufficient energy to blackmail")
@@ -418,7 +418,7 @@ func (w *World) applyBlackmail(a *Actor, x Action) []Event {
 		return fail("no known unexposed secret to blackmail target")
 	}
 	s := &w.Secrets[secretIdx]
-	a.Energy -= 4
+	tx.setEnergy(a, a.Energy-4, x.Kind)
 
 	if target.Trust == nil {
 		target.Trust = map[string]int{}
@@ -435,16 +435,16 @@ func (w *World) applyBlackmail(a *Actor, x Action) []Event {
 		if target.Money < 1 {
 			reason = "insolvent"
 		}
-		target.Trust[a.ID] -= 5
+		tx.MutateTrust(target, a.ID, -5)
 		var backlashDmg, absorbed int
 		var immune bool
 		var effects []Event
 		if assess.Outcome == "breaking_point" {
 			tPower := CombatPowerWithCatalog(w.Catalog, *target)
-			backlashDmg, absorbed, immune, effects = w.applyMeleeHit(target, a, x, maxInt(4, minInt(18, tPower/3)))
+			backlashDmg, absorbed, immune, effects = w.applyMeleeHit(tx, target, a, x, maxInt(4, minInt(18, tPower/3)))
 		}
 		observers := w.awakeSamePlaceObservers(*a, a.ID)
-		ev := w.record(a, x, "blackmail_refused", map[string]any{
+		ev := tx.record(a, x, "blackmail_refused", map[string]any{
 			"text":                fmt.Sprintf("%s snapped and refused %s's %s blackmail (%d coins) over %s (offense %d/%d; backlash -%d HP)", target.Name, a.Name, attitude, demand, w.formatSecretDesc(*s), assess.AccumulatedAfter, assess.Threshold, backlashDmg),
 			"secret_id":           s.ID,
 			"victim_id":           target.ID,
@@ -455,22 +455,23 @@ func (w *World) applyBlackmail(a *Actor, x Action) []Event {
 			"accumulated_offense": assess.AccumulatedAfter,
 			"breaking_threshold":  assess.Threshold,
 			"reason":              reason,
+			"observation":         Observation{Kind: "blackmail_refused", SubjectID: a.ID, ObjectID: target.ID, SecretID: s.ID, Location: a.Location},
 			"backlash_damage":     backlashDmg,
 			"absorbed":            absorbed,
 			"immune_blocked":      immune,
+			"root_event_id":       s.RootEventID,
+			"cause_event_id":      s.RootEventID,
 		}, observers...)
 		events := append(effects, ev)
-		events = append(events, w.ensureRelations().recordGrudge(w, target.ID, a.ID, "blackmail_attempt", minInt(90, 45+assess.PriorRepeats*15), ev.ID, ev.ID)...)
-		events = append(events, w.finishMeleeHit(target, a, x, backlashDmg, "blackmail backlash", ev)...)
+		events = append(events, w.ensureRelations().recordGrudge(tx, w, target.ID, a.ID, "blackmail_attempt", minInt(90, 45+assess.PriorRepeats*15), ev.ID, ev.ID)...)
+		events = append(events, w.finishMeleeHit(tx, target, a, x, backlashDmg, "blackmail backlash", ev)...)
 		return events
 	}
 
 	paid := minInt(target.Money, demand)
 	if paid > 0 {
-		// Exact 0-error coin transfer between existing living actors.
-		target.Money -= paid
-		a.Money += paid
-		if assess.Outcome != "minor_favor" {
+		// Exact 0-error coin transfer via canonical primitive.
+		if tx.TransferCurrency(target, a, "coins", int64(paid), x.Kind) && assess.Outcome != "minor_favor" {
 			a.IllicitGain += paid
 		}
 	}
@@ -478,6 +479,7 @@ func (w *World) applyBlackmail(a *Actor, x Action) []Event {
 	observers := w.awakeSamePlaceObservers(*a, a.ID)
 	obs := Observation{
 		Kind:      "blackmailed",
+		SecretID:  s.ID,
 		Modality:  "eyewitness",
 		SubjectID: a.ID,
 		ObjectID:  target.ID,
@@ -488,8 +490,8 @@ func (w *World) applyBlackmail(a *Actor, x Action) []Event {
 
 	if assess.Outcome == "minor_favor" {
 		// Minor favor (e.g. "buy me a meal"): slight wariness, NO blood feud, NO criminal plot!
-		target.Trust[a.ID] -= 1
-		ev := w.record(a, x, "blackmailed", map[string]any{
+		tx.MutateTrust(target, a.ID, -1)
+		ev := tx.record(a, x, "blackmailed", map[string]any{
 			"text":                fmt.Sprintf("%s subtly leveraged %s against %s for a minor favor (%d coins; offense %d/%d)", a.Name, w.formatSecretDesc(*s), target.Name, paid, assess.AccumulatedAfter, assess.Threshold),
 			"secret_id":           s.ID,
 			"victim_id":           target.ID,
@@ -501,14 +503,16 @@ func (w *World) applyBlackmail(a *Actor, x Action) []Event {
 			"accumulated_offense": assess.AccumulatedAfter,
 			"breaking_threshold":  assess.Threshold,
 			"observation":         obs,
+			"root_event_id":       s.RootEventID,
+			"cause_event_id":      s.RootEventID,
 		}, observers...)
 		return []Event{ev}
 	}
 
 	// Substantive extortion (comply_resentful): heavy trust drop, scaled grudge, reciprocal covert secret.
-	target.Trust[a.ID] -= 3
+	tx.MutateTrust(target, a.ID, -3)
 	grudgeInt := minInt(75, maxInt(20, (assess.AccumulatedAfter*60)/maxInt(1, assess.Threshold)))
-	ev := w.record(a, x, "blackmailed", map[string]any{
+	ev := tx.record(a, x, "blackmailed", map[string]any{
 		"text":                fmt.Sprintf("%s blackmailed %s (%s) over %s and extorted %d coins (offense %d/%d)", a.Name, target.Name, attitude, w.formatSecretDesc(*s), paid, assess.AccumulatedAfter, assess.Threshold),
 		"secret_id":           s.ID,
 		"victim_id":           target.ID,
@@ -521,15 +525,17 @@ func (w *World) applyBlackmail(a *Actor, x Action) []Event {
 		"breaking_threshold":  assess.Threshold,
 		"severity":            s.Severity,
 		"observation":         obs,
+		"root_event_id":       s.RootEventID,
+		"cause_event_id":      s.RootEventID,
 	}, observers...)
 	events := []Event{ev}
-	events = append(events, w.ensureRelations().recordGrudge(w, target.ID, a.ID, "blackmailed", grudgeInt, ev.ID, ev.ID)...)
+	events = append(events, w.ensureRelations().recordGrudge(tx, w, target.ID, a.ID, "blackmailed", grudgeInt, ev.ID, ev.ID)...)
 	return events
 }
 
-func (w *World) applyExposeSecret(a *Actor, x Action) []Event {
+func (w *World) applyExposeSecret(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	if a.Energy < 4 {
 		return fail("insufficient energy to expose secret")
@@ -553,7 +559,7 @@ func (w *World) applyExposeSecret(a *Actor, x Action) []Event {
 		return fail("no known unexposed secret to expose")
 	}
 	s := &w.Secrets[secretIdx]
-	a.Energy -= 4
+	tx.setEnergy(a, a.Energy-4, x.Kind)
 	if !s.Exposed {
 		s.Exposed = true
 		s.ExposedTick = w.Tick
@@ -574,14 +580,14 @@ func (w *World) applyExposeSecret(a *Actor, x Action) []Event {
 		if ob.Trust == nil {
 			ob.Trust = map[string]int{}
 		}
-		ob.Trust[s.OwnerID] -= 3
+		tx.MutateTrust(ob, s.OwnerID, -3)
 	}
 	if owner != nil && !owner.Dead && ActorHasTag(s.ExposureKnownBy, owner.ID) {
 		if owner.ID != a.ID {
 			if owner.Trust == nil {
 				owner.Trust = map[string]int{}
 			}
-			owner.Trust[a.ID] -= 5
+			tx.MutateTrust(owner, a.ID, -5)
 		}
 	}
 	obs := Observation{
@@ -598,20 +604,25 @@ func (w *World) applyExposeSecret(a *Actor, x Action) []Event {
 	if owner != nil {
 		ownerName = owner.Name
 	}
-	ev := w.record(a, x, "secret_exposed", map[string]any{
+	witnessIDs := make([]string, 0, len(observers))
+	for _, obs := range observers {
+		witnessIDs = appendUnique(witnessIDs, obs.ID)
+	}
+	ev := tx.record(a, x, "secret_exposed", map[string]any{
 		"text":          fmt.Sprintf("%s publicly exposed %s's secret (%s, severity %d) in %s", a.Name, ownerName, w.formatSecretDesc(*s), s.Severity, a.Location),
 		"secret_id":     s.ID,
 		"owner_id":      s.OwnerID,
 		"subject_id":    s.SubjectID,
 		"secret_kind":   s.Kind,
 		"severity":      s.Severity,
-		"witnesses":     len(observers),
+		"witnesses":     witnessIDs,
+		"witness_count": len(observers),
 		"observation":   obs,
 		"root_event_id": s.RootEventID,
 	}, observers...)
 	events := []Event{ev}
 	if owner != nil && !owner.Dead && owner.ID != a.ID && ActorHasTag(s.ExposureKnownBy, owner.ID) {
-		events = append(events, w.ensureRelations().recordGrudge(w, owner.ID, a.ID, "secret_exposed", 45, ev.ID, ev.ID)...)
+		events = append(events, w.ensureRelations().recordGrudge(tx, w, owner.ID, a.ID, "secret_exposed", 45, ev.ID, ev.ID)...)
 	}
 	if s.Severity >= 60 && len(s.HolderStances) > 0 {
 		hKeys := make([]string, 0, len(s.HolderStances))
@@ -737,7 +748,7 @@ func (w *World) deliverSecretReport(x Action, factID int64, listeners []*Actor) 
 }
 
 // captureActionSecrets runs before another action can move or incapacitate a witness.
-func (w *World) captureActionSecrets(ev Event) []Event {
+func (w *World) captureActionSecrets(tx *WorldTx, ev Event) []Event {
 	owner := w.actor(ev.ActorID)
 	if owner == nil {
 		return nil
@@ -813,7 +824,7 @@ func (w *World) captureActionSecrets(ev Event) []Event {
 		obs := Observation{Kind: "secret_caught_red_handed", Modality: "eyewitness",
 			SubjectID: culprit.ID, ObjectID: s.ID, Item: s.Kind, Location: district, Quantity: s.Severity, Proceeds: proceeds}
 		if len(observers) > 0 {
-			caught := w.record(culprit, Action{Kind: ev.Action.Kind, TargetID: culprit.ID, Item: s.ID, BasisEventID: ev.ID},
+			caught := w.recordWithTx(tx, culprit, Action{Kind: ev.Action.Kind, TargetID: culprit.ID, Item: s.ID, BasisEventID: ev.ID},
 				"secret_caught_red_handed", map[string]any{
 					"text":        fmt.Sprintf("Witnesses caught %s red-handed (%s) at %s", culprit.Name, s.Kind, district),
 					"observation": obs, "secret_id": s.ID, "root_event_id": root, "cause_event_id": ev.ID,
@@ -822,7 +833,7 @@ func (w *World) captureActionSecrets(ev Event) []Event {
 			for _, observer := range observers {
 				seen := Observation{Kind: "witnessed_my_secret", Modality: "eyewitness", SubjectID: observer.ID,
 					ObjectID: s.ID, Item: s.Kind, Location: district, Quantity: s.Severity}
-				culprit.Memories = appendMemory(culprit.Memories, Memory{Kind: seen.Kind, Tick: w.Tick,
+				tx.RecordMemory(culprit, Memory{Kind: seen.Kind, Tick: w.Tick,
 					EventID: caught.ID, RootEventID: root, CauseEventID: ev.ID, Source: observer.ID, TargetID: culprit.ID, Observation: &seen})
 			}
 		}
@@ -990,38 +1001,4 @@ func (w *World) stepAmbitionsAndSecrets(settled []Event) []Event {
 		}
 	}
 	return events
-}
-
-func (w *World) perceivedBlackmailActions(a Actor, secrets []ActorSecret, nearby []Neighbor) []Action {
-	if a.Energy < 4 {
-		return nil
-	}
-	here := map[string]bool{}
-	for _, nb := range nearby {
-		here[nb.ID] = !nb.Sleeping && !nb.Jailed
-	}
-	var actions []Action
-	for _, s := range secrets {
-		if s.Exposed || s.HolderStances[a.ID] != "leverage" || !here[s.OwnerID] {
-			continue
-		}
-		victim := w.actor(s.OwnerID)
-		if victim.Money == 0 {
-			continue
-		}
-		x := Action{Kind: "blackmail", TargetID: victim.ID, Item: s.ID, Text: "firm", Price: maxInt(2, s.Severity/5)}
-		switch {
-		case personalityContainsAny(a.Personality, "cautious", "cunning", "diplomatic", "警觉", "狡黠"):
-			x.Text, x.Price = "subtle", 2
-		case personalityContainsAny(a.Personality, "ruthless", "reckless", "狠辣", "鲁莽"):
-			x.Text, x.Price = "hostile", maxInt(6, s.Severity/3)
-		}
-		if w.BlackmailAssessment(*victim, a, s, x, false).Outcome == "breaking_point" {
-			x.Text, x.Price = "subtle", 2
-		}
-		if w.BlackmailAssessment(*victim, a, s, x, false).Outcome != "breaking_point" {
-			actions = append(actions, x)
-		}
-	}
-	return actions
 }

@@ -84,15 +84,14 @@ func (w *World) sanitationInfraCondition(ds DistrictState) (int, bool) {
 	if ds.Infrastructure == nil {
 		return 50, false
 	}
+	condition, found := 0, false
 	for infraID, spec := range w.Catalog.Infrastructures {
-		if spec.SanitationRole {
-			if v, ok := ds.Infrastructure[infraID]; ok {
-				return v, true
-			}
+		if v, ok := ds.Infrastructure[infraID]; spec.SanitationRole && ok && (!found || v > condition) {
+			condition, found = v, true
 		}
 	}
-	if v, ok := ds.Infrastructure["public_latrine"]; ok {
-		return v, true
+	if found {
+		return condition, true
 	}
 	return 50, false
 }
@@ -241,7 +240,7 @@ func (w *World) applyCohortCasualtiesWithCause(c *PopulationCohort, wounded, dea
 	if wounded > 0 {
 		if cause != "starvation" {
 			c.ensureResidents(c.Population)
-			c.updateResidentBandState(wounded, func(b ResidentBand) bool { return b.Health == MaxHealth }, func(b *ResidentBand) { b.Health = maxInt(1, MaxHealth-1) })
+			c.updateResidentBandState(wounded, func(b ResidentBand) bool { return b.Health == MaxHealth }, func(b *ResidentBand) { setResidentBandHealthBounded(b, MaxHealth-1) })
 		}
 		if populationWide {
 			c.WoundedSick += (c.Sick - c.WoundedSick) * wounded / eff
@@ -286,6 +285,9 @@ func actorElderAndExpectancy(lc LifecycleSpec, form *FormSpec) (elderAge, maxExp
 }
 
 func actorAnnualMortalityPermille(lc LifecycleSpec, form *FormSpec, ageYears int) int {
+	if lc.Ageless || (form != nil && form.LifeExpectancyYears < 0) {
+		return 0
+	}
 	elderAge, maxExp := actorElderAndExpectancy(lc, form)
 	if ageYears < elderAge {
 		return 0
@@ -392,7 +394,7 @@ func (w *World) stepActorPhysiologyAndLifecycleFor(actors []Actor, allowSuccesso
 				}
 			}
 
-			// Low-friction excretion settlement: indoor latrine/compost_pit or public_latrine converts waste cleanly into nightsoil
+			// Low-friction excretion settlement: indoor latrine/compost_pit or public sanitation infrastructure converts waste cleanly into nightsoil
 			if a.Waste >= 2 && !a.InTransit() {
 				cleanLatrine := false
 				if a.InsideHouse != "" {
@@ -430,7 +432,7 @@ func (w *World) stepActorPhysiologyAndLifecycleFor(actors []Actor, allowSuccesso
 
 			// Severe dehydration / starvation damage
 			if a.Thirst >= 6 {
-				a.Health -= 10
+				adjustActorHealthBounded(a, -10, 0)
 				if a.Health <= 0 {
 					evs := w.markDeadIfZero(a, nil, Action{Kind: "wait"}, "dehydration")
 					events = append(events, evs...)
@@ -440,7 +442,7 @@ func (w *World) stepActorPhysiologyAndLifecycleFor(actors []Actor, allowSuccesso
 			}
 			form, _ := w.actorFormSpec(*a)
 			if damage := starvationDamage(a.Hunger, w.Catalog.Lifecycle, form); damage > 0 {
-				a.Health -= damage
+				adjustActorHealthBounded(a, -damage, 0)
 				if a.Health <= 0 {
 					evs := w.markDeadIfZero(a, nil, Action{Kind: "wait"}, "starvation")
 					events = append(events, evs...)
@@ -457,7 +459,7 @@ func (w *World) stepActorPhysiologyAndLifecycleFor(actors []Actor, allowSuccesso
 						if a.Energy < 0 {
 							a.Energy = 0
 						}
-						a.Health -= ws.ColdDamage
+						adjustActorHealthBounded(a, -ws.ColdDamage, 0)
 						if a.Health <= 0 {
 							events = append(events, w.markDeadIfZero(a, nil, Action{Kind: "wait"}, "cold")...)
 							newlyDeadIndices = append(newlyDeadIndices, i)
@@ -478,7 +480,7 @@ func (w *World) stepActorPhysiologyAndLifecycleFor(actors []Actor, allowSuccesso
 						break
 					}
 				}
-				a.Health -= drain
+				adjustActorHealthBounded(a, -drain, 0)
 				a.DiseaseTicks -= TicksPerDay
 				if a.Health <= 0 {
 					evs := w.markDeadIfZero(a, nil, Action{Kind: "wait"}, "disease")
@@ -548,14 +550,22 @@ func (w *World) stepActorPhysiologyAndLifecycleFor(actors []Actor, allowSuccesso
 				if roll < lc.AnnualBirthPermille*4 {
 					for ci := range w.Cohorts {
 						if w.Cohorts[ci].District == a.Location {
-							w.Cohorts[ci].Population++
-							w.Cohorts[ci].Children++
-							w.Cohorts[ci].CumulativeBirths++
+							c := &w.Cohorts[ci]
+							prevAnon := w.anonymousCohort(*c).Population
+							c.ensureResidents(prevAnon)
+							totalHunger := c.hungerUnits(prevAnon)
+							totalEnergy := w.anonymousCohortEnergy(c, prevAnon)
+							c.Population++
+							c.Children++
+							c.CumulativeBirths++
+							c.issueResidents(1, 0)
+							c.setHungerUnits(prevAnon+1, totalHunger)
+							w.setAnonymousCohortEnergy(c, prevAnon+1, totalEnergy)
 							w.TotalBirthsCount++
 							events = append(events, w.record(a, Action{Kind: "wait"}, "actor_child_born", map[string]any{
 								"text":      fmt.Sprintf("%s welcomed a newborn child into household %s", a.Name, a.HomeID),
 								"house_id":  a.HomeID,
-								"cohort_id": w.Cohorts[ci].ID,
+								"cohort_id": c.ID,
 							}))
 							break
 						}
@@ -575,7 +585,7 @@ func (w *World) stepActorPhysiologyAndLifecycleFor(actors []Actor, allowSuccesso
 				deathPermille := actorAnnualMortalityPermille(lc, formPtr, a.AgeYears)
 				roll := int(worldHash(w.ID, w.Tick, "elder_die:"+a.ID) % 1000)
 				if roll < deathPermille {
-					a.Health = 0
+					setActorHealthBounded(a, 0, 0)
 					evs := w.markDeadIfZero(a, nil, Action{Kind: "wait"}, "old_age")
 					events = append(events, evs...)
 					newlyDeadIndices = append(newlyDeadIndices, i)
@@ -729,7 +739,15 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 				}
 				if !hasActiveDisaster || c.AvgHunger >= 4 {
 					reliefNeed := int64(c.Population)
+					edibleItemIDs := make([]string, 0, len(w.Catalog.Items))
 					for itemID, spec := range w.Catalog.Items {
+						if spec.Edible {
+							edibleItemIDs = append(edibleItemIDs, itemID)
+						}
+					}
+					sort.Strings(edibleItemIDs)
+					for _, itemID := range edibleItemIDs {
+						spec := w.Catalog.Items[itemID]
 						if !spec.Edible || reliefNeed <= 0 {
 							continue
 						}
@@ -1107,9 +1125,15 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 				}
 			}
 
-			// 2d. Daily Natural Elder Mortality (老死: natural end-of-life curve among Elders)
-			if c.Elders > 0 {
-				numer := int64(c.Elders) * int64(elderDeathPermille)
+			// 2d. Daily Natural Elder Mortality (honoring FormSpec.LifeExpectancyYears; <=0 = ageless/immortal)
+			baseMaxExp := DefaultLifecycleSpec().MaxExpectancy
+			cohortMaxExp := CohortFormLifeExpectancy(w.Catalog, *c)
+			if cohortMaxExp > 0 && c.Elders > 0 {
+				effElderDeathPermille := (elderDeathPermille * baseMaxExp) / maxInt(1, cohortMaxExp)
+				if effElderDeathPermille < 1 {
+					effElderDeathPermille = 1
+				}
+				numer := int64(c.Elders) * int64(effElderDeathPermille)
 				denom := int64(1000 * daysInYear)
 				eDeaths := int(numer / denom)
 				rem := numer % denom
@@ -1125,16 +1149,16 @@ func (w *World) stepCohortPhysiologySanitationAndLifecycle() []Event {
 				}
 			}
 
-			// 2e. End-of-Year Age Bracket Progression (少 -> 壮 -> 老) on final day of each calendar year!
-			if cal.DayOfYear == daysInYear {
-				// Keep the existing 12/32-year transition rates without discarding
-				// the fractional years of small populations.
+			// 2e. End-of-Year Age Bracket Progression (scaled to FormSpec.LifeExpectancyYears; skipped for ageless forms)
+			if cohortMaxExp > 0 && cal.DayOfYear == daysInYear {
+				childSpan := 12
+				adultSpan := maxInt(12, (32*cohortMaxExp)/baseMaxExp)
 				c.ChildAgeRemainder += c.Children
 				c.AdultAgeRemainder += c.Adults
-				matured := c.ChildAgeRemainder / 12
-				retired := c.AdultAgeRemainder / 32
-				c.ChildAgeRemainder %= 12
-				c.AdultAgeRemainder %= 32
+				matured := c.ChildAgeRemainder / childSpan
+				retired := c.AdultAgeRemainder / adultSpan
+				c.ChildAgeRemainder %= childSpan
+				c.AdultAgeRemainder %= adultSpan
 				if matured > c.Children {
 					matured = c.Children
 				}
@@ -1208,6 +1232,8 @@ func (w *World) isCivicServiceProfession(profID string) bool {
 // service cohorts and focal actors (including payroll/admin embezzlement leakage), settles merchant retail
 // turnover with commercial sales tax, and applies daily structural & cold-season wear on durable household goods.
 func (w *World) settleDailyCivicPayrollAndRetailUpkeep(cal CalendarState) []Event {
+	restore := w.detachCohortMembers()
+	defer restore()
 	var events []Event
 	gov := w.Catalog.EffectiveGovernance()
 	stipendPerCap := int64(gov.CivicStipendPerCap)
@@ -1282,7 +1308,7 @@ func (w *World) settleDailyCivicPayrollAndRetailUpkeep(cal CalendarState) []Even
 				}
 				paid := w.debitTreasury(allocatePay(stipendPerCap+1), "payroll")
 				if paid > 0 {
-					a.Money += int(paid)
+					w.adjustActorCurrency(a, "coins", paid, false)
 					totalPaid += paid
 				}
 			}

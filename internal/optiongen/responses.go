@@ -84,18 +84,18 @@ type ActorScenarioCounterSet struct {
 
 // WorldResponseSummary summarizes the full combination-response expansion run.
 type WorldResponseSummary struct {
-	WorldID        string                 `json:"world_id"`
-	OptionsDir     string                 `json:"options_dir"`
-	Model          string                 `json:"model"`
-	Endpoint       string                 `json:"endpoint"`
-	StartedAt      time.Time              `json:"started_at"`
-	CompletedAt    time.Time              `json:"completed_at"`
-	TotalScenarios int                    `json:"total_scenarios"`
-	TotalRequests  int                    `json:"total_requests"`
-	TotalResponses int                    `json:"total_responses"`
-	TotalTokens    int                    `json:"total_tokens"`
-	ByStance       map[string]int         `json:"by_stance"`
-	ByCollision    map[string]int         `json:"by_collision"`
+	WorldID        string                  `json:"world_id"`
+	OptionsDir     string                  `json:"options_dir"`
+	Model          string                  `json:"model"`
+	Endpoint       string                  `json:"endpoint"`
+	StartedAt      time.Time               `json:"started_at"`
+	CompletedAt    time.Time               `json:"completed_at"`
+	TotalScenarios int                     `json:"total_scenarios"`
+	TotalRequests  int                     `json:"total_requests"`
+	TotalResponses int                     `json:"total_responses"`
+	TotalTokens    int                     `json:"total_tokens"`
+	ByStance       map[string]int          `json:"by_stance"`
+	ByCollision    map[string]int          `json:"by_collision"`
 	Scenarios      []ScenarioResponseBrief `json:"scenarios"`
 }
 
@@ -238,7 +238,7 @@ func BuildResponseSystemPrompt(world WorldContextSummary, scenario CombinationSc
    - 结合该%s的真实性格、手头筹码与人脉关系，如实评估每条应对的选中概率（高/中/低）并给出一句动机依据。
 3. **动作原语与配方映射规范**：
    - 若应对动作涉及上方“已有生产/炼制配方”，action.engine_kind **必须填 "craft"**，并在 action.recipe_id 填入对应配方 ID。
-   - 优先使用上方 engine_action_kinds 中已有的动作名；只有确实超出引擎现有动作集合的高阶策略，才允许使用 "new_primitive:英文蛇形名"。
+   - 只允许使用上方 engine_action_kinds 列出的动作，包括已声明的 ActionSpecs。超出该列表的策略请拆成已有动作。
    - 严禁凭空捏造档案中不存在的人物、地点、物品或组织。
 
 输出格式（必须且只能返回一个合法 JSON 对象，不要附加任何解释）：
@@ -259,7 +259,7 @@ func BuildResponseSystemPrompt(world WorldContextSummary, scenario CombinationSc
       "probability_rationale": "结合该%s性格、处境与筹码，用一句自然中文说明为何该应对选中概率高/中/低",
       "counter_to_option_ids": ["对方触发选项的真实option_id"],
       "action": {
-        "engine_kind": "对应engine_action_kinds里的已有动作名，或 new_primitive:英文蛇形名",
+        "engine_kind": "对应 engine_action_kinds 列出的动作名",
         "recipe_id": "可选：仅当 engine_kind 为 craft 时填入档案中真实的 recipe_id",
         "target_actor_ids": [%q],
         "target_location": %q,
@@ -608,11 +608,11 @@ func ExpandResponses(ctx context.Context, records []ActorExpansionRecord, client
 	actorIndexes := make(map[string]*ActorResponseIndex, len(records))
 	for _, r := range records {
 		actorIndexes[r.ActorID] = &ActorResponseIndex{
-			WorldID:  worldCtx.ID,
-			ActorID:  r.ActorID,
+			WorldID:   worldCtx.ID,
+			ActorID:   r.ActorID,
 			ActorName: r.ActorName,
-			Role:     r.Dossier.Actor.Role,
-			Location: r.Dossier.Actor.Location,
+			Role:      r.Dossier.Actor.Role,
+			Location:  r.Dossier.Actor.Location,
 		}
 	}
 

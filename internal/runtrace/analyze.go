@@ -437,6 +437,9 @@ func Analyze(dir string) (Report, error) {
 			}
 			report.RunCompleted, report.RunError, ended = data.Completed, data.Error, true
 		default:
+			if strings.HasPrefix(e.Kind, "ext:") {
+				continue
+			}
 			return report, fmt.Errorf("unknown trace entry kind %q at %d", e.Kind, e.Seq)
 		}
 	}

@@ -372,13 +372,13 @@ func (w *World) applyEcologyActorExposure(a *Actor, wn, dn, denominator int64, d
 	wn = min(wn, denominator-dn)
 	roll := int64(worldHash(w.ID, w.Tick, salt+":"+a.ID) % uint64(denominator))
 	if roll < dn {
-		a.Health = 0
+		setActorHealthBounded(a, 0, 0)
 		return 0, 1, w.markDeadIfZero(a, nil, Action{Kind: "wait"}, cause, source...)
 	}
 	if roll < dn+wn {
 		// A wounded outcome is nonfatal; death has its own declared probability.
 		previousHealth := a.Health
-		a.Health = maxInt(1, a.Health-maxInt(1, damage))
+		adjustActorHealthBounded(a, -maxInt(1, damage), 1)
 		data := map[string]any{"text": "environmental exposure injured " + a.Name,
 			"cause": cause, "previous_health": previousHealth, "health": a.Health}
 		if len(source) > 0 {
@@ -386,7 +386,7 @@ func (w *World) applyEcologyActorExposure(a *Actor, wn, dn, denominator int64, d
 			data["cause_event_id"] = source[0].ID
 		}
 		injury := w.record(a, Action{Kind: "wait"}, "actor_environment_injured", data)
-		return 1, 0, append([]Event{injury}, w.interruptTaskOnDamage(a, cause, injury)...)
+		return 1, 0, append([]Event{injury}, w.interruptTaskOnDamage(nil, a, cause, injury)...)
 
 	}
 	return 0, 0, nil
@@ -404,7 +404,7 @@ func ecologyActorImpactCounts(events []Event) (wounded, dead int) {
 	return
 }
 
-func (w *World) applyDisasterActorExposure(a *Actor, dis DisasterSpec, scale int) (int, int, int64, []Event) {
+func (w *World) applyDisasterActorExposure(a *Actor, dis DisasterSpec, scale int, source ...Event) (int, int, int64, []Event) {
 	use := int64(0)
 	if dis.ReliefItem != "" && a.Items[dis.ReliefItem] > 0 {
 		use = 1
@@ -413,7 +413,7 @@ func (w *World) applyDisasterActorExposure(a *Actor, dis DisasterSpec, scale int
 	wn, dn, den := disasterExposureRates(dis, scale, use, 1)
 	// DisasterSpec encodes injury counts, not injury severity. One health point
 	// marks the injury without inventing a new disaster damage coefficient.
-	cw, cd, events := w.applyEcologyActorExposure(a, wn, dn, den, 1, "disaster:"+dis.ID, "disaster")
+	cw, cd, events := w.applyEcologyActorExposure(a, wn, dn, den, 1, "disaster:"+dis.ID, "disaster", source...)
 	return cw, cd, use, events
 }
 

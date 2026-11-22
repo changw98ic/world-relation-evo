@@ -150,27 +150,31 @@ func (w *World) consumeActorRation(a *Actor) []Event {
 		return meal("", "no_edible_stock", 0)
 	}
 	item := items[0]
-	w.consumeHeldFood(a, item)
+	w.consumeHeldFood(nil, a, item)
 	return meal(item, "consumed", 1)
 }
 
 // consumeHeldFood settles one verified edible unit from this person's inventory.
-func (w *World) consumeHeldFood(a *Actor, item string) {
-	w.adjustActorItem(a, item, -1, true)
+func (w *World) consumeHeldFood(tx *WorldTx, a *Actor, item string) {
+	if tx == nil {
+		w.adjustActorItem(a, item, -1, true)
+	} else {
+		tx.ProduceOrConsumeItem(a, item, -1, "eat")
+	}
 	spec := w.Catalog.Items[item]
 	absorbNutrition(&a.Hunger, &a.NutritionReserve, spec.NutritionUnits)
 	a.DigestedFood++
 	a.Waste++
-	w.applyItemSlotAndEnergyEffects(a, spec)
+	w.applyItemSlotAndEnergyEffects(tx, a, spec, "eat")
 }
 
 // applyItemSlotAndEnergyEffects applies generic energy and state-slot changes declared on an ItemSpec.
-func (w *World) applyItemSlotAndEnergyEffects(a *Actor, spec ItemSpec) {
+func (w *World) applyItemSlotAndEnergyEffects(tx *WorldTx, a *Actor, spec ItemSpec, reason string) {
 	if a == nil {
 		return
 	}
 	if spec.EnergyRelief != 0 {
-		a.Energy = maxInt(0, min(MaxEnergy, a.Energy+spec.EnergyRelief))
+		tx.setEnergy(a, maxInt(0, min(MaxEnergy, a.Energy+spec.EnergyRelief)), reason)
 	}
 	for slotID, delta := range spec.SlotChanges {
 		w.addActorStateSlot(a, slotID, delta)
@@ -297,20 +301,25 @@ func (w *World) transferCohortStoredShare(from, to *PopulationCohort, moved, pop
 	}
 }
 
-func (w *World) transferLastCohortAssets(c *PopulationCohort, a *Actor) {
-	a.Money += int(c.MoneyPool)
+func (w *World) transferLastCohortAssets(tx *WorldTx, c *PopulationCohort, a *Actor) {
+	w.adjustActorCurrency(a, "coins", c.MoneyPool, false)
+	tx.recordTransfer("transfer_currency", c.ID, a.ID, "coins", -c.MoneyPool, "cohort assets")
 	c.MoneyPool = 0
 	a.DigestedFood += c.DigestedFood
 	c.DigestedFood = 0
 	if a.Items == nil {
 		a.Items = map[string]int{}
 	}
-	for item, qty := range c.ItemPool {
+	for _, item := range sortedProductionKeys(c.ItemPool) {
+		qty := c.ItemPool[item]
 		a.Items[item] += int(qty)
+		tx.recordTransfer("transfer_item", c.ID, a.ID, item, -qty, "cohort assets")
 	}
 	c.ItemPool = nil
-	for currency, amount := range c.Currencies {
+	for _, currency := range sortedProductionKeys(c.Currencies) {
+		amount := c.Currencies[currency]
 		w.addActorCurrency(a, currency, amount)
+		tx.recordTransfer("transfer_currency", c.ID, a.ID, currency, -amount, "cohort assets")
 	}
 	c.Currencies = nil
 	w.transferGrowingAssets("cohort", c.ID, "actor", a.ID)
@@ -318,7 +327,7 @@ func (w *World) transferLastCohortAssets(c *PopulationCohort, a *Actor) {
 
 // settleUnclaimedActorEstate keeps heirless non-coin assets in local custody.
 // A zero-population public estate is an account, not an invented inhabitant.
-func (w *World) settleUnclaimedActorEstate(deceased *Actor, houses []int) {
+func (w *World) settleUnclaimedActorEstate(tx *WorldTx, deceased *Actor, houses []int) {
 	var custodian *PopulationCohort
 	for i := range w.Cohorts {
 		if w.Cohorts[i].District == deceased.Location && w.Cohorts[i].Population > 0 {
@@ -337,12 +346,16 @@ func (w *World) settleUnclaimedActorEstate(deceased *Actor, houses []int) {
 	if len(deceased.Items) > 0 && custodian.ItemPool == nil {
 		custodian.ItemPool = map[string]int64{}
 	}
-	for item, qty := range deceased.Items {
+	for _, item := range sortedProductionKeys(deceased.Items) {
+		qty := deceased.Items[item]
 		custodian.ItemPool[item] += int64(qty)
+		tx.recordTransfer("transfer_item", deceased.ID, custodian.ID, item, -int64(qty), "inheritance")
 	}
 	deceased.Items = nil
-	for currency, amount := range deceased.Currencies {
+	for _, currency := range sortedProductionKeys(deceased.Currencies) {
+		amount := deceased.Currencies[currency]
 		w.addCohortCurrency(custodian, currency, amount)
+		tx.recordTransfer("transfer_currency", deceased.ID, custodian.ID, currency, -amount, "inheritance")
 	}
 	deceased.Currencies = nil
 	for _, hi := range houses {

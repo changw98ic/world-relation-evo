@@ -21,14 +21,14 @@ import (
 
 // RulebookDomainSpec describes one generic interaction domain synthesized offline by DeepSeek.
 type RulebookDomainSpec struct {
-	ID              string   `json:"id"`
-	Title           string   `json:"title"`
-	Description     string   `json:"description"`
-	FocusActions    []string `json:"focus_actions"`
-	FocusOutcomes   []string `json:"focus_outcomes"`
-	MinProactive    int      `json:"min_proactive"`
-	MinReaction     int      `json:"min_reaction"`
-	RequireWitness  bool     `json:"require_witness"`
+	ID             string   `json:"id"`
+	Title          string   `json:"title"`
+	Description    string   `json:"description"`
+	FocusActions   []string `json:"focus_actions"`
+	FocusOutcomes  []string `json:"focus_outcomes"`
+	MinProactive   int      `json:"min_proactive"`
+	MinReaction    int      `json:"min_reaction"`
+	RequireWitness bool     `json:"require_witness"`
 }
 
 // RoleArchetypeSummary summarizes a role class across the world WITHOUT any actor IDs or names.
@@ -141,22 +141,22 @@ type RulebookAuditReport struct {
 
 // RulebookExpandSummary summarizes an offline expand-rulebook synthesis run.
 type RulebookExpandSummary struct {
-	WorldID             string               `json:"world_id"`
-	Theme               string               `json:"theme"`
-	Genre               string               `json:"genre"`
-	Model               string               `json:"model"`
-	Endpoint            string               `json:"endpoint"`
-	StartedAt           time.Time            `json:"started_at"`
-	CompletedAt         time.Time            `json:"completed_at"`
-	Domains             int                  `json:"domains"`
-	TotalRequests       int                  `json:"total_requests"`
-	TotalTokens         int                  `json:"total_tokens"`
-	TotalProactiveRules int                  `json:"total_proactive_rules"`
-	TotalReactionRules  int                  `json:"total_reaction_rules"`
-	TotalBranches       int                  `json:"total_branches"`
-	Audit               RulebookAuditReport  `json:"audit"`
-	RulebookFile        string               `json:"rulebook_file"`
-	DomainFiles         map[string]string    `json:"domain_files"`
+	WorldID             string              `json:"world_id"`
+	Theme               string              `json:"theme"`
+	Genre               string              `json:"genre"`
+	Model               string              `json:"model"`
+	Endpoint            string              `json:"endpoint"`
+	StartedAt           time.Time           `json:"started_at"`
+	CompletedAt         time.Time           `json:"completed_at"`
+	Domains             int                 `json:"domains"`
+	TotalRequests       int                 `json:"total_requests"`
+	TotalTokens         int                 `json:"total_tokens"`
+	TotalProactiveRules int                 `json:"total_proactive_rules"`
+	TotalReactionRules  int                 `json:"total_reaction_rules"`
+	TotalBranches       int                 `json:"total_branches"`
+	Audit               RulebookAuditReport `json:"audit"`
+	RulebookFile        string              `json:"rulebook_file"`
+	DomainFiles         map[string]string   `json:"domain_files"`
 }
 
 // RulebookExpandConfig configures ExpandWorldRulebook.
@@ -167,46 +167,26 @@ type RulebookExpandConfig struct {
 	Progress    io.Writer
 }
 
-var baseInteractiveEngineActions = []string{
-	"offer",
-	"accept",
-	"reject",
-	"propose_agreement",
-	"accept_agreement",
-	"reject_agreement",
-	"fulfill_agreement",
-	"speak",
-	"transmit_message",
-	"attack",
-	"spar",
-	"steal",
-	"raid",
-	"extort",
-	"bribe",
-	"arrest",
-	"audit_corruption",
-	"file_appeal",
-	"issue_decree",
-	"heal",
-	"swear_bond",
-	"teach_knowledge",
-	"avenge_feud",
-	"hunt_threat",
-	"maintain_infra",
-	"repair_house",
-	"perform_ritual",
-	"move",
-	"propose_alliance",
-	"declare_war",
-	"make_peace",
-	"form_party",
-	"join_party",
-	"betray_party",
-	"investigate_actor",
-	"blackmail",
-	"expose_secret",
-	"claim_world_event",
-	"attempt_transition",
+// nonInteractiveActionKinds lists pure self-maintenance / lifecycle housekeeping actions
+// excluded from DeepSeek's social/interactive rulebook ontology; all other built-in and
+// declarative actions are derived dynamically from sim.Catalog.ActionMetadataList().
+var nonInteractiveActionKinds = map[string]bool{
+	"wait":         true,
+	"sleep":        true,
+	"begin_rest":   true,
+	"end_rest":     true,
+	"eat":          true,
+	"drink":        true,
+	"relieve":      true,
+	"medicate":     true,
+	"enter_house":  true,
+	"leave_house":  true,
+	"equip":        true,
+	"unequip":      true,
+	"start_plan":   true,
+	"abandon_plan": true,
+	"cancel_loan":  true,
+	"leave_party":  true,
 }
 
 var baseEngineOutcomeKinds = []string{
@@ -300,23 +280,36 @@ func BuildWorldOntology(w *sim.World) WorldOntology {
 		}
 	}
 	var allowedActions []string
-	for _, k := range baseInteractiveEngineActions {
-		if k == "extort" && !env.Institutions.RacketeeringEnabled() {
-			continue
+	seenAllowed := map[string]bool{}
+	addAllowed := func(k string) {
+		if k == "" || seenAllowed[k] {
+			return
 		}
-		if k == "arrest" && !env.Institutions.EnforcementEnabled() {
-			continue
+		if k == "extort" && !env.Institutions.RacketeeringEnabled() {
+			return
+		}
+		if (k == "arrest" || k == "frame_suspect" || k == "open_case" || k == "hold_trial") && !env.Institutions.EnforcementEnabled() {
+			return
 		}
 		if (k == "audit_corruption" || k == "file_appeal") && !env.Institutions.OversightEnabled() {
-			continue
+			return
 		}
 		if k == "perform_ritual" && !env.Institutions.RitualsEnabled() {
-			continue
+			return
 		}
 		if len(worldCaps) > 0 && !worldCaps[k] && k != "move" && k != "speak" && k != "offer" && k != "accept" && k != "reject" {
+			return
+		}
+		seenAllowed[k] = true
+		allowedActions = append(allowedActions, k)
+	}
+	// Derive all interactive, targeted, faction, golden-finger, and declarative actions
+	// dynamically from the single-source Catalog action registry.
+	for _, meta := range w.Catalog.ActionMetadataList() {
+		if nonInteractiveActionKinds[meta.Kind] {
 			continue
 		}
-		allowedActions = append(allowedActions, k)
+		addAllowed(meta.Kind)
 	}
 
 	// Filter valid engine outcome kinds by world institutions.

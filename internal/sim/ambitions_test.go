@@ -248,7 +248,7 @@ func TestRedHandedWitnessConfrontationAndSecretHoldStances(t *testing.T) {
 		TargetID: corruptOfficial.ID,
 		Kind:     "bribed",
 	}
-	stepEvs := w.captureActionSecrets(bribeEv)
+	stepEvs := w.captureActionSecrets(nil, bribeEv)
 	if len(w.Secrets) == 0 {
 		t.Fatalf("expected bribed event to record secrets")
 	}

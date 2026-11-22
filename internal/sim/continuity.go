@@ -2,6 +2,7 @@ package sim
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 )
 
@@ -275,22 +276,21 @@ func (dir *PlanDirectiveView) planRecipeStart(p Perception, workRecipe Recipe, v
 	}
 	dir.ActiveRecipeID = workRecipe.ID
 	if workRecipe.HouseFacility != "" {
-		for _, h := range p.AccessibleHouses {
-			if h.HasFacility(workRecipe.HouseFacility) {
-				dir.TargetHouseID = h.ID
-				dir.TargetDistrict = h.District
-				dir.TargetVenueID = h.VenueID
-				if a.InsideHouse == h.ID {
-					dir.setCraftStep(p, workRecipe)
-				} else if a.InsideHouse != "" {
-					dir.NextStep = "leave_house_for_workshop:" + h.ID
-				} else if a.Location == h.District && (h.VenueID == "" || a.VenueID == "" || h.VenueID == a.VenueID) {
-					dir.NextStep = "enter_workshop:" + h.ID
-				} else {
-					dir.NextStep = "travel_to_workshop:" + h.ID
-				}
-				return dir
+		if h, ok := p.KnownWorkshop(workRecipe.HouseFacility); ok {
+			dir.TargetHouseID = h.ID
+			dir.TargetDistrict = h.District
+			dir.TargetVenueID = h.VenueID
+			switch {
+			case a.InsideHouse == h.ID:
+				dir.setCraftStep(p, workRecipe)
+			case a.InsideHouse != "":
+				dir.NextStep = "leave_house_for_workshop:" + h.ID
+			case a.Location == h.District && (h.VenueID == "" || a.VenueID == "" || h.VenueID == a.VenueID):
+				dir.NextStep = "enter_workshop:" + h.ID
+			default:
+				dir.NextStep = "travel_to_workshop:" + h.ID
 			}
+			return dir
 		}
 	}
 	if workRecipe.NodeFeature != "" {
@@ -343,12 +343,10 @@ func (dir *PlanDirectiveView) planGrowth(p Perception, item string, covered bool
 			continue
 		}
 		id := fmt.Sprint(g.ID)
-		for _, action := range p.GrowthCareActions {
-			if action.Kind == "harvest" && action.TargetID == id && p.Capabilities()["harvest"] {
-				dir.ReadyHarvestIDs = append(dir.ReadyHarvestIDs, g.ID)
-				dir.NextStep = "harvest:" + id
-				return true
-			}
+		if p.CanHarvestObservedGrowth(g) && p.Capabilities()["harvest"] {
+			dir.ReadyHarvestIDs = append(dir.ReadyHarvestIDs, g.ID)
+			dir.NextStep = "harvest:" + id
+			return true
 		}
 		canCollect := !g.Cohort && g.OwnerID == p.Self.ID
 		if !canCollect && !g.Harvested {
@@ -411,6 +409,33 @@ func (g Agreement) matchesAction(x Action) bool {
 		(x.Currency == "" || x.Currency == "coins")
 }
 
+func (w *World) perceivedAgreementDeliveryBlockReason(g Agreement, supplier, buyer *Actor) string {
+	if g.Status != "active" || w.Tick > g.DueTick {
+		return "agreement is not active or its delivery deadline has passed"
+	}
+	if supplier == nil || buyer == nil || !SamePlace(*supplier, *buyer) || w.Tick < supplier.JailedUntil || w.Tick < buyer.JailedUntil || (buyer.Task != nil && (buyer.Task.Action.Kind == "sleep" || buyer.Task.Dormant)) {
+		return "agreement participants are unavailable for delivery at the same place"
+	}
+	spec := w.Catalog.Items[g.Item]
+	if !spec.Tradeable {
+		return fmt.Sprintf("item %s is not tradeable", g.Item)
+	}
+	if !itemAcceptsCurrency(spec, "coins") {
+		return fmt.Sprintf("item %s does not accept currency coins", g.Item)
+	}
+	if spec.BuyerRequiredTag != "" && !ActorHasTag(w.neighborEffectiveTags(*buyer), spec.BuyerRequiredTag) {
+		return fmt.Sprintf("buyer %s lacks required tag %s for %s", buyer.ID, spec.BuyerRequiredTag, g.Item)
+	}
+	if w.IsItemEmbargoedAt(buyer.Location, buyer.VenueID, g.Item) {
+		return "item is embargoed by local polity decree: " + g.Item
+	}
+	// Supplier knows only their own stock, never the buyer's private wallet balance.
+	if supplier.Items[g.Item] < g.Quantity {
+		return "delivery goods or payment unavailable"
+	}
+	return ""
+}
+
 func (w *World) agreementDeliveryBlockReason(g Agreement, supplier, buyer *Actor) string {
 	if g.Status != "active" || w.Tick > g.DueTick {
 		return "agreement is not active or its delivery deadline has passed"
@@ -444,9 +469,11 @@ type ContinuityState struct {
 	DialogueByActor map[string][]DialogueTurn `json:"dialogue_by_actor,omitempty"`
 }
 type ContinuityView struct {
-	FulfillableAgreementIDs []int64        `json:"fulfillable_agreement_ids,omitempty"`
-	Agreements              []Agreement    `json:"agreements,omitempty"`
-	Dialogue                []DialogueTurn `json:"dialogue,omitempty"`
+	DisplayedGoods          map[int64]int         `json:"displayed_goods,omitempty"`
+	CareProposals           []GrowthCareAgreement `json:"care_proposals,omitempty"`
+	FulfillableAgreementIDs []int64               `json:"fulfillable_agreement_ids,omitempty"`
+	Agreements              []Agreement           `json:"agreements,omitempty"`
+	Dialogue                []DialogueTurn        `json:"dialogue,omitempty"`
 }
 
 func (w *World) continuity() *ContinuityState {
@@ -466,7 +493,7 @@ func (w *World) continuityForAgreements(id string, agreements []Agreement) Conti
 			v.Agreements = append(v.Agreements, a)
 			if a.SupplierID == id && a.Status == "active" {
 				supplier, buyer := w.actor(a.SupplierID), w.actor(a.BuyerID)
-				if w.agreementDeliveryBlockReason(a, supplier, buyer) == "" {
+				if w.perceivedAgreementDeliveryBlockReason(a, supplier, buyer) == "" {
 					v.FulfillableAgreementIDs = append(v.FulfillableAgreementIDs, a.ID)
 				}
 			}
@@ -532,8 +559,19 @@ func canProduce(cat Catalog, a Actor, item string) bool {
 }
 
 func (w *World) ApplyContinuity(a *Actor, x Action) []Event {
+	if a == nil || !slices.Contains(continuityActionKinds, x.Kind) {
+		return nil
+	}
+	if a == w.actor(a.ID) {
+		return w.Apply(a.ID, x)
+	}
+	tx := w.BeginTx(a.ID, ActionIntent{Action: x})
+	return (DefaultActionExecutor{}).executeTx(tx, a).Events
+}
+
+func (w *World) applyContinuityTx(tx *WorldTx, a *Actor, x Action) []Event {
 	emit := func(kind, text string, b *Actor) []Event {
-		return []Event{w.record(a, x, kind, map[string]any{"text": text}, b)}
+		return []Event{tx.record(a, x, kind, map[string]any{"text": text}, b)}
 	}
 	fail := func(text string) []Event { return emit("action_failed", text, nil) }
 	switch x.Kind {
@@ -642,24 +680,13 @@ func (w *World) ApplyContinuity(a *Actor, x Action) []Event {
 			if reason := w.agreementDeliveryBlockReason(*g, supplier, buyer); reason != "" {
 				return fail(reason)
 			}
-			if buyer.Items == nil {
-				buyer.Items = map[string]int{}
-			}
-			supplier.Items[g.Item] -= g.Quantity
-			buyer.Items[g.Item] += g.Quantity
-			buyer.Money -= g.Price
-			supplier.Money += g.Price
+			tx.TransferItem(supplier, buyer, g.Item, g.Quantity, x.Kind)
+			tx.TransferCurrency(buyer, supplier, "coins", int64(g.Price), x.Kind)
 			g.Status = "fulfilled"
-			if buyer.Trust == nil {
-				buyer.Trust = map[string]int{}
-			}
-			if supplier.Trust == nil {
-				supplier.Trust = map[string]int{}
-			}
-			buyer.Trust[supplier.ID]++
-			supplier.Trust[buyer.ID]++
+			tx.MutateTrust(buyer, supplier.ID, 1)
+			tx.MutateTrust(supplier, buyer.ID, 1)
 			g.ClosedTick = w.Tick
-			return []Event{w.record(a, x, "agreement_fulfilled", map[string]any{"text": fmt.Sprintf("%s delivered %d %s to %s for %d coins", supplier.Name, g.Quantity, g.Item, buyer.Name, g.Price), "item": g.Item, "quantity": g.Quantity, "price": g.Price, "seller_id": supplier.ID, "buyer_id": buyer.ID}, buyer)}
+			return []Event{tx.record(a, x, "agreement_fulfilled", map[string]any{"text": fmt.Sprintf("%s delivered %d %s to %s for %d coins", supplier.Name, g.Quantity, g.Item, buyer.Name, g.Price), "item": g.Item, "quantity": g.Quantity, "price": g.Price, "seller_id": supplier.ID, "buyer_id": buyer.ID}, buyer)}
 		}
 		return fail("agreement not found")
 	}

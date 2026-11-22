@@ -608,7 +608,7 @@ func (s *RulebookSelector) Select(ctx context.Context, p sim.Perception, options
 	}
 
 	// Work on existing legal process and coordinated movement before discretionary interactions.
-	for _, action := range p.CaseActions {
+	for _, action := range caseActions(p) {
 		if id := ruleOptionID(action, options); id != "" {
 			return id, nil
 		}

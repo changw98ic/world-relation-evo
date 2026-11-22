@@ -9,15 +9,15 @@ import (
 // ExternalPatch defines a conservation-safe, deterministic narrative beat injection applied
 // between simulation stages (e.g. Volume 1 -> Volume 2) by an external director or LLM Skill.
 type ExternalPatch struct {
-	Label              string                    `json:"label,omitempty"`
-	TriggerWorldEvents []PatchWorldEventTrigger  `json:"trigger_world_events,omitempty"`
-	SpawnActors        []Actor                   `json:"spawn_actors,omitempty"`
-	AddSecrets         []ActorSecret             `json:"add_secrets,omitempty"`
-	AddGrudges         []GrudgeRecord            `json:"add_grudges,omitempty"`
-	SetDiplomacy       []FactionDiplomacy        `json:"set_diplomacy,omitempty"`
-	AddAmbitions       []PatchActorAmbition      `json:"add_ambitions,omitempty"`
-	AddGoldenFingers   []GoldenFingerSpec        `json:"add_golden_fingers,omitempty"`
-	AddGFQuests        []GFQuestInstance         `json:"add_gf_quests,omitempty"`
+	Label              string                   `json:"label,omitempty"`
+	TriggerWorldEvents []PatchWorldEventTrigger `json:"trigger_world_events,omitempty"`
+	SpawnActors        []Actor                  `json:"spawn_actors,omitempty"`
+	AddSecrets         []ActorSecret            `json:"add_secrets,omitempty"`
+	AddGrudges         []GrudgeRecord           `json:"add_grudges,omitempty"`
+	SetDiplomacy       []FactionDiplomacy       `json:"set_diplomacy,omitempty"`
+	AddAmbitions       []PatchActorAmbition     `json:"add_ambitions,omitempty"`
+	AddGoldenFingers   []GoldenFingerSpec       `json:"add_golden_fingers,omitempty"`
+	AddGFQuests        []GFQuestInstance        `json:"add_gf_quests,omitempty"`
 }
 
 // PatchWorldEventTrigger fires either an already-declared Catalog.WorldEvent by SpecID
@@ -215,7 +215,7 @@ func (w *World) ApplyExternalPatch(patch ExternalPatch) ([]Event, error) {
 			if cause == "" {
 				cause = "narrative_conflict"
 			}
-			events = append(events, rs.recordGrudge(w, g.AggrievedID, g.OffenderID, cause, inten, 0, 0)...)
+			events = append(events, rs.recordGrudge(nil, w, g.AggrievedID, g.OffenderID, cause, inten, 0, 0)...)
 		}
 	}
 
@@ -231,7 +231,7 @@ func (w *World) ApplyExternalPatch(patch ExternalPatch) ([]Event, error) {
 		if d.Stance != "" {
 			rel.Stance = d.Stance
 		}
-		if d.RelationScore != 0 {
+		if d.RelationScore != 0 || d.Stance == "neutral" {
 			rel.RelationScore = d.RelationScore
 		}
 		if d.Reason != "" {
@@ -279,12 +279,12 @@ func (w *World) ApplyExternalPatch(patch ExternalPatch) ([]Event, error) {
 		}
 		a.Ambitions = append(a.Ambitions, newAmb)
 		ev := Event{
-			ID:      w.NextID,
-			Tick:    w.Tick,
-			ActorID: a.ID,
+			ID:       w.NextID,
+			Tick:     w.Tick,
+			ActorID:  a.ID,
 			TargetID: amb.TargetID,
-			Kind:    "ambition_adopted",
-			Action:  Action{Kind: "set_ambition", Item: kind, TargetID: amb.TargetID},
+			Kind:     "ambition_adopted",
+			Action:   Action{Kind: "set_ambition", Item: kind, TargetID: amb.TargetID},
 			Payload: map[string]any{
 				"text":        fmt.Sprintf("%s adopted ambition %s (target=%s)", a.Name, kind, amb.TargetID),
 				"ambition_id": newAmb.ID,

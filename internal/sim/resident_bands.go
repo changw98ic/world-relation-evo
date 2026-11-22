@@ -193,13 +193,48 @@ func (c *PopulationCohort) updateResidentBandState(count int, match func(Residen
 	return count - remaining
 }
 
-// moveResidents removes a deterministic prefix. A nil destination retires the IDs.
+// popHealthyFreeResident extracts a single healthy, non-sick, non-jailed resident
+// when available (falling back to index 0 only if no matching band exists).
+func (c *PopulationCohort) popHealthyFreeResident() ResidentBand {
+	pick := 0
+	for i, b := range c.Residents {
+		if b.Count > 0 && !b.Jailed && !b.Sick && b.Health >= MaxHealth {
+			pick = i
+			break
+		}
+	}
+	b := c.Residents[pick]
+	out := cloneResidentBand(b)
+	out.Count = 1
+	c.Residents[pick].First++
+	c.Residents[pick].Count--
+	if c.Residents[pick].Count == 0 {
+		c.Residents = append(c.Residents[:pick], c.Residents[pick+1:]...)
+	}
+	if len(c.Residents) == 0 {
+		c.Residents = nil
+	}
+	return out
+}
+
+// moveResidents removes a deterministic prefix. A nil destination retires the IDs
+// and returns any personally held ResidentBand.Items back into c.ItemPool so
+// item conservation holds across all non-starvation cohort deaths.
 func (c *PopulationCohort) moveResidents(to *PopulationCohort, count int) (hunger int64) {
 	for count > 0 {
 		b := c.Residents[0]
 		b.Count = min(b.Count, count)
 		if to != nil {
 			to.Residents = appendResidentBand(to.Residents, b)
+		} else if len(b.Items) > 0 && b.Count > 0 {
+			if c.ItemPool == nil {
+				c.ItemPool = map[string]int64{}
+			}
+			for itemID, qty := range b.Items {
+				if qty > 0 {
+					c.ItemPool[itemID] += int64(qty) * int64(b.Count)
+				}
+			}
 		}
 		hunger += int64(b.Hunger) * int64(b.Count)
 		c.Residents[0].First += b.Count

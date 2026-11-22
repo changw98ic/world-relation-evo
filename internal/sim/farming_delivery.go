@@ -33,6 +33,10 @@ func (w *World) dispatchCohortHarvests() []Event {
 // ledger. It does not pay a second purchase price: the owner already owns them.
 // An individual owner instead collects at the stored district through harvest.
 func (w *World) DispatchHarvest(growthID int64) ([]Event, error) {
+	return w.dispatchHarvestWithTx(nil, growthID)
+}
+
+func (w *World) dispatchHarvestWithTx(tx *WorldTx, growthID int64) ([]Event, error) {
 	for i := range w.Growth {
 		g := &w.Growth[i]
 		if g.ID != growthID {
@@ -70,6 +74,7 @@ func (w *World) DispatchHarvest(growthID int64) ([]Event, error) {
 		w.Shipments = append(w.Shipments, Shipment{ID: shipmentID, GrowthID: g.ID, SourceGrowthID: g.harvestSource(), HarvestBasis: g.harvestBasis(), BuyerID: g.OwnerID, Item: g.Item, Quantity: capacity, From: g.District, To: owner.District, ArrivalTick: w.Tick + route.ticks})
 		w.NextID++
 		g.Quantity -= capacity
+		tx.recordTransfer("transfer_item", fmt.Sprintf("growth:%d", g.ID), fmt.Sprintf("shipment:%d", shipmentID), g.Item, -capacity, "dispatch_harvest")
 		e := w.growthEvent(*g, "harvest_dispatched", map[string]any{"source_growth_id": g.harvestSource(), "shipment_id": shipmentID, "item": g.Item, "quantity": capacity, "from": g.District, "to": owner.District, "arrival_tick": w.Tick + route.ticks})
 		if g.Quantity == 0 && len(g.Parents) == 0 {
 			w.Growth = append(w.Growth[:i], w.Growth[i+1:]...)

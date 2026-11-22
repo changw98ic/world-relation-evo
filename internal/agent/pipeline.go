@@ -27,79 +27,25 @@ type Pipeline struct {
 	Trace    *runtrace.Writer
 }
 
-func (p Pipeline) Decide(ctx context.Context, view sim.Perception) (action sim.Action, err error) {
-	stage := "input"
-	defer func() {
-		if err == nil {
-			stage = "ready"
-			err = p.Trace.Record("decision_ready", view.Tick, view.Self.ID, map[string]any{"action": action})
-		}
-		if err != nil {
-			if traceErr := p.Trace.Record("decision_error", view.Tick, view.Self.ID, map[string]any{"stage": stage, "error": err.Error()}); traceErr != nil {
-				err = errors.Join(err, traceErr)
-			}
-		}
-	}()
-	options := Options(view)
-	selector := p.Selector
-	source := "selector"
-	switch s := p.Selector.(type) {
-	case RuleSelector, *RuleSelector:
-		source = "rules"
-		selector = RuleSelector{trace: p.Trace}
-	case Jev, *Jev:
-		source = "jev"
-	case *PlaybookSelector:
-		source = "playbook"
-		if s.Trace == nil && p.Trace != nil {
-			s.Trace = p.Trace
-		}
+func (p Pipeline) Decide(ctx context.Context, view sim.Perception) (sim.Action, error) {
+	pipeline := DecisionPipeline{Trace: p.Trace}
+	switch selector := p.Selector.(type) {
+	case RuleSelector:
+		pipeline.Selector = RuleDecisionSelector{Selector: selector}
+	case *RuleSelector:
+		pipeline.Selector = RuleDecisionSelector{Selector: *selector}
+	case Jev:
+		pipeline.Selector = JevDecisionSelector{Jev: selector}
+	case *Jev:
+		pipeline.Selector = JevDecisionSelector{Jev: *selector}
 	case *RulebookSelector:
-		source = "rulebook"
-		if s.Trace == nil && p.Trace != nil {
-			s.Trace = p.Trace
-		}
+		pipeline.Selector = RulebookDecisionSelector{Selector: selector}
+	case *PlaybookSelector:
+		pipeline.Selector = PlaybookDecisionSelector{Selector: selector}
+	default:
+		pipeline.Selector = optionDecisionSelector{selector}
 	}
-	if err = p.Trace.Record("decision_input", view.Tick, view.Self.ID, map[string]any{"perception": view, "options": options, "decision_source": source}); err != nil {
-		return sim.Action{}, err
-	}
-	stage = "options"
-	if len(options) == 0 {
-		return sim.Action{}, fmt.Errorf("actor %s has no actions granted by tags", view.Self.ID)
-	}
-	stage = "selector"
-	id, err := selector.Select(ctx, view, options)
-	if err != nil {
-		return sim.Action{}, err
-	}
-	var selected *sim.Action
-	for _, o := range options {
-		if o.ID == id {
-			v := o.Action
-			selected = &v
-			break
-		}
-	}
-	if selected == nil {
-		return sim.Action{}, fmt.Errorf("selector returned unavailable option %q", id)
-	}
-	if selected.BasisEventID == 0 {
-		if annot, ok := selector.(interface{ LastTriggerEventID(string) int64 }); ok {
-			if basisID := annot.LastTriggerEventID(view.Self.ID); basisID > 0 {
-				for _, m := range view.Self.Memories {
-					if m.EventID == basisID {
-						selected.BasisEventID = basisID
-						break
-					}
-				}
-			}
-		}
-	}
-	stage = "selected"
-	if err = p.Trace.Record("decision_selected", view.Tick, view.Self.ID, map[string]any{"option_id": id, "action": *selected}); err != nil {
-		return sim.Action{}, err
-	}
-	return *selected, nil
+	return pipeline.Decide(ctx, view)
 }
 
 // modelRequestError preserves the original error chain without exposing endpoint
@@ -157,17 +103,17 @@ func Options(p sim.Perception) []Option {
 	dir := p.ActivePlan
 	allowed := p.Capabilities()
 	var options []Option
-	worldRules := sim.World{Catalog: p.Catalog, WorldLaws: p.WorldLaws}
 	add := func(label string, action sim.Action) {
-		if allowed[action.Kind] {
-			if blocked, _ := worldRules.IsActionBlockedByWorldLaw(a, action); blocked {
-				return
-			}
-			if action.Text == "" && (action.Kind == "speak" || action.Kind == "transmit_message" || action.Kind == "issue_decree") {
-				action = buildCommunicationAction(p, action)
-			}
-			options = append(options, Option{ID: fmt.Sprintf("o%03d", len(options)), Label: label, Action: action})
+		if !allowed[action.Kind] {
+			return
 		}
+		if res := p.CheckAction(action); !res.Allowed {
+			return
+		}
+		if action.Text == "" && (action.Kind == "speak" || action.Kind == "transmit_message" || action.Kind == "issue_decree") {
+			action = buildCommunicationAction(p, action)
+		}
+		options = append(options, Option{ID: fmt.Sprintf("o%03d", len(options)), Label: label, Action: action})
 	}
 
 	for _, n := range p.EnergyNodes {
@@ -176,7 +122,7 @@ func Options(p sim.Perception) []Option {
 			add(fmt.Sprintf("Refuel %s with %d %s", n.ID, qty, n.Source.FuelItem), sim.Action{Kind: "refuel", TargetID: n.ID, Quantity: int(qty)})
 		}
 	}
-	for _, action := range p.GrowthCareActions {
+	for _, action := range growthCareActions(p) {
 		label := action.Kind + " " + action.TargetID
 		if action.Care != nil {
 			label = fmt.Sprintf("%s for growth %d: %s supplies care and materials for %d/1000 of the harvest; owner %s keeps the balance", action.Kind, action.Care.GrowthID, action.Care.CaretakerID, action.Care.SharePermille, action.Care.OwnerID)
@@ -362,7 +308,7 @@ func Options(p sim.Perception) []Option {
 	if a.Hunger > 0 {
 		for _, itemID := range itemKeys {
 			spec := p.Catalog.Items[itemID]
-			if spec.Edible && a.Items[itemID] >= 1 {
+			if spec.Edible && a.Items[itemID] >= 1 && p.Catalog.ActorAcceptsFood(a, spec) {
 				add(fmt.Sprintf("Eat 1 %s (%d nutrition units; surplus is retained)", itemID, spec.NutritionUnits), sim.Action{Kind: "eat", Item: itemID})
 			}
 		}
@@ -510,10 +456,6 @@ func Options(p sim.Perception) []Option {
 		}
 	}
 
-	eligibleSpouse := make(map[string]bool, len(p.EligibleSpouseIDs))
-	for _, id := range p.EligibleSpouseIDs {
-		eligibleSpouse[id] = true
-	}
 	grudgeTarget := make(map[string]bool, len(p.ActiveGrudgeTargets))
 	for _, id := range p.ActiveGrudgeTargets {
 		grudgeTarget[id] = true
@@ -527,19 +469,17 @@ func Options(p sim.Perception) []Option {
 		})
 	}
 	env := p.Catalog.EffectiveEnvironment()
-	if env.Institutions.OversightEnabled() && p.HasOpenWrongfulCase && p.AppealTargetID != "" && a.IllicitGain == 0 && a.Energy >= 6 {
-		add(fmt.Sprintf("File %s appeal for %s (-6 energy)", env.OversightName, p.AppealTargetID), sim.Action{
-			Kind: "file_appeal", TargetID: p.AppealTargetID, Location: a.Location, BasisEventID: p.AppealBasisEventID,
-		})
+	if appeal, ok := appealAction(p); ok && env.Institutions.OversightEnabled() && a.IllicitGain == 0 && a.Energy >= 4 {
+		add(fmt.Sprintf("File %s appeal for %s (-4 energy)", env.OversightName, appeal.TargetID), appeal)
 	}
-	if len(a.Guilds) > 0 && p.DistrictController == "" && a.Energy >= 6 {
+	if a.InsideHouse == "" && len(a.Guilds) > 0 && p.DistrictController == "" && a.Energy >= 5 {
 		add("Claim district sovereignty for "+a.Guilds[0], sim.Action{Kind: "claim_turf", FactionID: a.Guilds[0], Location: a.Location})
 	}
 
 	if report, ok := informationAction(p); ok && report.Kind == "speak" && ruleOptionID(report, options) == "" {
 		add(report.Text, report)
 	}
-	for _, action := range p.CaseActions {
+	for _, action := range caseActions(p) {
 		add(fmt.Sprintf("%s: %s", action.Kind, action.TargetID), action)
 	}
 	medItem := cheapestMedicinalItem(p.Catalog, a, itemKeys)
@@ -595,14 +535,23 @@ func Options(p sim.Perception) []Option {
 		if a.Health >= 45 && a.Energy >= 5 && p.Tick >= a.RestUntil && !bIsOutlaw {
 			add("Steal from "+b.Name+" (-5 energy)", sim.Action{Kind: "steal", TargetID: b.ID})
 		}
-		if env.Institutions.RacketeeringEnabled() && a.Health >= 50 && a.Energy >= 6 && p.Tick >= a.RestUntil && sim.ActorHasTag(p.ExtortionTargets, b.ID) && b.FactionRelation != "allied" {
+		if env.Institutions.RacketeeringEnabled() && a.Health >= 50 && a.Energy >= 6 && p.Tick >= a.RestUntil && !bIsOutlaw && !b.Sleeping && !b.Jailed && b.FactionRelation != "allied" {
 			add("Extort coercion fee from "+b.Name+" (-6 energy)", sim.Action{Kind: "extort", TargetID: b.ID})
 		}
 		if a.Health >= 55 && b.Health > 20 && a.Energy >= 8 && p.Tick >= a.RestUntil && !bIsOutlaw {
 			add("Raid and plunder "+b.Name+" (-8 energy)", sim.Action{Kind: "raid", TargetID: b.ID})
 		}
-		if a.Money >= 4 && a.Energy >= 3 && bIsEnforcer {
-			add(fmt.Sprintf("Offer hush bribe to %s %s (-3 energy)", env.AuthorityName, b.Name), sim.Action{Kind: "bribe", TargetID: b.ID})
+		if a.Money >= 4 && a.Energy >= 3 && !b.Sleeping {
+			if bIsEnforcer {
+				add(fmt.Sprintf("Offer hush bribe to %s %s (-3 energy)", env.AuthorityName, b.Name), sim.Action{Kind: "bribe", TargetID: b.ID})
+			} else {
+				for _, sec := range p.KnownSecrets {
+					if sec.OwnerID == a.ID && !sec.Exposed && sim.ActorHasTag(sec.WitnessedBy, b.ID) {
+						add(fmt.Sprintf("Offer hush bribe to witness %s (-3 energy)", b.Name), sim.Action{Kind: "bribe", TargetID: b.ID, Item: sec.ID})
+						break
+					}
+				}
+			}
 		}
 		if p.CurrentHouse != nil && p.CurrentHouse.OwnerID == a.ID {
 			add(fmt.Sprintf("Transfer ownership deed of %s to %s (permanent property transfer)", p.CurrentHouse.Name, b.Name), sim.Action{
@@ -610,12 +559,12 @@ func Options(p sim.Perception) []Option {
 			})
 		}
 
-		if !p.Married && eligibleSpouse[b.ID] {
+		if !p.Married && !b.Married && b.KinshipToSelf == "" {
 			add(fmt.Sprintf("Propose marriage alliance to %s", b.Name), sim.Action{
 				Kind: "marry", TargetID: b.ID,
 			})
 		}
-		if a.Energy >= 2 && a.Trust[b.ID] >= 3 && sim.ActorHasTag(p.EligibleBondIDs, b.ID) {
+		if a.Energy >= 2 && a.Trust[b.ID] >= 3 && b.KinshipToSelf == "" {
 			add(fmt.Sprintf("Swear kinship/patronage bond with %s", b.Name), sim.Action{
 				Kind: "swear_bond", TargetID: b.ID,
 			})
@@ -625,14 +574,14 @@ func Options(p sim.Perception) []Option {
 				Kind: "avenge_feud", TargetID: b.ID,
 			})
 		}
-		if env.Institutions.EnforcementEnabled() && (a.IllicitGain > 0 || p.DistrictGrievance >= 35) && a.Energy >= 5 && !bIsEnforcer && !bIsOversight && !bIsOutlaw {
-			add(fmt.Sprintf("Frame %s in %s docket (-5 energy)", b.Name, env.AuthorityName), sim.Action{
+		if env.Institutions.EnforcementEnabled() && !bIsEnforcer && !bIsOversight && !bIsOutlaw {
+			add(fmt.Sprintf("Frame %s in %s docket (-4 energy)", b.Name, env.AuthorityName), sim.Action{
 				Kind: "frame_suspect", TargetID: b.ID,
 			})
 		}
 	}
 
-	for _, action := range p.MediationActions {
+	for _, action := range mediationActions(p) {
 		add(fmt.Sprintf("Propose or accept %d coins to settle known feud %s", action.Price, action.Text), action)
 	}
 	selfEffTags := p.EffectiveTags()
@@ -641,7 +590,7 @@ func Options(p sim.Perception) []Option {
 			continue
 		}
 		other := o.Counterparty(a.ID)
-		if p.OfferBlockReasons[o.ID] == "" {
+		if p.OfferAcceptanceBlockReason(o) == "" {
 			for _, b := range p.Nearby {
 				if b.ID == other && !b.Jailed {
 					add(fmt.Sprintf("Accept offer %d: buyer %s pays %d %s to seller %s for %d %s", o.ID, o.Buyer, o.Price, o.Currency, o.Seller, o.Quantity, o.Item), sim.Action{Kind: "accept", TargetID: other, OfferID: o.ID})
@@ -672,8 +621,14 @@ func Options(p sim.Perception) []Option {
 		}
 	}
 	if !p.HasActiveLoan && !pendingBorrow && a.Money < 10 {
-		for _, quote := range p.LoanQuotes {
-			add(fmt.Sprintf("Request %d coins from %s: interest %d per mille/day, term %d ticks, collateral %s", quote.Principal, quote.LenderID, quote.RatePermille, quote.TermTicks, quote.CollateralHouse), sim.Action{Kind: "borrow_loan", TargetID: quote.LenderID})
+		collateral := ""
+		if deed, known := p.KnownHouse(a.HomeID); known && deed.OwnerID == a.ID {
+			collateral = deed.ID
+		}
+		for _, peer := range p.Nearby {
+			if canRequestLoan(peer, p.CreditTerms) {
+				add(fmt.Sprintf("Request 12 coins from %s: interest %d per mille/day, term %d ticks, collateral %s", peer.ID, p.CreditTerms.DailyLoanInterestPermille, p.CreditTerms.LoanTermTicks, collateral), sim.Action{Kind: "borrow_loan", TargetID: peer.ID})
+			}
 		}
 	}
 	if len(p.Catalog.CommChannels) > 0 {

@@ -75,9 +75,9 @@ func QuoteAction(p Perception, draft Action, terms TradeTerms) (Action, error) {
 	return draft, nil
 }
 
-func (w *World) counterOffer(a *Actor, x Action) []Event {
+func (w *World) counterOffer(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason}, w.actor(x.TargetID))}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason}, w.actor(x.TargetID))}
 	}
 	for i, previous := range w.Offers {
 		if previous.ID != x.OfferID {
@@ -112,7 +112,7 @@ func (w *World) counterOffer(a *Actor, x Action) []Event {
 		if reason := w.buyerItemBlockReason(*buyer, x.Item, currency); reason != "" {
 			return fail(reason)
 		}
-		e := w.record(a, valid, "trade_counteroffered", map[string]any{"text": fmt.Sprintf("%s proposes %d %s for %d %s in reply to offer %d", a.Name, valid.Quantity, valid.Item, valid.Price, currency, previous.ID), "previous_offer_id": previous.ID}, other)
+		e := tx.record(a, valid, "trade_counteroffered", map[string]any{"text": fmt.Sprintf("%s proposes %d %s for %d %s in reply to offer %d", a.Name, valid.Quantity, valid.Item, valid.Price, currency, previous.ID), "previous_offer_id": previous.ID}, other)
 		next := previous
 		next.ID, next.PreviousID, next.ProposedBy = e.ID, previous.ID, a.ID
 		next.Quantity, next.Price, next.Currency = valid.Quantity, valid.Price, valid.Currency
@@ -151,8 +151,8 @@ func BuildInteractionViews(p Perception) []InteractionView {
 		v := InteractionView{Kind: "offer", ID: o.ID, CounterpartyID: o.Counterparty(p.Self.ID), AwaitingActorID: o.ResponderID(), Expires: o.Expires, ReplyOptional: true}
 		if !available(v.CounterpartyID) {
 			v.BlockReason = "counterparty is not available at the same place"
-		} else {
-			v.BlockReason = p.OfferBlockReasons[o.ID]
+		} else if v.AwaitingActorID == p.Self.ID {
+			v.BlockReason = p.OfferAcceptanceBlockReason(o)
 		}
 		out = append(out, v)
 	}

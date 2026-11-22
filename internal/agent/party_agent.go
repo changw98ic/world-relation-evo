@@ -12,7 +12,7 @@ func isKinOrSwornPeer(p sim.Perception, targetID string) bool {
 	}
 	for _, nb := range p.Nearby {
 		if nb.ID == targetID && !nb.Jailed {
-			return !sim.ActorHasTag(p.EligibleBondIDs, targetID)
+			return nb.KinshipToSelf != ""
 		}
 	}
 	return false

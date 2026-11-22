@@ -85,6 +85,9 @@ func BuildSystemPrompt(dossier CharacterDossier) string {
 		fmt.Fprintf(&worldDesc, "- 本世界已关闭制度：%s（严禁围绕这些已关闭制度编造选项）\n", strings.Join(disabledInst, "、"))
 	}
 
+	if len(dossier.EngineActionKinds) > 0 {
+		fmt.Fprintf(&worldDesc, "- 当前世界可用引擎动作（engine_action_kinds）：%s\n", strings.Join(dossier.EngineActionKinds, "，"))
+	}
 	gloss := dossier.World.Glossaries
 	if s := formatGlossaryLine(gloss.Locations); s != "" {
 		fmt.Fprintf(&worldDesc, "- 地点中英对照：%s\n", s)
@@ -136,8 +139,8 @@ func BuildSystemPrompt(dossier CharacterDossier) string {
    - 充分利用该%s的性格、年龄、住所与同住者、初始物资缺口、所属势力/派系、职业晋升路径、特殊能力与标签，以及同世界其他 %d 位%s之间的真实互补、上下级、信任或敌对关系。
    - **严禁**凭空捏造档案中不存在的人物、地点或组织。
 4. **动作原语与配方映射规范**：
-   - 如果某条选项执行的是上方“已有生产/炼制配方”中的工序，action.engine_kind **必须填 "craft"**，并在 action.recipe_id 填入对应配方 ID（严禁把已有配方写成 new_primitive:...）。
-   - 优先使用 engine_action_kinds 中已有的动作名；只有确实超出引擎现有动作集合的高阶策略动作，才可使用 "new_primitive:英文蛇形名"。
+   - 如果某条选项执行的是上方“已有生产/炼制配方”中的工序，action.engine_kind **必须填 "craft"**，并在 action.recipe_id 填入对应配方 ID。
+   - 只允许使用 engine_action_kinds 列出的动作，包括已声明的 ActionSpecs。超出该列表的策略请拆成已有动作。
    - 每条选项的 when_if.trigger_event 都请用一句精炼中文写明触发时机或外部事件，不要留空。
 5. **覆盖 %d 天内完整博弈维度**（category 只能从以下 6 个标准中文类别中选一）：
    - 主业经营（本职生产、采集、炼制、修习、设施/据点修缮升级、长期计划）
@@ -168,7 +171,7 @@ func BuildSystemPrompt(dossier CharacterDossier) string {
         "trigger_event": "触发这件事的外部事件或时机（自然中文，必填）"
       },
       "action": {
-        "engine_kind": "对应engine_action_kinds里的已有动作名，或 new_primitive:英文蛇形名",
+        "engine_kind": "对应 engine_action_kinds 列出的动作名",
         "recipe_id": "可选：仅当 engine_kind 为 craft 时填入档案中真实的 recipe_id",
         "target_actor_ids": [%q],
         "target_location": %q,

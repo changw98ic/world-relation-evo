@@ -72,7 +72,7 @@ type GFRewardSpec struct {
 type GFTriggerSpec struct {
 	ID                       string       `json:"id"`
 	Name                     string       `json:"name"`
-	OnEvents                 []string     `json:"on_events"` // event kinds or "day_start"
+	OnEvents                 []string     `json:"on_events"`            // event kinds or "day_start"
 	MatchRole                string       `json:"match_role,omitempty"` // "self_actor"|"self_target"|"self_killer"|"witnessed_by_others"|"mentee_or_kin"|"any"
 	RequiredDistrictFeatures []string     `json:"required_district_features,omitempty"`
 	OncePerDistrict          bool         `json:"once_per_district,omitempty"`
@@ -407,12 +407,20 @@ func (c Catalog) PerceivedFormID(a Actor) string {
 	return bestID
 }
 
-// PerceivedPowerTier returns the actor's apparent power tier to outsiders, honoring DisguisePowerTier ("扮猪吃虎").
+// PerceivedPowerTier returns the actor's apparent power tier to outsiders, honoring DisguisePowerTier and DisguiseFormID ("扮猪吃虎").
 func (c Catalog) PerceivedPowerTier(a Actor) int {
 	tier := c.ActorPowerTier(a)
 	for _, gf := range c.ActiveGoldenFingersFor(a) {
-		if gf.Passive != nil && gf.Passive.DisguisePowerTier > 0 && gf.Passive.DisguisePowerTier < tier {
+		if gf.Passive == nil {
+			continue
+		}
+		if gf.Passive.DisguisePowerTier > 0 && gf.Passive.DisguisePowerTier < tier {
 			tier = gf.Passive.DisguisePowerTier
+		}
+		if gf.Passive.DisguiseFormID != "" {
+			if form, ok := c.Forms[gf.Passive.DisguiseFormID]; ok && form.PowerTier > 0 && form.PowerTier < tier {
+				tier = form.PowerTier
+			}
 		}
 	}
 	return tier
@@ -533,7 +541,7 @@ func (w *World) goldenFingerViewsFor(a Actor) []GoldenFingerView {
 }
 
 // applyGFReward deterministically applies a GFRewardSpec to actor a with strict ledger conservation.
-func (w *World) applyGFReward(a *Actor, x Action, r GFRewardSpec, multiplier int) (string, []Event) {
+func (w *World) applyGFReward(tx *WorldTx, a *Actor, x Action, r GFRewardSpec, multiplier int) (string, []Event) {
 	if multiplier < 1 {
 		multiplier = 1
 	}
@@ -542,8 +550,7 @@ func (w *World) applyGFReward(a *Actor, x Action, r GFRewardSpec, multiplier int
 
 	if r.Coins > 0 {
 		gain := r.Coins * multiplier
-		a.Money += gain
-		w.recordLedgerCurrencyProduced("coins", int64(gain))
+		tx.MintOrBurnCurrency(a, "coins", int64(gain), x.Kind)
 		parts = append(parts, fmt.Sprintf("+%d coins", gain))
 	}
 	if len(r.Currencies) > 0 {
@@ -560,8 +567,7 @@ func (w *World) applyGFReward(a *Actor, x Action, r GFRewardSpec, multiplier int
 			if amt <= 0 {
 				continue
 			}
-			a.Currencies[cur] += amt
-			w.recordLedgerCurrencyProduced(cur, amt)
+			tx.MintOrBurnCurrency(a, cur, amt, x.Kind)
 			parts = append(parts, fmt.Sprintf("+%d %s", amt, cur))
 		}
 	}
@@ -578,8 +584,7 @@ func (w *World) applyGFReward(a *Actor, x Action, r GFRewardSpec, multiplier int
 			if _, ok := w.Catalog.Items[itemID]; !ok {
 				w.Catalog.Items[itemID] = ItemSpec{ID: itemID, Name: itemID, Tier: 3, Tradeable: true, MassUnits: 1, BatchQty: 1, BatchPrice: 20}
 			}
-			a.Items[itemID] += qty
-			w.recordLedgerItemProduced(itemID, int64(qty))
+			tx.ProduceOrConsumeItem(a, itemID, qty, x.Kind)
 			parts = append(parts, fmt.Sprintf("+%d %s", qty, itemID))
 		}
 	}
@@ -590,7 +595,7 @@ func (w *World) applyGFReward(a *Actor, x Action, r GFRewardSpec, multiplier int
 			if xp <= 0 {
 				continue
 			}
-			extraEvents = append(extraEvents, w.grantSkillXP(a, x, sid, xp)...)
+			extraEvents = append(extraEvents, w.grantSkillXP(tx, a, x, sid, xp)...)
 			parts = append(parts, fmt.Sprintf("+%d %s XP", xp, sid))
 		}
 	}
@@ -638,11 +643,11 @@ func (w *World) applyGFReward(a *Actor, x Action, r GFRewardSpec, multiplier int
 		}
 	}
 	if r.HealthDelta != 0 {
-		a.Health = maxInt(1, minInt(MaxHealth, a.Health+r.HealthDelta*multiplier))
+		tx.adjustHealth(a, r.HealthDelta*multiplier, 1, x.Kind)
 		parts = append(parts, fmt.Sprintf("%+d HP", r.HealthDelta*multiplier))
 	}
 	if r.EnergyDelta != 0 {
-		a.Energy = maxInt(0, minInt(MaxEnergy, a.Energy+r.EnergyDelta*multiplier))
+		tx.setEnergy(a, maxInt(0, minInt(MaxEnergy, a.Energy+r.EnergyDelta*multiplier)), x.Kind)
 		parts = append(parts, fmt.Sprintf("%+d energy", r.EnergyDelta*multiplier))
 	}
 	for _, tag := range r.GrantTags {
@@ -653,7 +658,7 @@ func (w *World) applyGFReward(a *Actor, x Action, r GFRewardSpec, multiplier int
 	return strings.Join(parts, ", "), extraEvents
 }
 
-func (w *World) maybeExposeGoldenFinger(a *Actor, gf GoldenFingerSpec, causeEventID int64) []Event {
+func (w *World) maybeExposeGoldenFinger(tx *WorldTx, a *Actor, gf GoldenFingerSpec, causeEventID int64) []Event {
 	if gf.ExposureRiskPermille <= 0 {
 		return nil
 	}
@@ -675,34 +680,33 @@ func (w *World) maybeExposeGoldenFinger(a *Actor, gf GoldenFingerSpec, causeEven
 		}
 	}
 	knownBy := []string{a.ID}
+	witnessIDs := make([]string, 0, len(observers))
 	for _, obs := range observers {
 		knownBy = appendUnique(knownBy, obs.ID)
+		witnessIDs = appendUnique(witnessIDs, obs.ID)
 	}
-	sec := ActorSecret{
-		ID:          fmt.Sprintf("sec_gf_%d_%s", w.NextID, a.ID),
-		OwnerID:     a.ID,
-		Kind:        kind,
-		SubjectID:   gf.ID,
-		Severity:    85,
-		CreatedTick: w.Tick,
-		KnownBy:     knownBy,
+	sec, extra := w.addSecretWithWitnesses(a.ID, kind, gf.ID, 85, causeEventID, knownBy, witnessIDs)
+	secID := ""
+	if sec != nil {
+		secID = sec.ID
 	}
-	w.Secrets = append(w.Secrets, sec)
-	ev := w.record(a, Action{Kind: "wait", BasisEventID: causeEventID}, "secret_caught_red_handed", map[string]any{
+	ev := w.recordWithTx(tx, a, Action{Kind: "wait", BasisEventID: causeEventID}, "secret_caught_red_handed", map[string]any{
 		"text":           fmt.Sprintf("Witnesses glimpsed %s's hidden anomaly [%s] at %s", a.Name, gf.Name, a.Location),
-		"secret_id":      sec.ID,
+		"secret_id":      secID,
 		"secret_kind":    kind,
 		"golden_finger":  gf.ID,
-		"witnesses":      len(observers),
+		"witnesses":      witnessIDs,
+		"witness_count":  len(observers),
 		"cause_event_id": causeEventID,
+		"root_event_id":  causeEventID,
 	}, observers...)
-	return []Event{ev}
+	return append([]Event{ev}, extra...)
 }
 
 // applyGFExchange executes Action{Kind:"gf_exchange", Text:gfID, Item:offerID}.
-func (w *World) applyGFExchange(a *Actor, x Action) []Event {
+func (w *World) applyGFExchange(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(msg string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": msg})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": msg})}
 	}
 	var matchedGF *GoldenFingerSpec
 	var matchedOffer *GFShopItemSpec
@@ -733,26 +737,23 @@ func (w *World) applyGFExchange(a *Actor, x Action) []Event {
 	key := a.ID + "|" + matchedGF.ID + "|" + matchedOffer.ID
 
 	if matchedOffer.CostCoins > 0 {
-		a.Money -= matchedOffer.CostCoins
-		w.recordLedgerCurrencyConsumed("coins", int64(matchedOffer.CostCoins))
+		tx.MintOrBurnCurrency(a, "coins", -int64(matchedOffer.CostCoins), x.Kind)
 	}
 	if matchedOffer.CostCurrency != "" && matchedOffer.CostAmount > 0 {
-		a.Currencies[matchedOffer.CostCurrency] -= matchedOffer.CostAmount
-		w.recordLedgerCurrencyConsumed(matchedOffer.CostCurrency, matchedOffer.CostAmount)
+		tx.MintOrBurnCurrency(a, matchedOffer.CostCurrency, -matchedOffer.CostAmount, x.Kind)
 	}
 	for _, itemID := range sortedProductionKeys(matchedOffer.CostItems) {
 		qty := matchedOffer.CostItems[itemID]
 		if qty > 0 {
-			a.Items[itemID] -= qty
-			w.recordLedgerItemConsumed(itemID, int64(qty))
+			tx.ProduceOrConsumeItem(a, itemID, -qty, x.Kind)
 		}
 	}
 
 	st.ShopBoughtCounts[key]++
 	st.ShopLastTick[key] = w.Tick
 
-	rewardText, extra := w.applyGFReward(a, x, matchedOffer.Reward, 1)
-	ev := w.record(a, x, "gf_exchanged", map[string]any{
+	rewardText, extra := w.applyGFReward(tx, a, x, matchedOffer.Reward, 1)
+	ev := tx.record(a, x, "gf_exchanged", map[string]any{
 		"text":          fmt.Sprintf("%s redeemed [%s] via %s (%s)", a.Name, matchedOffer.Name, matchedGF.Name, rewardText),
 		"golden_finger": matchedGF.ID,
 		"offer_id":      matchedOffer.ID,
@@ -760,14 +761,14 @@ func (w *World) applyGFExchange(a *Actor, x Action) []Event {
 		"reward":        rewardText,
 	})
 	events := append([]Event{ev}, extra...)
-	events = append(events, w.maybeExposeGoldenFinger(a, *matchedGF, ev.ID)...)
+	events = append(events, w.maybeExposeGoldenFinger(tx, a, *matchedGF, ev.ID)...)
 	return events
 }
 
 // applyGFSimulate executes Action{Kind:"gf_simulate", Text:gfID} (life simulator / branch deduction).
-func (w *World) applyGFSimulate(a *Actor, x Action) []Event {
+func (w *World) applyGFSimulate(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(msg string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": msg})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": msg})}
 	}
 	var matchedGF *GoldenFingerSpec
 	for _, gf := range w.Catalog.ActiveGoldenFingersFor(*a) {
@@ -788,12 +789,10 @@ func (w *World) applyGFSimulate(a *Actor, x Action) []Event {
 	}
 	simSpec := matchedGF.Simulator
 	if simSpec.CostCoins > 0 {
-		a.Money -= simSpec.CostCoins
-		w.recordLedgerCurrencyConsumed("coins", int64(simSpec.CostCoins))
+		tx.MintOrBurnCurrency(a, "coins", -int64(simSpec.CostCoins), x.Kind)
 	}
 	if simSpec.CostCurrency != "" && simSpec.CostAmount > 0 {
-		a.Currencies[simSpec.CostCurrency] -= simSpec.CostAmount
-		w.recordLedgerCurrencyConsumed(simSpec.CostCurrency, simSpec.CostAmount)
+		tx.MintOrBurnCurrency(a, simSpec.CostCurrency, -simSpec.CostAmount, x.Kind)
 	}
 	st := w.ensureGoldenFingerState()
 	st.SimLastTick[a.ID+"|"+matchedGF.ID] = w.Tick
@@ -823,12 +822,12 @@ func (w *World) applyGFSimulate(a *Actor, x Action) []Event {
 		Attributes: simSpec.RewardAttributes,
 		Currencies: simSpec.RewardCurrencies,
 	}
-	rewardText, extra := w.applyGFReward(a, x, rewardSpec, 1)
+	rewardText, extra := w.applyGFReward(tx, a, x, rewardSpec, 1)
 	simName := simSpec.Name
 	if simName == "" {
 		simName = matchedGF.Name
 	}
-	ev := w.record(a, x, "gf_simulated", map[string]any{
+	ev := tx.record(a, x, "gf_simulated", map[string]any{
 		"text":          fmt.Sprintf("%s ran [%s], foresaw (%s) and retained (%s)", a.Name, simName, strings.Join(insights, "; "), rewardText),
 		"golden_finger": matchedGF.ID,
 		"insights":      insights,
@@ -927,7 +926,7 @@ func (w *World) stepGoldenFingers(tickEvents []Event) []Event {
 					if heal <= 0 {
 						heal = 45
 					}
-					a.Health = minInt(MaxHealth, a.Health+heal)
+					adjustActorHealthBounded(a, heal, 0)
 					a.Energy = minInt(MaxEnergy, a.Energy+20)
 					rName := gf.Passive.RescueName
 					if rName == "" {
@@ -939,7 +938,7 @@ func (w *World) stepGoldenFingers(tickEvents []Event) []Event {
 						"heal":          heal,
 					})
 					out = append(out, ev)
-					out = append(out, w.maybeExposeGoldenFinger(a, gf, ev.ID)...)
+					out = append(out, w.maybeExposeGoldenFinger(nil, a, gf, ev.ID)...)
 				}
 			}
 
@@ -948,7 +947,7 @@ func (w *World) stepGoldenFingers(tickEvents []Event) []Event {
 				pKey := a.ID + "|" + gf.ID
 				if lastDay, ok := st.PocketLastDay[pKey]; !ok || lastDay < dayNum {
 					st.PocketLastDay[pKey] = dayNum
-					rewardText, extra := w.applyGFReward(a, Action{Kind: "wait"}, *gf.Passive.DailyPocketYield, 1)
+					rewardText, extra := w.applyGFReward(w.BeginTx(a.ID, ActionIntent{}), a, Action{Kind: "wait"}, *gf.Passive.DailyPocketYield, 1)
 					if rewardText != "" {
 						ev := w.record(a, Action{Kind: "wait"}, "gf_pocket_yield", map[string]any{
 							"text":          fmt.Sprintf("%s harvested [%s] pocket realm yield (%s)", a.Name, gf.Name, rewardText),
@@ -997,7 +996,7 @@ func (w *World) stepGoldenFingers(tickEvents []Event) []Event {
 						if tr.OncePerDistrict {
 							st.VisitedDistricts[tKey+"|"+a.Location] = true
 						}
-						rewardText, extra := w.applyGFReward(a, Action{Kind: "wait"}, tr.Reward, 1)
+						rewardText, extra := w.applyGFReward(w.BeginTx(a.ID, ActionIntent{}), a, Action{Kind: "wait"}, tr.Reward, 1)
 						ev := w.record(a, Action{Kind: "wait"}, "gf_triggered", map[string]any{
 							"text":          fmt.Sprintf("%s triggered [%s / %s] at %s (%s)", a.Name, gf.Name, tr.Name, a.Location, rewardText),
 							"golden_finger": gf.ID,
@@ -1069,7 +1068,7 @@ func (w *World) stepGoldenFingers(tickEvents []Event) []Event {
 						st.VisitedDistricts[tKey+"|"+a.Location] = true
 					}
 					actionCtx := Action{Kind: "wait", BasisEventID: evSrc.ID}
-					rewardText, extra := w.applyGFReward(a, actionCtx, tr.Reward, mult)
+					rewardText, extra := w.applyGFReward(w.BeginTx(a.ID, ActionIntent{Action: actionCtx}), a, actionCtx, tr.Reward, mult)
 					var devourParts []string
 					if victim != nil {
 						if tr.DevourAttrPoints > 0 {
@@ -1087,7 +1086,7 @@ func (w *World) stepGoldenFingers(tickEvents []Event) []Event {
 								}
 							}
 							if bestSkill != "" {
-								extra = append(extra, w.grantSkillXP(a, actionCtx, bestSkill, 12)...)
+								extra = append(extra, w.grantSkillXP(nil, a, actionCtx, bestSkill, 12)...)
 								devourParts = append(devourParts, fmt.Sprintf("devoured %s essence", bestSkill))
 							}
 						}
@@ -1108,7 +1107,7 @@ func (w *World) stepGoldenFingers(tickEvents []Event) []Event {
 					})
 					out = append(out, ev)
 					out = append(out, extra...)
-					out = append(out, w.maybeExposeGoldenFinger(a, gf, ev.ID)...)
+					out = append(out, w.maybeExposeGoldenFinger(nil, a, gf, ev.ID)...)
 					break // fire each trigger at most once per tick
 				}
 			}
@@ -1121,7 +1120,7 @@ func (w *World) stepGoldenFingers(tickEvents []Event) []Event {
 				}
 				if w.isGFQuestSatisfied(*a, q) {
 					st.QuestStatus[qKey] = "completed"
-					rewardText, extra := w.applyGFReward(a, Action{Kind: "wait"}, q.Reward, 1)
+					rewardText, extra := w.applyGFReward(w.BeginTx(a.ID, ActionIntent{}), a, Action{Kind: "wait"}, q.Reward, 1)
 					ev := w.record(a, Action{Kind: "wait"}, "gf_quest_completed", map[string]any{
 						"text":          fmt.Sprintf("%s completed [%s] quest '%s' (%s)", a.Name, gf.Name, q.Title, rewardText),
 						"golden_finger": gf.ID,
@@ -1141,8 +1140,7 @@ func (w *World) stepGoldenFingers(tickEvents []Event) []Event {
 						fp := q.FailurePenalty
 						if fp.CoinsLoss > 0 {
 							loss := minInt(a.Money, fp.CoinsLoss)
-							a.Money -= loss
-							w.recordLedgerCurrencyConsumed("coins", int64(loss))
+							w.adjustActorCurrency(a, "coins", -int64(loss), true)
 							penParts = append(penParts, fmt.Sprintf("-%d coins", loss))
 						}
 						if len(fp.CurrencyLoss) > 0 {
@@ -1165,10 +1163,10 @@ func (w *World) stepGoldenFingers(tickEvents []Event) []Event {
 							}
 						}
 						if fp.Lethal {
-							a.Health = 0
+							setActorHealthBounded(a, 0, 0)
 							penParts = append(penParts, "system_erasure")
 						} else if fp.HealthLoss > 0 {
-							a.Health = maxInt(0, a.Health-fp.HealthLoss)
+							adjustActorHealthBounded(a, -fp.HealthLoss, 0)
 							penParts = append(penParts, fmt.Sprintf("-%d HP", fp.HealthLoss))
 						}
 					}

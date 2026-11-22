@@ -114,15 +114,10 @@ func addAmbitionOptions(p sim.Perception, allowed map[string]bool, add func(stri
 				sim.Action{Kind: "expose_secret", TargetID: s.OwnerID, Item: s.ID})
 		}
 	}
-	for _, factionID := range p.LeadershipChallenges {
+	for _, factionID := range leadershipChallenges(p) {
 		add("Challenge for leadership of "+factionID, sim.Action{Kind: "challenge_leadership", FactionID: factionID})
 	}
-	for _, ambition := range a.Ambitions {
-		if !ambition.Completed && ambition.Kind == "master_skill" && a.Skills[ambition.TargetID] > 0 && a.Skills[ambition.TargetID] < ambition.TargetValue && a.Energy >= 4 {
-			add("Practise "+ambition.TargetID, sim.Action{Kind: "practice_skill", SkillID: ambition.TargetID})
-		}
-	}
-	for _, action := range p.BlackmailActions {
+	for _, action := range blackmailActions(p) {
 		add(fmt.Sprintf("Leverage secret against %s (%s, %d coins)", action.TargetID, action.Text, action.Price), action)
 	}
 }
@@ -226,7 +221,7 @@ func planAmbitionAction(p sim.Perception, consider func(sim.Action) bool) bool {
 
 		}
 	}
-	for _, action := range p.BlackmailActions {
+	for _, action := range blackmailActions(p) {
 		if consider(action) {
 			return true
 		}
@@ -301,7 +296,7 @@ func planAmbitionAction(p sim.Perception, consider func(sim.Action) bool) bool {
 	}
 
 	if sim.ActorHasTag(traits, "ambitious") {
-		for _, factionID := range p.LeadershipChallenges {
+		for _, factionID := range leadershipChallenges(p) {
 			if consider(sim.Action{Kind: "set_ambition", Item: "seize_leadership", TargetID: factionID}) {
 				return true
 			}

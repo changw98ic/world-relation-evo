@@ -421,6 +421,9 @@ func (w *World) stepStateSlotsAndForms() []Event {
 	}
 	for ci := range w.Cohorts {
 		c := &w.Cohorts[ci]
+		if c.Population > 0 {
+			w.stepCohortStateSlots(c, slotKeys)
+		}
 		before := append([]Actor(nil), c.Members...)
 		for mi := range c.Members {
 			events = append(events, w.stepActorStateSlotsAndForm(&c.Members[mi], slotKeys)...)
@@ -428,6 +431,55 @@ func (w *World) stepStateSlotsAndForms() []Event {
 		w.reconcileCohortMemberChanges(c, before)
 	}
 	return events
+}
+
+// stepCohortStateSlots applies the same ambient-field & FormSpec slot metabolism laws to
+// PopulationCohort.StateSlots that stepActorStateSlotsAndForm applies to individual Actors.
+func (w *World) stepCohortStateSlots(c *PopulationCohort, slotKeys []string) {
+	if c == nil || c.Population <= 0 || len(slotKeys) == 0 {
+		return
+	}
+	var form FormSpec
+	hasForm := false
+	if c.FormID != "" {
+		form, hasForm = w.Catalog.Forms[c.FormID]
+	}
+	var reg GeoRegion
+	hasReg := false
+	if regID := w.Map.GeoRegionIDForLocation(c.District, ""); regID != "" {
+		reg, hasReg = w.Map.GeoRegionByID(regID)
+	}
+	tags, _ := w.cohortEffectiveTagsAndCaps(*c)
+	for _, slotID := range slotKeys {
+		spec := w.Catalog.StateSlots[slotID]
+		if spec.RequiredTag != "" && !ActorHasTag(tags, spec.RequiredTag) {
+			continue
+		}
+		cur, existed := c.StateSlots[slotID]
+		if !existed && spec.Default != 0 {
+			cur = spec.Default
+		}
+		delta := spec.RegenPerTick
+		if hasForm && form.SlotMetabolism != nil {
+			delta += form.SlotMetabolism[slotID]
+		}
+		if spec.AmbientFieldKey != "" && hasReg && reg.AmbientFields != nil {
+			if ambient := reg.AmbientFields[spec.AmbientFieldKey]; ambient != 0 {
+				div := spec.AmbientAbsorbDivisor
+				if div <= 0 {
+					div = 1
+				}
+				delta += ambient / div
+			}
+		}
+		if !existed && delta == 0 && spec.Default == 0 {
+			continue
+		}
+		if c.StateSlots == nil {
+			c.StateSlots = map[string]int{}
+		}
+		c.StateSlots[slotID] = clampSlotValue(cur+delta, spec, true)
+	}
 }
 
 func (w *World) stepActorStateSlotsAndForm(a *Actor, slotKeys []string) []Event {
@@ -514,7 +566,7 @@ func (w *World) stepActorStateSlotsAndForm(a *Actor, slotKeys []string) []Event 
 		}
 		if w.transitionRequirementReason(*a, trans) == "" {
 			x := Action{Kind: "attempt_transition", TransitionID: transID}
-			events = append(events, w.applyAttemptTransition(a, x)...)
+			events = append(events, w.applyAttemptTransition(w.BeginTx(a.ID, ActionIntent{Action: x}), a, x)...)
 		}
 	}
 	return events
@@ -533,9 +585,9 @@ func resolveTransitionID(x Action) string {
 	return x.Item
 }
 
-func (w *World) applyAttemptTransition(a *Actor, x Action) []Event {
+func (w *World) applyAttemptTransition(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	transID := resolveTransitionID(x)
 	trans, ok := w.Catalog.Transitions[transID]
@@ -568,7 +620,7 @@ func (w *World) applyAttemptTransition(a *Actor, x Action) []Event {
 	for _, itemID := range costItemKeys {
 		qty := trans.ItemCosts[itemID]
 		if qty > 0 {
-			w.adjustActorItem(a, itemID, -qty, true)
+			tx.ProduceOrConsumeItem(a, itemID, -qty, x.Kind)
 		}
 	}
 
@@ -576,16 +628,16 @@ func (w *World) applyAttemptTransition(a *Actor, x Action) []Event {
 	if trans.Ticks > 1 {
 		task := Task{Action: x, TotalTicks: trans.Ticks, Remaining: trans.Ticks - 1, StartedTick: w.Tick}
 		a.Task = &task
-		return []Event{w.record(a, x, "task_started", map[string]any{
+		return []Event{tx.record(a, x, "task_started", map[string]any{
 			"text":            fmt.Sprintf("%s began transition %s (%d ticks)", a.Name, trans.ID, trans.Ticks),
 			"transition_id":   trans.ID,
 			"remaining_ticks": task.Remaining,
 		})}
 	}
-	return w.executeTransition(a, x, trans.ID)
+	return w.executeTransition(tx, a, x, trans.ID)
 }
 
-func (w *World) executeTransition(a *Actor, x Action, transID string) []Event {
+func (w *World) executeTransition(tx *WorldTx, a *Actor, x Action, transID string) []Event {
 	if a == nil {
 		return nil
 	}
@@ -632,7 +684,7 @@ func (w *World) executeTransition(a *Actor, x Action, transID string) []Event {
 			}
 		}
 		w.refreshActor(a)
-		return []Event{w.record(a, x, "transition_succeeded", map[string]any{
+		return []Event{tx.record(a, x, "transition_succeeded", map[string]any{
 			"text":          fmt.Sprintf("%s succeeded transition %s -> form %s", a.Name, trans.ID, a.FormID),
 			"transition_id": trans.ID,
 			"previous_form": prevForm,
@@ -645,10 +697,7 @@ func (w *World) executeTransition(a *Actor, x Action, transID string) []Event {
 
 	prevForm := a.FormID
 	if trans.FailureHealthLoss > 0 {
-		a.Health -= trans.FailureHealthLoss
-		if a.Health < 0 {
-			a.Health = 0
-		}
+		tx.adjustHealth(a, -trans.FailureHealthLoss, 0, x.Kind)
 	}
 	if trans.FailureFormID != "" {
 		a.FormID = trans.FailureFormID
@@ -657,7 +706,7 @@ func (w *World) executeTransition(a *Actor, x Action, transID string) []Event {
 		a.Tags = appendUnique(a.Tags, trans.FailureHostileTag)
 	}
 	w.refreshActor(a)
-	ev := w.record(a, x, "transition_failed", map[string]any{
+	ev := tx.record(a, x, "transition_failed", map[string]any{
 		"text":           fmt.Sprintf("%s failed transition %s -> form %s", a.Name, trans.ID, a.FormID),
 		"transition_id":  trans.ID,
 		"previous_form":  prevForm,
@@ -667,17 +716,16 @@ func (w *World) executeTransition(a *Actor, x Action, transID string) []Event {
 		"hostile_tag":    trans.FailureHostileTag,
 	})
 	if trans.FailureWipeMemories {
-		a.Memories = nil
-		a.Trust = map[string]int{}
+		tx.clearActorMemoriesAndTrust(a)
 	}
 	events := []Event{ev}
-	events = append(events, w.markDeadIfZero(a, nil, x, "transition_failure")...)
+	events = append(events, w.markDeadIfZeroWithTx(tx, a, nil, x, "transition_failure")...)
 	return events
 }
 
-func (w *World) applyRefineCurrencyItem(a *Actor, x Action) []Event {
+func (w *World) applyRefineCurrencyItem(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	itemID := x.Item
 	if itemID == "" {
@@ -707,11 +755,11 @@ func (w *World) applyRefineCurrencyItem(a *Actor, x Action) []Event {
 	if a.Items[itemID] < qty {
 		return fail(fmt.Sprintf("insufficient %s to refine (need %d, has %d)", itemID, qty, a.Items[itemID]))
 	}
-	w.adjustActorItem(a, itemID, -qty, true)
+	tx.ProduceOrConsumeItem(a, itemID, -qty, x.Kind)
 	minted := int64(qty) * int64(spec.DualUseRate)
-	w.adjustActorCurrency(a, spec.DualUseCurrency, minted, true)
+	tx.MintOrBurnCurrency(a, spec.DualUseCurrency, minted, x.Kind)
 
-	return []Event{w.record(a, x, "currency_item_refined", map[string]any{
+	return []Event{tx.record(a, x, "currency_item_refined", map[string]any{
 		"text":            fmt.Sprintf("%s refined %d %s into %d %s", a.Name, qty, itemID, minted, spec.DualUseCurrency),
 		"item":            itemID,
 		"item_consumed":   qty,
@@ -720,9 +768,9 @@ func (w *World) applyRefineCurrencyItem(a *Actor, x Action) []Event {
 	})}
 }
 
-func (w *World) applyAbsorbItemSlot(a *Actor, x Action) []Event {
+func (w *World) applyAbsorbItemSlot(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	itemID := x.Item
 	if itemID == "" {
@@ -780,13 +828,13 @@ func (w *World) applyAbsorbItemSlot(a *Actor, x Action) []Event {
 		gainPerUnit = 10
 	}
 
-	w.adjustActorItem(a, itemID, -qty, true)
+	tx.ProduceOrConsumeItem(a, itemID, -qty, x.Kind)
 
 	slotSpec, hasSpec := w.Catalog.StateSlots[slotID]
 	nextVal := clampSlotValue(a.StateSlots[slotID]+qty*gainPerUnit, slotSpec, hasSpec)
 	setActorSlotValue(a, slotID, nextVal)
 
-	return []Event{w.record(a, x, "item_absorbed_slot", map[string]any{
+	return []Event{tx.record(a, x, "item_absorbed_slot", map[string]any{
 		"text":          fmt.Sprintf("%s absorbed %d %s into %s (%d)", a.Name, qty, itemID, slotID, nextVal),
 		"item":          itemID,
 		"item_consumed": qty,
@@ -1107,9 +1155,9 @@ func resolveFlowEdgeID(x Action) string {
 	return x.RecipeID
 }
 
-func (w *World) applySeverFlowEdge(a *Actor, x Action) []Event {
+func (w *World) applySeverFlowEdge(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	if w.FlowGrid == nil {
 		return fail("flow grid is not enabled")
@@ -1138,16 +1186,16 @@ func (w *World) applySeverFlowEdge(a *Actor, x Action) []Event {
 			cutoffNodes = append(cutoffNodes, n.ID)
 		}
 	}
-	return []Event{w.record(a, x, "flow_cutoff", map[string]any{
+	return []Event{tx.record(a, x, "flow_cutoff", map[string]any{
 		"text":           fmt.Sprintf("%s severed flow edge %s (affected: %v)", a.Name, edge.ID, cutoffNodes),
 		"edge_id":        edge.ID,
 		"affected_nodes": cutoffNodes,
 	})}
 }
 
-func (w *World) applyRepairFlowEdge(a *Actor, x Action) []Event {
+func (w *World) applyRepairFlowEdge(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	if w.FlowGrid == nil {
 		return fail("flow grid is not enabled")
@@ -1176,7 +1224,7 @@ func (w *World) applyRepairFlowEdge(a *Actor, x Action) []Event {
 			restoredNodes = append(restoredNodes, n.ID)
 		}
 	}
-	return []Event{w.record(a, x, "flow_restored", map[string]any{
+	return []Event{tx.record(a, x, "flow_restored", map[string]any{
 		"text":           fmt.Sprintf("%s repaired flow edge %s (restored: %v)", a.Name, edge.ID, restoredNodes),
 		"edge_id":        edge.ID,
 		"restored_nodes": restoredNodes,

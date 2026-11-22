@@ -8,72 +8,16 @@ import (
 	"github.com/changw98ic/world-relation-evo/internal/sim"
 )
 
-var engineActionKinds = []string{
-	"abandon_plan",
-	"accept",
-	"accept_agreement",
-	"accept_growth_care",
-	"accept_loan",
-	"adopt_facility",
-	"arrest",
-	"attack",
-	"audit_corruption",
-	"avenge_feud",
-	"begin_rest",
-	"borrow_loan",
-	"bribe",
-	"cancel_loan",
-	"claim_turf",
-	"craft",
-	"drink",
-	"eat",
-	"end_rest",
-	"enter_house",
-	"equip",
-	"extort",
-	"file_appeal",
-	"foreclose_collateral",
-	"frame_suspect",
-	"fulfill_agreement",
-	"harvest",
-	"heal",
-	"hunt_threat",
-	"issue_decree",
-	"join_faction",
-	"join_profession",
-	"leave_house",
-	"maintain_infra",
-	"marry",
-	"medicate",
-	"move",
-	"move_venue",
-	"offer",
-	"perform_ritual",
-	"propose_agreement",
-	"propose_growth_care",
-	"raid",
-	"refuel",
-	"reject",
-	"reject_agreement",
-	"reject_loan",
-	"relieve",
-	"repair_house",
-	"repay_loan",
-	"research_tech",
-	"shoot",
-	"sleep",
-	"spar",
-	"speak",
-	"start_plan",
-	"steal",
-	"swear_bond",
-	"teach_knowledge",
-	"transfer_house",
-	"transmit_message",
-	"unequip",
-	"upgrade_house",
-	"wait",
-}
+// engineActionKinds is sourced from sim.BuiltinActionMetadata (single source of truth).
+var engineActionKinds = func() []string {
+	meta := sim.BuiltinActionMetadata()
+	out := make([]string, 0, len(meta))
+	for _, m := range meta {
+		out = append(out, m.Kind)
+	}
+	sort.Strings(out)
+	return out
+}()
 
 // BuildDossier assembles the complete description of a single actor together with
 // all relevant world, social, political, spatial, and catalog context.
@@ -342,6 +286,9 @@ func activeEngineActionKinds(c sim.Catalog) []string {
 	}
 	if !inst.EnforcementEnabled() {
 		disabled["arrest"] = true
+		disabled["frame_suspect"] = true
+		disabled["open_case"] = true
+		disabled["hold_trial"] = true
 	}
 	if !inst.OversightEnabled() {
 		disabled["audit_corruption"] = true

@@ -60,12 +60,16 @@ func citedReport(sender *Actor, x Action) (int64, string) {
 			continue
 		}
 		if o := m.Observation; o != nil && o.Kind == s.Topic && o.SubjectID == s.SubjectID &&
-			o.ObjectID == s.ObjectID && o.CaseID == s.CaseID && (s.Modality == "" || s.Modality == o.Modality) && o.Location == s.Location && o.Proceeds == s.Proceeds && (o.Item == s.Item || s.Item == "") {
+			o.ObjectID == s.ObjectID && o.CaseID == s.CaseID && (s.Modality == "" || s.Modality == o.Modality) && o.Location == s.Location && o.Proceeds == s.Proceeds && (o.Item == s.Item || s.Item == "") && (s.Quantity == 0 || o.Quantity == s.Quantity) {
 			return m.EventID, sender.ID
 		}
 		if m.Statement != nil && *m.Statement == *s {
-			if m.WitnessID != "" {
+			if m.FactEventID > 0 && m.WitnessID != "" {
 				return m.FactEventID, m.WitnessID
+			}
+			// Preserve original unverified speaker provenance (FactEventID stays 0).
+			if m.WitnessID != "" {
+				return 0, m.WitnessID
 			}
 			return 0, m.Source
 		}

@@ -192,7 +192,7 @@ func TestPostgresCheckpointBoundaryRestoresDecisionsWithoutCallingDecider(t *tes
 		{ID: "seller", Location: "meeting", Tags: []string{"resident"}, Health: 100, Energy: 100, Items: map[string]int{"parcel": 3}, Trust: map[string]int{}},
 		{ID: "buyer", Location: "meeting", Tags: []string{"resident"}, Health: 100, Energy: 100, Money: 7, Items: map[string]int{}, Trust: map[string]int{}},
 	}}
-	if err := s.SaveCheckpoint(ctx, w); err != nil {
+	if err := s.SaveTick(ctx, w, nil, nil, true); err != nil {
 		t.Fatal(err)
 	}
 	decider := &persistedDecisionFixture{}
@@ -202,17 +202,15 @@ func TestPostgresCheckpointBoundaryRestoresDecisionsWithoutCallingDecider(t *tes
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := s.SaveDecisionLog(ctx, id, log); err != nil {
+		if err := s.SaveTick(ctx, w, events, &log, false); err != nil {
 			t.Fatal(err)
 		}
 		originalEvents = append(originalEvents, events...)
 	}
-	if err := s.Save(ctx, w, originalEvents); err != nil {
-		t.Fatal(err)
-	}
 	future := *w
 	future.Tick = w.Tick + 1
-	if err := s.SaveCheckpoint(ctx, &future); err != nil {
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO world_checkpoints (world_id, tick, state) VALUES ($1, $2, $3)`,
+		id, future.Tick, persistedJSON(t, &future)); err != nil {
 		t.Fatal(err)
 	}
 	cp, raw, err := s.LoadNearestCheckpoint(ctx, id, w.Tick)
@@ -229,7 +227,9 @@ func TestPostgresCheckpointBoundaryRestoresDecisionsWithoutCallingDecider(t *tes
 	if len(logs) != 2 || logs[0].Tick != cp.Tick {
 		t.Fatal("checkpoint's first decision tick was omitted")
 	}
-	if err := s.SaveDecisionLog(ctx, otherID, sim.TickDecisionLog{Tick: 37, Decisions: map[string]sim.Action{"stranger": {Kind: "wait"}}}); err != nil {
+	other := &sim.World{ID: otherID, Tick: 38}
+	otherLog := sim.TickDecisionLog{Tick: 37, Decisions: map[string]sim.Action{"stranger": {Kind: "wait"}}}
+	if err := s.SaveTick(ctx, other, nil, &otherLog, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := s.LoadNearestCheckpoint(ctx, otherID, w.Tick); !errors.Is(err, sql.ErrNoRows) {

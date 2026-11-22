@@ -94,7 +94,7 @@ func TestPowerTierCombatSuppressionAndBreakthrough(t *testing.T) {
 	if ok, reason := CanAttemptTransition(w.Actors[0], w.Catalog.Transitions["breakthrough_foundation"]); !ok {
 		t.Fatalf("expected actor to satisfy transition preconditions, got %q", reason)
 	}
-	evs := w.applyAttemptTransition(&w.Actors[0], Action{Kind: "attempt_transition", TransitionID: "breakthrough_foundation"})
+	evs := w.applyAttemptTransition(w.BeginTx((&w.Actors[0]).ID, ActionIntent{}), &w.Actors[0], Action{Kind: "attempt_transition", TransitionID: "breakthrough_foundation"})
 	if w.Actors[0].FormID != "foundation" {
 		t.Fatalf("expected FormID=foundation after breakthrough, got %q (events=%+v)", w.Actors[0].FormID, evs)
 	}
@@ -189,7 +189,7 @@ func TestIndependentSkillsCrossProfessionAccessAndMentorship(t *testing.T) {
 	a.Energy = 80
 	a.Skills = map[string]int{"talisman_craft": 4}
 	b.Skills = nil
-	evs := w.applyTeachKnowledge(a, Action{Kind: "teach_knowledge", SkillID: "talisman_craft", TargetID: b.ID}, b)
+	evs := w.applyTeachKnowledge(w.BeginTx(a.ID, ActionIntent{}), a, Action{Kind: "teach_knowledge", SkillID: "talisman_craft", TargetID: b.ID}, b)
 	if b.Skills["talisman_craft"] < 1 {
 		t.Fatalf("expected student to learn talisman_craft Lv.1 via mentorship, got %+v (events=%+v)", b.Skills, evs)
 	}
@@ -260,7 +260,7 @@ func TestIndividualActorNonCombatHazards(t *testing.T) {
 	a.InsideHouse = ""
 	a.Skills = map[string]int{"alchemy": 0}
 	r := Recipe{ID: "brew_test_pill", SkillID: "alchemy"}
-	evs := w.checkActorCraftAccident(a, Action{Kind: "craft", RecipeID: r.ID}, r)
+	evs := w.checkActorCraftAccident(nil, a, Action{Kind: "craft", RecipeID: r.ID}, r)
 	if len(evs) == 0 || evs[0].Kind != "workplace_accident" || a.Health >= 100 {
 		t.Fatalf("expected individual spotlight actor to suffer workplace_accident, got health=%d evs=%+v", a.Health, evs)
 	}
@@ -279,7 +279,7 @@ func TestIndividualActorNonCombatHazards(t *testing.T) {
 	a.Health = 10
 	a.Memories = nil
 	w.Tick = 42
-	evsFatal := w.checkActorCraftAccident(a, Action{Kind: "craft", RecipeID: r.ID}, r)
+	evsFatal := w.checkActorCraftAccident(nil, a, Action{Kind: "craft", RecipeID: r.ID}, r)
 	if !a.Dead || a.DeathCause != "accident" || a.DeathTick != 42 {
 		t.Fatalf("expected fatal accident death cause='accident' tick=42, got dead=%v cause=%q tick=%d evs=%+v", a.Dead, a.DeathCause, a.DeathTick, evsFatal)
 	}
@@ -290,10 +290,10 @@ func TestIndividualActorNonCombatHazards(t *testing.T) {
 	b.Health = 100
 	b.Memories = nil
 	d0, d1 := w.Map.Districts[0].ID, w.Map.Districts[1].ID
-	if sameEvs := w.checkActorTransitHazard(b, Action{Kind: "move", Location: d0}, d0, d0, "road", "", 0); len(sameEvs) != 0 {
+	if sameEvs := w.checkActorTransitHazard(nil, b, Action{Kind: "move", Location: d0}, d0, d0, "road", "", 0); len(sameEvs) != 0 {
 		t.Fatalf("expected no transit hazard on same-district hop, got %+v", sameEvs)
 	}
-	crossEvs := w.checkActorTransitHazard(b, Action{Kind: "move", Location: d1}, d0, d1, "road", "", 0)
+	crossEvs := w.checkActorTransitHazard(nil, b, Action{Kind: "move", Location: d1}, d0, d1, "road", "", 0)
 	if len(crossEvs) == 0 || crossEvs[0].Kind != "transit_hazard" || b.Health >= 100 {
 		t.Fatalf("expected cross-district transit_hazard on spotlight actor, got health=%d evs=%+v", b.Health, crossEvs)
 	}

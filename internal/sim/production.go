@@ -426,7 +426,7 @@ func (w *World) productionFacility(district, venue, houseID string, r Recipe) (s
 // Tool wear keeps the remainder instead of rounding each small job up. The
 // denominator is the item's declared number of batches per tool, shared by
 // individual and cohort work. No extra output is created by possessing a tool.
-func (w *World) wearProductionTool(kind, id string, r Recipe, batches int64) {
+func (w *World) wearProductionTool(tx *WorldTx, kind, id string, r Recipe, batches int64) {
 	var tools []string
 	for item, spec := range w.Catalog.Items {
 		if spec.DurabilityBatches > 0 && w.growthStock(GrowthBatch{OwnerID: id, Cohort: kind == "cohort"}, item) > 0 {
@@ -437,11 +437,11 @@ func (w *World) wearProductionTool(kind, id string, r Recipe, batches int64) {
 	if len(tools) == 0 || (r.ResourcePool == "" && r.HouseFacility == "") {
 		return
 	}
-	w.wearToolItem(kind, id, tools[0], batches)
+	w.wearToolItem(tx, kind, id, tools[0], batches)
 }
 
 // wearToolItem advances tool wear for a single item type and deducts consumed whole tools.
-func (w *World) wearToolItem(kind, id, item string, batches int64) {
+func (w *World) wearToolItem(tx *WorldTx, kind, id, item string, batches int64) {
 	if item == "" || batches <= 0 {
 		return
 	}
@@ -477,6 +477,7 @@ func (w *World) wearToolItem(kind, id, item string, batches int64) {
 		fromStock := min(stock, spent)
 		if fromStock > 0 {
 			w.changeGrowthStock(GrowthBatch{OwnerID: id, Cohort: kind == "cohort"}, item, -fromStock, true)
+			tx.recordMutation(StateMutationRecord{Primitive: "produce_consume_item", ActorID: id, Resource: item, Delta: -fromStock, Detail: "tool wear"})
 		}
 		fromEquipped := spent - fromStock
 		if fromEquipped > 0 && equippedOwner != nil {
@@ -493,6 +494,7 @@ func (w *World) wearToolItem(kind, id, item string, batches int64) {
 					break
 				}
 				if w.removeActorEquippedItem(equippedOwner, slot, true) {
+					tx.recordMutation(StateMutationRecord{Primitive: "produce_consume_item", ActorID: id, Resource: item, Delta: -1, Detail: "tool wear"})
 					rem--
 				}
 			}
@@ -664,7 +666,7 @@ func (p Perception) RecipeResourceVenue(r Recipe) (string, bool) {
 	best := ""
 	bestCost := int(^uint(0) >> 1)
 	for _, v := range p.Map.Venues {
-		if r.Growth != nil && r.NodeFeature == "farmland" && !p.hasAvailableFieldAt(v.DistrictID, v.ID) {
+		if r.Growth != nil && r.NodeFeature == "farmland" && !p.knowsFieldAt(v.DistrictID, v.ID) {
 			continue
 		}
 		if !p.Map.VenueOrDistrictHasFeature(v.ID, v.DistrictID, r.NodeFeature) {
@@ -692,7 +694,7 @@ func (p Perception) RecipeResourceDistrict(r Recipe) (string, bool) {
 	best := ""
 	bestCost := int(^uint(0) >> 1)
 	for _, d := range p.Map.Districts {
-		if r.Growth != nil && r.NodeFeature == "farmland" && !p.hasAvailableFieldAt(d.ID, "") {
+		if r.Growth != nil && r.NodeFeature == "farmland" && !p.knowsFieldAt(d.ID, "") {
 			continue
 		}
 		if !p.Map.DistrictHasFeature(d.ID, r.NodeFeature) {
@@ -716,9 +718,14 @@ func (p Perception) RecipeResourceDistrict(r Recipe) (string, bool) {
 	return best, best != ""
 }
 
-func (p Perception) hasAvailableFieldAt(district, venue string) bool {
+func (p Perception) knowsFieldAt(district, venue string) bool {
 	for _, field := range p.Fields {
 		if field.District == district && (field.VenueID == "" || field.VenueID == venue) && field.AvailableAreaM2 >= p.Catalog.Production.FieldAreaPerBatchM2 {
+			return true
+		}
+	}
+	for _, field := range p.FieldDeeds {
+		if field.District == district && (field.VenueID == "" || field.VenueID == venue) && field.AreaM2 >= p.Catalog.Production.FieldAreaPerBatchM2 {
 			return true
 		}
 	}

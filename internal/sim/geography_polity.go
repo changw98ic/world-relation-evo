@@ -962,7 +962,7 @@ func (w *World) distributeAnomalyObservations(ev Event, anomalyID, flowKind, reg
 						continue
 					}
 					// Outgoing sensory scan must also penetrate the observer's own sealed enclosure if inside one.
-					if indoor && !spec.PenetratesIndoor && encShielding > spec.PenetrationPower {
+					if indoor && (!spec.PenetratesIndoor || encShielding > spec.PenetrationPower) {
 						continue
 					}
 					modality = spec.ID
@@ -991,7 +991,7 @@ func (w *World) distributeAnomalyObservations(ev Event, anomalyID, flowKind, reg
 			Text:        fmt.Sprintf("Observed %s at %s via %s (intensity %d)", anomalyID, siteLabel, modality, intensity),
 			Observation: &obs,
 		}
-		a.Memories = appendMemory(a.Memories, mem)
+		appendActorMemory(a, mem)
 		witnessCount++
 	}
 	return witnessCount
@@ -1236,16 +1236,16 @@ func (w *World) TriggerGeoAnomaly(spec GeoAnomalySpec) []Event {
 					continue
 				}
 				if dmg >= a.Health {
-					a.Health = 0
+					setActorHealthBounded(a, 0, 0)
 					deadActors++
 					deathEvents = append(deathEvents, w.markDeadIfZero(a, nil, Action{Kind: "wait", Location: a.Location}, "disaster", anomalyCause)...)
 				} else {
-					a.Health -= dmg
+					adjustActorHealthBounded(a, -dmg, 0)
 					woundedActors++
 					deathEvents = append(deathEvents, w.record(a, Action{Kind: "wait", Location: a.Location}, "actor_environment_injured",
 						map[string]any{"text": fmt.Sprintf("%s injured %s", spec.Name, a.Name), "damage": dmg, "district": a.Location,
 							"root_event_id": anomalyID, "cause_event_id": anomalyID}))
-					deathEvents = append(deathEvents, w.interruptTaskOnDamage(a, "disaster")...)
+					deathEvents = append(deathEvents, w.interruptTaskOnDamage(nil, a, "disaster")...)
 				}
 			}
 		}
@@ -1353,7 +1353,7 @@ func (w *World) perceivedActiveEffects(a Actor, effects []ActiveEffect) []Active
 
 // applyMoveDistrict follows the venue graph when places are configured, so district
 // travel cannot bypass a boat, flight, or other declared route capability.
-func (w *World) applyMoveDistrict(a *Actor, x Action) []Event {
+func (w *World) applyMoveDistrict(tx *WorldTx, a *Actor, x Action) []Event {
 	from := a.VenueID
 	traveler := w.actorWithEffectTags(*a)
 	var best *VenueRouteView
@@ -1364,15 +1364,15 @@ func (w *World) applyMoveDistrict(a *Actor, x Action) []Event {
 		}
 	}
 	if best == nil {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": fmt.Sprintf("no traversable venue route from %s to district %s; travel through connected venues first", from, x.Location)})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": fmt.Sprintf("no traversable venue route from %s to district %s; travel through connected venues first", from, x.Location)})}
 	}
 	x.Kind, x.Location = "move_venue", best.ToVenue
-	return w.applyMoveVenue(a, x)
+	return w.applyMoveVenue(tx, a, x)
 }
 
-func (w *World) applyMoveVenue(a *Actor, x Action) []Event {
+func (w *World) applyMoveVenue(tx *WorldTx, a *Actor, x Action) []Event {
 	emitFail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	if a.InsideHouse != "" {
 		return emitFail("leave house before traveling between venues")
@@ -1406,14 +1406,14 @@ func (w *World) applyMoveVenue(a *Actor, x Action) []Event {
 	if a.Energy < effEnergy {
 		return emitFail("insufficient energy to travel to " + destVenue.ID)
 	}
-	a.Energy -= effEnergy
+	tx.setEnergy(a, a.Energy-effEnergy, x.Kind)
 	x.Channel = modeID
 	task := Task{Action: x, TotalTicks: effTicks, Remaining: effTicks - 1, StartedTick: w.Tick}
 	if task.Remaining <= 0 {
-		return w.finishMoveVenue(a, task)
+		return w.finishMoveVenue(tx, a, task)
 	}
 	a.Task = &task
-	return []Event{w.record(a, x, "task_started", map[string]any{
+	return []Event{tx.record(a, x, "task_started", map[string]any{
 		"text":            fmt.Sprintf("%s set out via %s toward %s (%d ticks)", a.Name, modeID, destVenue.ID, effTicks),
 		"venue_id":        destVenue.ID,
 		"locomotion_mode": modeID,
@@ -1421,7 +1421,7 @@ func (w *World) applyMoveVenue(a *Actor, x Action) []Event {
 	})}
 }
 
-func (w *World) finishMoveVenue(a *Actor, t Task) []Event {
+func (w *World) finishMoveVenue(tx *WorldTx, a *Actor, t Task) []Event {
 	x := t.Action
 	destVenue, ok := w.Map.VenueByID(x.Location)
 	if !ok {
@@ -1434,29 +1434,26 @@ func (w *World) finishMoveVenue(a *Actor, t Task) []Event {
 		medium = route.Medium
 	}
 	if closed, reason := w.isRouteSevered(fromDistrict, destVenue.DistrictID, medium, x.Channel); closed {
-		return []Event{w.record(a, x, "travel_interrupted", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "travel_interrupted", map[string]any{"text": reason})}
 	}
 	escort := w.partyEscortRiskReductionPct(*a, x.Location)
-	a.VenueID = destVenue.ID
-	if destVenue.DistrictID != "" {
-		a.Location = destVenue.DistrictID
-	}
+	tx.MoveActor(a, destVenue.DistrictID, destVenue.ID, a.InsideHouse)
 	modeID := x.Channel
 	if modeID == "" {
 		modeID = "walk"
 	}
-	events := []Event{w.record(a, x, "moved_venue", map[string]any{
+	events := []Event{tx.record(a, x, "moved_venue", map[string]any{
 		"text":            fmt.Sprintf("%s traveled via %s to %s", a.Name, modeID, destVenue.ID),
 		"venue_id":        destVenue.ID,
 		"district":        a.Location,
 		"locomotion_mode": modeID,
 	})}
-	return append(events, w.checkActorTransitHazard(a, x, fromDistrict, a.Location, medium, modeID, escort)...)
+	return append(events, w.checkActorTransitHazard(tx, a, x, fromDistrict, a.Location, medium, modeID, escort)...)
 }
 
-func (w *World) applyIssueDecree(a *Actor, x Action) []Event {
+func (w *World) applyIssueDecree(tx *WorldTx, a *Actor, x Action) []Event {
 	emitFail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	if w.Polities == nil {
 		return emitFail("no polity network configured")
@@ -1539,7 +1536,7 @@ func (w *World) applyIssueDecree(a *Actor, x Action) []Event {
 				amount++
 				remainder--
 			}
-			recipient.Money += int(amount)
+			tx.moveCurrency(recipient, "coins", amount, node.ID, x.Kind)
 			reliefDistributed += amount
 			if amount > 0 {
 				reliefRecipients++
@@ -1551,6 +1548,7 @@ func (w *World) applyIssueDecree(a *Actor, x Action) []Event {
 			amount := perPerson*population + extra
 			remainder -= extra
 			cohort.MoneyPool += amount
+			tx.recordTransfer("transfer_currency", node.ID, cohort.ID, "coins", -amount, x.Kind)
 			reliefDistributed += amount
 			if perPerson > 0 {
 				reliefRecipients += int(population)
@@ -1568,7 +1566,7 @@ func (w *World) applyIssueDecree(a *Actor, x Action) []Event {
 		return emitFail("unsupported decree kind: " + x.Item)
 	}
 
-	a.Energy -= 4
+	tx.setEnergy(a, a.Energy-4, x.Kind)
 	proclamation := x.Text
 	if proclamation == "" {
 		proclamation = fmt.Sprintf("%s promulgated %s decree (%s=%d) for %s", a.Name, kind, embargoTarget, decreeVal, node.Name)
@@ -1586,7 +1584,7 @@ func (w *World) applyIssueDecree(a *Actor, x Action) []Event {
 	node.Decrees = append(node.Decrees, decree)
 	x.FactionID = node.ID
 	observers := w.awakeSamePlaceObservers(*a, a.ID)
-	ev := w.record(a, x, "decree_issued", map[string]any{
+	ev := tx.record(a, x, "decree_issued", map[string]any{
 		"text":               proclamation,
 		"polity_id":          node.ID,
 		"polity_name":        node.Name,
@@ -1600,9 +1598,9 @@ func (w *World) applyIssueDecree(a *Actor, x Action) []Event {
 	return []Event{ev}
 }
 
-func (w *World) applyTransmitMessage(a *Actor, x Action) []Event {
+func (w *World) applyTransmitMessage(tx *WorldTx, a *Actor, x Action) []Event {
 	emitFail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	if len(w.Catalog.CommChannels) == 0 {
 		return emitFail("no communication channels configured in world catalog")
@@ -1667,7 +1665,7 @@ func (w *World) applyTransmitMessage(a *Actor, x Action) []Event {
 		}
 	}
 
-	a.Energy -= ch.EnergyCost
+	tx.setEnergy(a, a.Energy-ch.EnergyCost, x.Kind)
 	x.Channel = ch.ID
 
 	var recipients []*Actor
@@ -1750,7 +1748,7 @@ func (w *World) applyTransmitMessage(a *Actor, x Action) []Event {
 		RootEventID:  root,
 		Statement:    stmtPtr,
 	}
-	a.Memories = appendMemory(a.Memories, senderMem)
+	tx.RecordMemory(a, senderMem)
 
 	deliveredIDs := make([]string, 0, len(recipients))
 	for _, rcpt := range recipients {
@@ -1776,7 +1774,7 @@ func (w *World) applyTransmitMessage(a *Actor, x Action) []Event {
 			RootEventID:  root,
 			Statement:    rcptStmt,
 		}
-		rcpt.Memories = appendMemory(rcpt.Memories, rcptMem)
+		tx.RecordMemory(rcpt, rcptMem)
 		deliveredIDs = append(deliveredIDs, rcpt.ID)
 	}
 	e.Payload["delivered_count"] = len(deliveredIDs)

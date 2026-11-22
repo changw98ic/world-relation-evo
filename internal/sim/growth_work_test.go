@@ -80,7 +80,7 @@ func TestAbsentCaretakerCollectsSignedShareOnce(t *testing.T) {
 	}
 	w.actor("b").Location = "away"
 	before := w.actor("b").Items["grain"]
-	events := w.harvestGrowth(0, g)
+	events := w.harvestGrowth(nil, 0, g)
 	if w.actor("b").Items["grain"] != before || len(w.Growth) != 1 || w.Growth[0].Quantity != 2 || w.Growth[0].SourceGrowthID != 30 {
 		t.Fatal(events)
 	}
@@ -99,7 +99,7 @@ func TestAbsentCaretakerCollectsSignedShareOnce(t *testing.T) {
 	w = lawRestore(t, w)
 	w.Tick++
 	w.actor("b").Location = "home"
-	events = w.harvestGrowth(0, w.Growth[0])
+	events = w.harvestGrowth(nil, 0, w.Growth[0])
 	var delivered int64
 	for _, e := range events {
 		if e.Kind == "harvest_entitled" {

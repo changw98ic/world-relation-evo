@@ -199,6 +199,7 @@ type LifecycleSpec struct {
 	StarvationThreshold       int    `json:"starvation_threshold,omitempty"`
 	StarvationDamage          int    `json:"starvation_damage,omitempty"`
 	MaxEcologicalYieldPct     int    `json:"max_ecological_yield_pct,omitempty"`
+	Ageless                   bool   `json:"ageless,omitempty"`
 }
 
 // EcologySpec configures initial ecological state for an external WorldPack.
@@ -1013,37 +1014,38 @@ func (w *World) stepWorldEnvironment() []Event {
 						}
 					}
 				}
-				wounded, dead, reliefUsed, impactEvents := w.applyDisasterImpactAndRelief(dID, dis, dmgScalePct)
-				actorWounded, actorDead := ecologyActorImpactCounts(impactEvents)
-				events = append(events, impactEvents...)
+				disasterID := w.NextID
+				w.NextID++
 				ev := Event{
-					ID:      w.NextID,
+					ID:      disasterID,
 					Tick:    w.Tick,
 					ActorID: "world",
 					Kind:    "disaster_struck",
 					Action:  Action{Kind: "wait", Location: dID},
 					Payload: map[string]any{
-						"text":           fmt.Sprintf("%s struck %s (infra mitigation %d%%, relief %d %s distributed; %d injured, %d perished)", dis.Name, dID, infraMitigationPct, reliefUsed, dis.ReliefItem, wounded, dead),
 						"district":       dID,
 						"disaster_id":    dis.ID,
 						"disaster_name":  dis.Name,
 						"mitigation_pct": infraMitigationPct,
-						"relief_used":    reliefUsed,
-						"wounded":        wounded,
-						"deaths":         dead,
-						"actor_wounded":  actorWounded,
-						"actor_deaths":   actorDead,
 						"cause":          "disaster",
 					},
 				}
-				w.NextID++
+				wounded, dead, reliefUsed, impactEvents := w.applyDisasterImpactAndRelief(dID, dis, dmgScalePct, ev)
+				actorWounded, actorDead := ecologyActorImpactCounts(impactEvents)
+				ev.Payload["text"] = fmt.Sprintf("%s struck %s (infra mitigation %d%%, relief %d %s distributed; %d injured, %d perished)", dis.Name, dID, infraMitigationPct, reliefUsed, dis.ReliefItem, wounded, dead)
+				ev.Payload["relief_used"] = reliefUsed
+				ev.Payload["wounded"] = wounded
+				ev.Payload["deaths"] = dead
+				ev.Payload["actor_wounded"] = actorWounded
+				ev.Payload["actor_deaths"] = actorDead
 				witnesses := w.distributeAnomalyObservations(ev, dis.ID, "disaster", w.Map.GeoRegionIDForLocation(dID, ""), dID, maxInt(20, dmgScalePct))
 				ev.Payload["witnesses"] = witnesses
 				events = append(events, ev)
+				events = append(events, impactEvents...)
 				for ai := range w.Actors {
 					act := &w.Actors[ai]
 					if !act.Dead && act.Location == dID && act.Task != nil && act.Task.Dormant {
-						events = append(events, w.interruptTaskOnDamage(act, "disaster")...)
+						events = append(events, w.interruptTaskOnDamage(nil, act, "disaster")...)
 					}
 				}
 			}
@@ -1150,7 +1152,7 @@ func (w *World) runCohortInfraRepair(districtID, infraID string, spec Infrastruc
 	return currentCond
 }
 
-func (w *World) applyDisasterImpactAndRelief(districtID string, dis DisasterSpec, dmgScalePct int) (totalWounded, totalDead int, reliefUsed int64, events []Event) {
+func (w *World) applyDisasterImpactAndRelief(districtID string, dis DisasterSpec, dmgScalePct int, source ...Event) (totalWounded, totalDead int, reliefUsed int64, events []Event) {
 	// The existing relief budget is one unit per eight residents. Coverage now
 	// scales continuously from no relief to the configured full 55% reduction.
 	for i := range w.Cohorts {
@@ -1173,7 +1175,7 @@ func (w *World) applyDisasterImpactAndRelief(districtID string, dis DisasterSpec
 		before := append([]Actor(nil), c.Members...)
 		for mi := range c.Members {
 			a := &c.Members[mi]
-			cw, cd, used, ev := w.applyDisasterActorExposure(a, dis, dmgScalePct)
+			cw, cd, used, ev := w.applyDisasterActorExposure(a, dis, dmgScalePct, source...)
 			totalWounded += cw
 			totalDead += cd
 			reliefUsed += used
@@ -1186,7 +1188,7 @@ func (w *World) applyDisasterImpactAndRelief(districtID string, dis DisasterSpec
 		if a.Dead || a.Location != districtID || a.InTransit() {
 			continue
 		}
-		cw, cd, used, ev := w.applyDisasterActorExposure(a, dis, dmgScalePct)
+		cw, cd, used, ev := w.applyDisasterActorExposure(a, dis, dmgScalePct, source...)
 		totalWounded += cw
 		totalDead += cd
 		reliefUsed += used
@@ -1242,7 +1244,7 @@ func (w *World) applyThreatSurge(districtID string, enc EncounterSpec) (wounded,
 
 func (w *World) stepCohortRituals(cal CalendarState) []Event {
 	var events []Event
-	if len(w.Catalog.Rituals) == 0 {
+	if len(w.Catalog.Rituals) == 0 || !w.Catalog.EffectiveEnvironment().Institutions.RitualsEnabled() {
 		return nil
 	}
 	// Locate ritualist / high_priest cohort (or shrine district cohort)
@@ -1294,9 +1296,8 @@ func (w *World) stepCohortRituals(cal CalendarState) []Event {
 			shrineState.LastRitualSeason = seasonTag
 			w.DistrictStates[shrineDist] = shrineState
 
-			// Apply morale boost across all districts & optional threat appeasement
-			for _, dID := range distIDs {
-				ds := w.DistrictStates[dID]
+			// Apply morale boost & optional threat appeasement locally in the priests' district.
+			if ds, ok := w.DistrictStates[shrineDist]; ok {
 				ds.MoraleBonus += rit.MoraleBoost
 				if ds.MoraleBonus > 30 {
 					ds.MoraleBonus = 30
@@ -1309,7 +1310,7 @@ func (w *World) stepCohortRituals(cal CalendarState) []Event {
 						}
 					}
 				}
-				w.DistrictStates[dID] = ds
+				w.DistrictStates[shrineDist] = ds
 			}
 			ev := Event{
 				ID:      w.NextID,
@@ -1335,8 +1336,11 @@ func (w *World) stepCohortRituals(cal CalendarState) []Event {
 		}
 	}
 
-	// 2. Crisis Appeasement Rite when any district suffers an active disaster
+	// 2. Crisis Appeasement Rite when a local or connected district suffers an active disaster
 	for _, dID := range distIDs {
+		if dID != shrineDist && !w.districtsConnected(shrineDist, dID) {
+			continue
+		}
 		ds := w.DistrictStates[dID]
 		if len(ds.ActiveDisasters) == 0 {
 			continue
@@ -1391,7 +1395,26 @@ func (w *World) stepCohortRituals(cal CalendarState) []Event {
 	return events
 }
 
-// stepCohortEncountersAndAccidents resolves daytime workplace accidents (mining, logging, fishing, forging)
+// districtsConnected reports whether two districts share either a direct Road or a direct VenueRoute.
+func (w *World) districtsConnected(a, b string) bool {
+	if a == b {
+		return true
+	}
+	if _, ok := w.Map.RoadBetween(a, b); ok {
+		return true
+	}
+	for _, vr := range w.Map.VenueRoutes {
+		fromV, ok1 := w.Map.VenueByID(vr.FromVenue)
+		toV, ok2 := w.Map.VenueByID(vr.ToVenue)
+		if !ok1 || !ok2 {
+			continue
+		}
+		if (fromV.DistrictID == a && toV.DistrictID == b) || (fromV.DistrictID == b && toV.DistrictID == a) {
+			return true
+		}
+	}
+	return false
+}
 // and wild beast/anomaly encounters during primary resource extraction.
 func (w *World) stepCohortEncountersAndAccidents() []Event {
 	var events []Event
@@ -1573,7 +1596,7 @@ func (w *World) actorHadRecentHazard(a Actor, window int64) bool {
 
 // checkActorCraftAccident evaluates declarative workplace/crafting AccidentSpecs for an individual spotlight Actor.
 // Skill mastery, protective items (SafetyBonusPct), district safety infrastructure, and PowerTier mitigate risk.
-func (w *World) checkActorCraftAccident(a *Actor, x Action, r Recipe) []Event {
+func (w *World) checkActorCraftAccident(tx *WorldTx, a *Actor, x Action, r Recipe) []Event {
 	if a == nil || a.Dead || w.DistrictStates == nil || len(w.Catalog.Accidents) == 0 {
 		return nil
 	}
@@ -1627,15 +1650,15 @@ func (w *World) checkActorCraftAccident(a *Actor, x Action, r Recipe) []Event {
 		dRoll := int(worldHash(w.ID, w.Tick, "actor_accd:"+a.ID+":"+acc.ID+":"+r.ID) % 1000)
 		prevHealth := a.Health
 		if dRoll < leth {
-			a.Health = 0
+			tx.setHealth(a, 0, 0, x.Kind)
 		} else {
-			a.Health = maxInt(0, a.Health-dmg)
+			tx.adjustHealth(a, -dmg, 0, x.Kind)
 		}
 		fatal := a.Health <= 0
 		if !fatal {
 			a.RestUntil = maxInt64(a.RestUntil, w.Tick+16)
 		}
-		ev := w.record(a, x, "workplace_accident", map[string]any{
+		ev := w.recordWithTx(tx, a, x, "workplace_accident", map[string]any{
 			"text":            fmt.Sprintf("%s suffered %s while performing %s in %s (health %d -> %d)", a.Name, acc.Name, r.ID, a.Location, prevHealth, a.Health),
 			"district":        a.Location,
 			"accident_id":     acc.ID,
@@ -1650,7 +1673,7 @@ func (w *World) checkActorCraftAccident(a *Actor, x Action, r Recipe) []Event {
 		})
 		events := []Event{ev}
 		if fatal {
-			events = append(events, w.markDeadIfZero(a, nil, x, "accident", ev)...)
+			events = append(events, w.markDeadIfZeroWithTx(tx, a, nil, x, "accident", ev)...)
 		}
 		return events
 	}
@@ -1659,7 +1682,7 @@ func (w *World) checkActorCraftAccident(a *Actor, x Action, r Recipe) []Event {
 
 // checkActorTransitHazard evaluates cross-district route accidents and roadside wild encounters
 // when an individual spotlight Actor completes inter-district travel.
-func (w *World) checkActorTransitHazard(a *Actor, x Action, fromDistrict, toDistrict, medium, modeID string, escort int) []Event {
+func (w *World) checkActorTransitHazard(tx *WorldTx, a *Actor, x Action, fromDistrict, toDistrict, medium, modeID string, escort int) []Event {
 	if a == nil || a.Dead || w.DistrictStates == nil || fromDistrict == "" || toDistrict == "" || fromDistrict == toDistrict {
 		return nil
 	}
@@ -1728,15 +1751,15 @@ func (w *World) checkActorTransitHazard(a *Actor, x Action, fromDistrict, toDist
 		dRoll := int(worldHash(w.ID, w.Tick, "actor_transitd:"+a.ID+":"+acc.ID+":"+toDistrict) % 1000)
 		prevHealth := a.Health
 		if dRoll < leth {
-			a.Health = 0
+			tx.setHealth(a, 0, 0, x.Kind)
 		} else {
-			a.Health = maxInt(0, a.Health-dmg)
+			tx.adjustHealth(a, -dmg, 0, x.Kind)
 		}
 		fatal := a.Health <= 0
 		if !fatal {
 			a.RestUntil = maxInt64(a.RestUntil, w.Tick+16)
 		}
-		ev := w.record(a, x, "transit_hazard", map[string]any{
+		ev := w.recordWithTx(tx, a, x, "transit_hazard", map[string]any{
 			"text":            fmt.Sprintf("%s encountered %s traveling from %s to %s via %s (health %d -> %d)", a.Name, acc.Name, fromDistrict, toDistrict, medium, prevHealth, a.Health),
 			"from_district":   fromDistrict,
 			"to_district":     toDistrict,
@@ -1753,7 +1776,7 @@ func (w *World) checkActorTransitHazard(a *Actor, x Action, fromDistrict, toDist
 		})
 		events := []Event{ev}
 		if fatal {
-			events = append(events, w.markDeadIfZero(a, nil, x, "accident", ev)...)
+			events = append(events, w.markDeadIfZeroWithTx(tx, a, nil, x, "accident", ev)...)
 		}
 		return events
 	}
@@ -1795,15 +1818,15 @@ func (w *World) checkActorTransitHazard(a *Actor, x Action, fromDistrict, toDist
 		dRoll := int(worldHash(w.ID, w.Tick, "actor_tencd:"+a.ID+":"+enc.ID+":"+toDistrict) % 1000)
 		prevHealth := a.Health
 		if dRoll < leth {
-			a.Health = 0
+			tx.setHealth(a, 0, 0, x.Kind)
 		} else {
-			a.Health = maxInt(0, a.Health-dmg)
+			tx.adjustHealth(a, -dmg, 0, x.Kind)
 		}
 		fatal := a.Health <= 0
 		if !fatal {
 			a.RestUntil = maxInt64(a.RestUntil, w.Tick+16)
 		}
-		ev := w.record(a, x, "wild_encounter", map[string]any{
+		ev := w.recordWithTx(tx, a, x, "wild_encounter", map[string]any{
 			"text":            fmt.Sprintf("%s was ambushed by %s on the road from %s to %s (health %d -> %d)", a.Name, enc.Name, fromDistrict, toDistrict, prevHealth, a.Health),
 			"in_transit":      true,
 			"from_district":   fromDistrict,
@@ -1819,7 +1842,7 @@ func (w *World) checkActorTransitHazard(a *Actor, x Action, fromDistrict, toDist
 		})
 		events := []Event{ev}
 		if fatal {
-			events = append(events, w.markDeadIfZero(a, nil, x, "beast", ev)...)
+			events = append(events, w.markDeadIfZeroWithTx(tx, a, nil, x, "beast", ev)...)
 		}
 		return events
 	}
@@ -1880,9 +1903,9 @@ func (w *World) stepActorOutdoorEncounters() []Event {
 			dRoll := int(worldHash(w.ID, w.Tick, "actor_encd:"+a.ID+":"+enc.ID) % 1000)
 			prevHealth := a.Health
 			if dRoll < leth {
-				a.Health = 0
+				setActorHealthBounded(a, 0, 0)
 			} else {
-				a.Health = maxInt(0, a.Health-dmg)
+				adjustActorHealthBounded(a, -dmg, 0)
 			}
 			fatal := a.Health <= 0
 			actObj := Action{Kind: "wait", Location: a.Location}
@@ -1902,7 +1925,7 @@ func (w *World) stepActorOutdoorEncounters() []Event {
 				events = append(events, w.markDeadIfZero(a, nil, actObj, "beast", ev)...)
 			} else {
 				a.RestUntil = maxInt64(a.RestUntil, w.Tick+16)
-				events = append(events, w.interruptTaskOnDamage(a, "beast")...)
+				events = append(events, w.interruptTaskOnDamage(nil, a, "beast")...)
 			}
 			break
 		}

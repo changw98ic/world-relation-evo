@@ -91,11 +91,22 @@ func (w *World) settleResidentMeals(c *PopulationCohort, edible []string, physio
 			c.DigestedFood += int64(part.Count)
 		}
 		if damageDue {
-			part.Health = max(0, part.Health-starvationDamage(part.Hunger, w.Catalog.Lifecycle, form))
+			setResidentBandHealthBounded(&part, part.Health-starvationDamage(part.Hunger, w.Catalog.Lifecycle, form))
 		}
 		r.HungerAfter, r.HealthAfter, r.NutritionAfter = part.Hunger, part.Health, part.NutritionReserve
 		meals = append(meals, r)
 		if part.Health == 0 {
+			// Return personal items of starved residents to the cohort pool to preserve item conservation.
+			if len(part.Items) > 0 && part.Count > 0 {
+				if c.ItemPool == nil {
+					c.ItemPool = map[string]int64{}
+				}
+				for itemID, qty := range part.Items {
+					if qty > 0 {
+						c.ItemPool[itemID] += int64(qty) * int64(part.Count)
+					}
+				}
+			}
 			dead += part.Count
 			fatalities = append(fatalities, r)
 		} else {

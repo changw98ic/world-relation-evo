@@ -60,6 +60,7 @@ type PopulationCohort struct {
 	IllicitWealth      int64            `json:"illicit_wealth,omitempty"`
 	ProtectedUntilTick int64            `json:"protected_until_tick,omitempty"`
 	ItemPool           map[string]int64 `json:"item_pool,omitempty"`
+	StateSlots         map[string]int   `json:"state_slots,omitempty"`
 	HydratedSeq        int              `json:"hydrated_seq,omitempty"`
 }
 
@@ -73,6 +74,7 @@ func CloneCohort(c PopulationCohort) PopulationCohort {
 	}
 	c.Currencies = cloneInt64Map(c.Currencies)
 	c.ItemPool = cloneInt64Map(c.ItemPool)
+	c.StateSlots = cloneIntMap(c.StateSlots)
 	if c.Members != nil {
 		c.Members = append([]Actor(nil), c.Members...)
 		for i := range c.Members {
@@ -370,11 +372,17 @@ func (w *World) buildStepIndex() *stepIndex {
 }
 
 func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
-	a := w.Actors[actorIdx]
+	return w.buildPerception(w.Actors[actorIdx], actorIdx, idx)
+}
+
+func (w *World) buildPerception(raw Actor, actorIdx int, idx *stepIndex) Perception {
+	a := raw
 	id, history := a.ID, a.Memories
 	a.Memories = nil
 	a = CloneActor(a)
-	a.Memories = history
+	if len(history) > 0 {
+		a.Memories = append([]Memory(nil), history...)
+	}
 	if a.Items == nil {
 		a.Items = map[string]int{}
 	}
@@ -407,13 +415,13 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 	}
 	if idx.districtStates != nil {
 		if ds, ok := idx.districtStates[a.Location]; ok {
-			dsc := CloneDistrictState(ds)
+			dsc := w.sanitizeDistrictStateForActor(a, ds)
 			p.DistrictState = &dsc
 		}
 	}
 
-	if a.InsideHouse != "" {
-		if h, ok := idx.houseByID[a.InsideHouse]; ok {
+	if a.InsideHouse != "" && !a.InTransit() {
+		if h, ok := idx.houseByID[a.InsideHouse]; ok && h.District == a.Location {
 			hc := CloneHouse(h)
 			p.CurrentHouse = &hc
 		}
@@ -430,10 +438,13 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 	p.Polity = buildPolityPerceptionView(p.Map, idx.politiesSnapshot, a)
 	p.KnownTechs = actorKnownTechsFromBook(idx.knowledgeSnapshot, id)
 	p.WorldLaws = cloneIntMap(idx.worldLawsSnapshot)
-	if houses := idx.accessibleByActor[id]; len(houses) > 0 {
-		p.AccessibleHouses = make([]House, len(houses))
-		for i, h := range houses {
-			p.AccessibleHouses[i] = CloneHouse(h)
+	for _, h := range idx.accessibleByActor[id] {
+		if h.District == a.Location && !a.InTransit() {
+			p.AccessibleHouses = append(p.AccessibleHouses, CloneHouse(h))
+		} else {
+			site := h.Site()
+			site.Facilities = append([]string(nil), site.Facilities...)
+			p.KnownHouses = append(p.KnownHouses, site)
 		}
 	}
 	if len(idx.factionsBase) > 0 {
@@ -444,7 +455,7 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 			fv.Requirements = cloneIntMap(fb.Requirements)
 			fv.Joined = idx.factionMembers[fb.ID][id]
 			if i < len(w.Factions) {
-				fv.JoinBlockReason = w.FactionJoinEligibilityReason(a, w.Factions[i])
+				fv.JoinBlockReason = w.PerceivedFactionJoinBlockReason(a, w.Factions[i])
 			}
 			p.Factions[i] = fv
 		}
@@ -469,8 +480,8 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 		}
 		if len(p.Map.Venues) > 0 {
 			p.Roads = nil
-			p.VenueRoutes = w.actorVenueRoutes(a)
 		}
+		p.VenueRoutes = w.actorVenueRoutes(a)
 	}
 
 	if !a.Dead && !a.InTransit() {
@@ -479,9 +490,13 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 			venueBucket = a.VenueID
 		}
 		bucket := idx.placeBuckets[placeKey{location: a.Location, venueID: venueBucket, insideHouse: a.InsideHouse}]
-		if len(bucket) > 1 {
+		peerCount := len(bucket)
+		if actorIdx >= 0 {
+			peerCount--
+		}
+		if peerCount > 0 {
 			important := map[string]int{}
-			if len(bucket)-1 > MaxNearbyView {
+			if peerCount > MaxNearbyView {
 				for _, party := range p.Parties {
 					if ActorHasTag(party.MemberIDs, id) {
 						for _, member := range party.MemberIDs {
@@ -537,6 +552,7 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 				nb.Hobbies = append([]string(nil), nb.Hobbies...)
 				nb.Guilds = append([]string(nil), nb.Guilds...)
 				nb.Skills = cloneIntMap(nb.Skills)
+				nb.Resting = w.Tick < w.Actors[bi].RestUntil
 				p.Nearby = append(p.Nearby, nb)
 			}
 		}
@@ -546,7 +562,7 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 		p.Offers = append([]Offer(nil), offers...)
 	}
 	p.ActiveGoldenFingers = w.goldenFingerViewsFor(p.Self)
-	w.applyPerceptionEvoHintsWithAgreements(&p, idx.agreementsByActor[id])
+	w.projectPerceptionContext(&p, idx.agreementsByActor[id])
 	recallPerceptionMemories(&p)
 	return p
 }
@@ -943,7 +959,7 @@ func (w *World) HydrateActor(cohortID string) (*Actor, error) {
 				c.Members = nil
 			}
 			if c.Population == 0 {
-				w.transferLastCohortAssets(c, &a)
+				w.transferLastCohortAssets(nil, c, &a)
 			}
 			w.Actors = append(w.Actors, a)
 			return &w.Actors[len(w.Actors)-1], nil
@@ -956,9 +972,8 @@ func (w *World) HydrateActor(cohortID string) (*Actor, error) {
 
 	oldPop := int64(anonymous.Population)
 	c.ensureResidents(anonymous.Population)
-	resident := c.Residents[0]
+	resident := c.popHealthyFreeResident()
 	actorID := resident.ID(0)
-	c.moveResidents(nil, 1)
 	c.HydratedSeq++
 	money := int(c.MoneyPool / oldPop)
 	if money < 0 {
@@ -967,6 +982,11 @@ func (w *World) HydrateActor(cohortID string) (*Actor, error) {
 	c.MoneyPool -= int64(money)
 
 	items := map[string]int{}
+	for item, qty := range resident.Items {
+		if qty > 0 {
+			items[item] += qty
+		}
+	}
 	for item, totalQty := range c.ItemPool {
 		share := int(totalQty / oldPop)
 		if share > 0 {
@@ -1122,7 +1142,7 @@ func (w *World) HydrateActor(cohortID string) (*Actor, error) {
 	w.placeResident(&a)
 	w.refreshActor(&a)
 	if c.Population == 0 {
-		w.transferLastCohortAssets(c, &a)
+		w.transferLastCohortAssets(nil, c, &a)
 	}
 	w.Actors = append(w.Actors, a)
 	return &w.Actors[len(w.Actors)-1], nil
@@ -1171,7 +1191,7 @@ func (w *World) DehydrateActor(actorID string) error {
 
 	var target *PopulationCohort
 	for i := range w.Cohorts {
-		if w.Cohorts[i].Profession == profID && w.Cohorts[i].District == a.Location {
+		if w.Cohorts[i].Profession == profID && w.Cohorts[i].District == a.Location && w.Cohorts[i].FormID == a.FormID {
 			target = &w.Cohorts[i]
 			break
 		}
@@ -1189,12 +1209,10 @@ func (w *World) DehydrateActor(actorID string) error {
 			District:   a.Location,
 			FactionID:  prof.Guild,
 			Profession: profID,
+			FormID:     a.FormID,
 			Tier:       tier,
 			ProfLevel:  profLv,
 			Rank:       prof.RankTitle(profLv),
-			AvgEnergy:  a.Energy,
-			AvgHunger:  a.Hunger,
-			AvgThirst:  a.Thirst,
 		})
 		target = &w.Cohorts[len(w.Cohorts)-1]
 	}
@@ -1536,7 +1554,7 @@ func (w *World) runCohortProduction(c *PopulationCohort) []Event {
 	} else {
 		produced = int64(w.Catalog.RecipeYield(Actor{}, *chosen, false))*batches + bonusBatches*int64(chosen.BonusOutput)
 	}
-	w.wearProductionTool("cohort", c.ID, *chosen, batches)
+	w.wearProductionTool(nil, "cohort", c.ID, *chosen, batches)
 	if chosen.ResourcePool != "" {
 		w.drawDistrictResource(c.District, chosen.ResourcePool, batches*int64(maxInt(1, chosen.ResourceDraw)))
 	}
@@ -1632,7 +1650,7 @@ func (w *World) clearRegionalCohortMarket() []Event {
 		if seller.Items[o.Item] == 0 {
 			delete(seller.Items, o.Item)
 		}
-		seller.Money += o.Price
+		w.adjustActorCurrency(seller, "coins", int64(o.Price), false)
 		if buyerCohort.ItemPool == nil {
 			buyerCohort.ItemPool = map[string]int64{}
 		}
@@ -1652,7 +1670,7 @@ func (w *World) clearRegionalCohortMarket() []Event {
 		if tier < 1 {
 			tier = 1
 		}
-		events = append(events, w.grantProfessionXP(seller, act, "peddler", tier*o.Quantity, tier)...)
+		events = append(events, w.grantProfessionXP(nil, seller, act, "peddler", tier*o.Quantity, tier)...)
 	}
 	w.Offers = remainingOffers
 
@@ -2032,7 +2050,7 @@ func (w *World) clearFocalActorCohortTrades() []Event {
 						continue
 					}
 					if c.Population > 0 && c.ItemPool[k] > int64(maxInt(10, c.Population/2)) && c.ItemPool[k] >= int64(sp.BatchQty) {
-						a.Money -= price
+						w.adjustActorCurrency(a, "coins", -int64(price), false)
 						if a.Items == nil {
 							a.Items = map[string]int{}
 						}
@@ -2104,7 +2122,7 @@ func (w *World) clearFocalActorCohortTrades() []Event {
 				if a.Items[k] <= 0 {
 					delete(a.Items, k)
 				}
-				a.Money += price
+				w.adjustActorCurrency(a, "coins", int64(price), false)
 				if buyerCohort.ItemPool == nil {
 					buyerCohort.ItemPool = map[string]int64{}
 				}
@@ -2120,7 +2138,7 @@ func (w *World) clearFocalActorCohortTrades() []Event {
 					"quantity":  sp.BatchQty,
 				}))
 				tier := maxInt(1, sp.Tier)
-				events = append(events, w.grantProfessionXP(a, act, "peddler", tier*sp.BatchQty, tier)...)
+				events = append(events, w.grantProfessionXP(nil, a, act, "peddler", tier*sp.BatchQty, tier)...)
 				break
 			}
 		}
@@ -2153,7 +2171,7 @@ func (w *World) buyLocalCohortRation(a *Actor, itemKeys []string, public bool) (
 			if public {
 				paid = w.debitTreasury(paid, "relief")
 			} else {
-				a.Money -= price
+				w.adjustActorCurrency(a, "coins", -int64(price), false)
 			}
 			seller.MoneyPool += paid
 			seller.ItemPool[item] -= int64(spec.BatchQty)
@@ -2249,16 +2267,18 @@ func (w *World) promoteEligibleCohorts() []Event {
 			if dst == nil {
 				w.Cohorts = append(w.Cohorts, PopulationCohort{
 					ID:         "cohort_" + c.District + "_" + adv.ID,
-					Name:       adv.Name + "群",
+					Name:       adv.Name + " cohort",
 					District:   c.District,
 					FactionID:  adv.Guild,
 					Profession: adv.ID,
+					FormID:     c.FormID,
 					Tier:       adv.Tier,
 					ProfLevel:  1,
 					Rank:       adv.RankTitle(1),
 					AvgEnergy:  c.AvgEnergy,
 					AvgHunger:  c.AvgHunger,
 					ItemPool:   map[string]int64{},
+					StateSlots: cloneIntMap(c.StateSlots),
 				})
 				dst = &w.Cohorts[len(w.Cohorts)-1]
 				// Refresh pointer c after slice append
@@ -2455,7 +2475,7 @@ func (w *World) stepCohortRecuperation() []Event {
 			}
 			if healed > 0 {
 				c.ensureResidents(c.Population)
-				c.updateResidentBandState(healed, func(b ResidentBand) bool { return b.Health < MaxHealth }, func(b *ResidentBand) { b.Health = MaxHealth })
+				c.updateResidentBandState(healed, func(b ResidentBand) bool { return b.Health < MaxHealth }, func(b *ResidentBand) { setResidentBandHealthBounded(b, MaxHealth) })
 				c.Wounded -= healed
 				c.WoundedSick = min(c.WoundedSick, c.Wounded, c.Sick)
 				e := Event{
@@ -2521,33 +2541,132 @@ func (w *World) stepCohortConflicts() []Event {
 func (w *World) stepCohortConflictsAt(district string) []Event {
 	var events []Event
 	clock := ClockAt(w.Tick)
-	findCohort := func(prof string) *PopulationCohort {
-		for i := range w.Cohorts {
-			if w.Cohorts[i].District == district && w.Cohorts[i].Profession == prof && w.Cohorts[i].Population > 0 {
-				if w.isLawCollectorCohort(&w.Cohorts[i]) && !w.cohortHasJurisdiction(&w.Cohorts[i], district) {
-					continue
-				}
-				return &w.Cohorts[i]
-			}
-		}
-		return nil
-	}
+	gov := w.Catalog.EffectiveGovernance()
+	env := w.Catalog.EffectiveEnvironment()
+	inst := env.Institutions
 
-	martial := findCohort("martial_artist")
-	martialMaster := findCohort("martial_master")
-	constables := findCohort("constable")
-	chiefConstables := findCohort("chief_constable")
-	guards := findCohort("guard")
-	captains := findCohort("captain")
-	bandits := findCohort("bandit")
-	banditLeaders := findCohort("bandit_leader")
-	thieves := findCohort("thief")
-	masterThieves := findCohort("master_thief")
-	gangsters := findCohort("gangster")
-	gangBosses := findCohort("gang_boss")
-	peddlers := findCohort("peddler")
-	farmers := findCohort("farmer")
-	woodcutters := findCohort("woodcutter")
+	// Resolve district cohort roles dynamically from Catalog tags & capabilities
+	// so macro conflicts work across any genre (historical, xianxia, sci-fi, wasteland).
+	var (
+		martial, martialMaster      *PopulationCohort
+		constables, chiefConstables *PopulationCohort
+		guards, captains            *PopulationCohort
+		bandits, banditLeaders      *PopulationCohort
+		thieves, masterThieves      *PopulationCohort
+		gangsters, gangBosses       *PopulationCohort
+		peddlers                    *PopulationCohort
+		workers                     []*PopulationCohort
+	)
+	pickHigher := func(cur, cand *PopulationCohort) *PopulationCohort {
+		if cur == nil || cand.EffectivePopulation() > cur.EffectivePopulation() {
+			return cand
+		}
+		return cur
+	}
+	for i := range w.Cohorts {
+		c := &w.Cohorts[i]
+		if c.District != district || c.Population <= 0 {
+			continue
+		}
+		tags, caps := w.cohortEffectiveTagsAndCaps(*c)
+		isEnf := w.Catalog.IsEnforcementTags(tags) || caps["arrest"]
+		isOutlaw := ActorHasTag(tags, gov.OutlawTag) || w.Catalog.IsOutlawTags(tags)
+		isRacket := ActorHasTag(tags, gov.RacketTag) || caps["extort"]
+		if isEnf && !isOutlaw {
+			if !w.cohortHasJurisdiction(c, district) {
+				continue
+			}
+			if c.Tier >= 2 {
+				chiefConstables = pickHigher(chiefConstables, c)
+			} else {
+				constables = pickHigher(constables, c)
+			}
+			continue
+		}
+		if isOutlaw {
+			if isRacket && !caps["raid"] {
+				if c.Tier >= 2 {
+					gangBosses = pickHigher(gangBosses, c)
+				} else {
+					gangsters = pickHigher(gangsters, c)
+				}
+			} else if caps["steal"] && !caps["raid"] && !isRacket {
+				if c.Tier >= 2 {
+					masterThieves = pickHigher(masterThieves, c)
+				} else {
+					thieves = pickHigher(thieves, c)
+				}
+			} else if caps["raid"] {
+				if c.Tier >= 2 {
+					banditLeaders = pickHigher(banditLeaders, c)
+				} else {
+					bandits = pickHigher(bandits, c)
+				}
+			} else if isRacket {
+				if c.Tier >= 2 {
+					gangBosses = pickHigher(gangBosses, c)
+				} else {
+					gangsters = pickHigher(gangsters, c)
+				}
+			} else {
+				if c.Tier >= 2 {
+					masterThieves = pickHigher(masterThieves, c)
+				} else {
+					thieves = pickHigher(thieves, c)
+				}
+			}
+			continue
+		}
+		if ActorHasTag(tags, "martial") || (caps["spar"] && !ActorHasTag(tags, "guard")) {
+			if c.Tier >= 2 {
+				martialMaster = pickHigher(martialMaster, c)
+			} else {
+				martial = pickHigher(martial, c)
+			}
+			continue
+		}
+		if ActorHasTag(tags, "guard") || ActorHasTag(tags, "escort") || ActorHasTag(tags, "security") || (caps["attack"] && !caps["perform_ritual"]) {
+			if c.Tier >= 2 {
+				captains = pickHigher(captains, c)
+			} else {
+				guards = pickHigher(guards, c)
+			}
+			continue
+		}
+		if prof, ok := w.Catalog.ProfessionByID(c.Profession); ok && (prof.TradeMargin || ActorHasTag(tags, "trader")) {
+			peddlers = pickHigher(peddlers, c)
+			continue
+		}
+		workers = append(workers, c)
+	}
+	if martial == nil {
+		martial = martialMaster
+	}
+	if constables == nil {
+		constables = chiefConstables
+	}
+	if guards == nil {
+		guards = captains
+	}
+	if bandits == nil {
+		bandits = banditLeaders
+	}
+	if thieves == nil {
+		thieves = masterThieves
+	}
+	if gangsters == nil {
+		gangsters = gangBosses
+	}
+	var farmers, woodcutters *PopulationCohort
+	if len(workers) > 0 {
+		farmers = workers[0]
+		if len(workers) > 1 {
+			woodcutters = workers[1]
+		} else {
+			woodcutters = workers[0]
+		}
+	}
+	edibleItem := w.resolveEdibleItemID()
 
 	// 1. 08:00 晨间武馆演武切磋 (Morning Martial Hall Sparring — once per day, non-lethal)
 	if clock.Hour == 8 && martial != nil && w.Tick >= martial.RestUntilTick && martial.EffectivePopulation() >= 4 {
@@ -2626,9 +2745,18 @@ func (w *World) stepCohortConflictsAt(district string) []Event {
 				target.MoneyPool -= lootCoins
 				bandits.MoneyPool += lootCoins
 			}
-			lootItem := "food"
-			if target.Profession == "woodcutter" && target.ItemPool["timber"] >= succeedBatches*6 {
-				lootItem = "timber"
+			lootItem := edibleItem
+			if lootItem == "" || target.ItemPool[lootItem] <= 0 {
+				keys := make([]string, 0, len(target.ItemPool))
+				for k, q := range target.ItemPool {
+					if q > 0 {
+						keys = append(keys, k)
+					}
+				}
+				sort.Strings(keys)
+				if len(keys) > 0 {
+					lootItem = keys[0]
+				}
 			}
 			lootQty := succeedBatches * 6
 			if lootQty > target.ItemPool[lootItem]/30 {
@@ -2740,15 +2868,16 @@ func (w *World) stepCohortConflictsAt(district string) []Event {
 			thieves.MoneyPool += stolenCoins
 		}
 		stolenQty := theftBatches / 2
-		if stolenQty > peddlers.ItemPool["food"]/80 {
-			stolenQty = peddlers.ItemPool["food"] / 80
+		if edibleItem == "" || stolenQty > peddlers.ItemPool[edibleItem]/80 {
+			if edibleItem == "" {
+				stolenQty = 0
+			} else {
+				stolenQty = peddlers.ItemPool[edibleItem] / 80
+			}
 		}
 		if stolenQty > 0 {
-			peddlers.ItemPool["food"] -= stolenQty
-			if thieves.ItemPool == nil {
-				thieves.ItemPool = map[string]int64{}
-			}
-			thieves.ItemPool["food"] += stolenQty
+			w.adjustCohortItem(peddlers, edibleItem, -stolenQty, false)
+			w.adjustCohortItem(thieves, edibleItem, stolenQty, false)
 		}
 		if thieves.Jailed+thieves.Wounded > thieves.Population/3 {
 			thieves.RestUntilTick = w.Tick + 48
@@ -2759,9 +2888,9 @@ func (w *World) stepCohortConflictsAt(district string) []Event {
 			ActorID:  thieves.ID,
 			TargetID: peddlers.ID,
 			Kind:     "cohort_stolen",
-			Action:   Action{Kind: "steal", TargetID: peddlers.ID, Item: "food", Quantity: int(stolenQty), Price: int(stolenCoins)},
+			Action:   Action{Kind: "steal", TargetID: peddlers.ID, Item: edibleItem, Quantity: int(stolenQty), Price: int(stolenCoins)},
 			Payload: map[string]any{
-				"text":              fmt.Sprintf("%s committed %d street thefts in %s (%d coins, %d food stolen; %d thieves beaten & %d jailed; gang_protected=%v)", thieves.Name, theftBatches, thieves.District, stolenCoins, stolenQty, woundedThieves, jailedThieves, protectedByGang),
+				"text":              fmt.Sprintf("%s committed %d street thefts in %s (%d coins, %d %s stolen; %d thieves beaten & %d jailed; gang_protected=%v)", thieves.Name, theftBatches, thieves.District, stolenCoins, stolenQty, edibleItem, woundedThieves, jailedThieves, protectedByGang),
 				"thief_cohort":      thieves.ID,
 				"victim_cohort":     peddlers.ID,
 				"batches":           theftBatches,
@@ -2778,8 +2907,8 @@ func (w *World) stepCohortConflictsAt(district string) []Event {
 		events = append(events, w.addCohortXP(masterThieves, 4, 2)...)
 	}
 
-	// 4. 21:00 夜间帮派堂口争抢保护费地盘火并 (Nighttime Underworld Gang Turf War — followed by multi-day recuperation!)
-	if clock.Hour == 21 && gangsters != nil && w.Tick >= gangsters.RestUntilTick &&
+	// 4. 21:00 Nighttime Underworld Turf War — followed by multi-day recuperation!
+	if clock.Hour == 21 && inst.RacketeeringEnabled() && gangsters != nil && w.Tick >= gangsters.RestUntilTick &&
 		gangsters.EffectivePopulation() >= 4 && gangsters.EffectivePopulation()*10 >= gangsters.Population*7 {
 		rival := bandits
 		if (w.Tick/TicksPerDay)%2 == 0 && martial != nil && martial.EffectivePopulation() >= 4 {
@@ -2842,8 +2971,8 @@ func (w *World) stepCohortConflictsAt(district string) []Event {
 		}
 	}
 
-	// 5. 14:00 午后府衙联合巡守缉盗剿匪 (Daily Prefecture Yamen Sweep — blunted if outlaws bribed corrupt patrols!)
-	if clock.Hour == 14 && constables != nil && w.Tick >= constables.RestUntilTick && constables.EffectivePopulation() >= 3 {
+	// 5. 14:00 Afternoon Law-Enforcement Sweep — blunted if outlaws bribed corrupt patrols!
+	if clock.Hour == 14 && inst.EnforcementEnabled() && constables != nil && w.Tick >= constables.RestUntilTick && constables.EffectivePopulation() >= 3 {
 		var outlaw *PopulationCohort
 		switch int(w.Tick/TicksPerDay) % 3 {
 		case 0:
@@ -2883,14 +3012,16 @@ func (w *World) stepCohortConflictsAt(district string) []Event {
 				}
 			}
 			writNeed := int64(maxInt(1, patrolSize/8))
-			if constables.ItemPool["bounty_writ"] >= writNeed {
-				w.adjustCohortItem(constables, "bounty_writ", -writNeed, true)
+			if writ := env.EnforcementItem; writ != "" && constables.ItemPool[writ] >= writNeed {
+				w.adjustCohortItem(constables, writ, -writNeed, true)
 				patrolSize += patrolSize / 6
 			}
 
 			capturedTarget := maxInt(1, patrolSize/4)
 			var outlawWoundedReq, outlawDeadReq, lawWoundedReq, lawDeadReq int
-			if outlaw.Profession == "thief" {
+			outlawTags, outlawCaps := w.cohortEffectiveTagsAndCaps(*outlaw)
+			isStealthOutlaw := outlawCaps["steal"] && !outlawCaps["raid"] && !ActorHasTag(outlawTags, gov.RacketTag)
+			if isStealthOutlaw {
 				outlawWoundedReq = maxInt(1, patrolSize/12)
 				lawWoundedReq = patrolSize / 30
 			} else {

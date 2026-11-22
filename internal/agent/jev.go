@@ -30,33 +30,54 @@ type Jev struct {
 // https://docs.typesafe.ai/primitives/choice
 const jevChoiceLimit = 255
 
-func (j Jev) Select(ctx context.Context, p sim.Perception, options []Option) (choice string, err error) {
+func (j Jev) Select(ctx context.Context, p sim.Perception, options []Option) (string, error) {
+	intent, err := j.selectCandidates(ctx, p, optionsToCandidates(p.Catalog, options), false)
+	return intent.CandidateID, err
+}
+
+func (j Jev) selectCandidates(ctx context.Context, p sim.Perception, candidates []sim.Candidate, rulebookMatched bool) (intent sim.ActionIntent, err error) {
 	defer func() {
 		err = recordModelError(j.Trace, "jev_error", p, j.Endpoint, j.APIKey, err)
 	}()
-	if len(options) == 0 {
-		return "", fmt.Errorf("Jev choice requires at least one option")
+	if len(candidates) == 0 {
+		return sim.ActionIntent{}, fmt.Errorf("Jev choice requires at least one option")
 	}
+	if advisor := j.RulebookAdvisor; advisor != nil && advisor.Rulebook != nil {
+		advisor.mu.Lock()
+		advisor.observePerceptionLocked(p)
+		advisor.mu.Unlock()
+		if !rulebookMatched {
+			candidates = append([]sim.Candidate(nil), candidates...)
+			annotateCandidatesWithRulebook(p, advisor.Rulebook, candidatesToOptions(candidates), candidates)
+		}
+	}
+	options := candidatesToOptions(candidates)
 	var rulebookGuidance []string
-	if j.RulebookAdvisor != nil {
-		options, rulebookGuidance = j.RulebookAdvisor.EnrichOptionsForJev(p, options)
+	for i, candidate := range candidates {
+		if len(candidate.RuleIDs) > 0 && candidate.RuleReason != "" {
+			tag := "Rulebook " + candidate.RuleReason
+			options[i].Label += " [" + tag + "]"
+			if len(rulebookGuidance) < 8 {
+				rulebookGuidance = append(rulebookGuidance, fmt.Sprintf("%s => %s", candidate.ID, tag))
+			}
+		}
 	}
 	criteria := make(map[string]string, len(options))
 	for _, o := range options {
 		if o.ID == "" {
-			return "", fmt.Errorf("Jev option has empty ID")
+			return sim.ActionIntent{}, fmt.Errorf("Jev option has empty ID")
 		}
 		if _, exists := criteria[o.ID]; exists {
-			return "", fmt.Errorf("duplicate Jev option ID %q", o.ID)
+			return sim.ActionIntent{}, fmt.Errorf("duplicate Jev option ID %q", o.ID)
 		}
 		action, err := json.Marshal(o.Action)
 		if err != nil {
-			return "", err
+			return sim.ActionIntent{}, err
 		}
 		criteria[o.ID] = o.Label + "; system-defined action: " + string(action)
 	}
 	if j.APIKey == "" {
-		return "", fmt.Errorf("Jev API key is required")
+		return sim.ActionIntent{}, fmt.Errorf("Jev API key is required")
 	}
 	p.Self.Plan = sim.ClonePersonalPlan(p.Self.Plan)
 	sim.SyncActorPlan(&p.Self, p.Tick, p.Catalog)
@@ -108,7 +129,7 @@ func (j Jev) Select(ctx context.Context, p sim.Perception, options []Option) (ch
 		}
 		selected, err := j.selectChoice(ctx, p, groupCriteria, instructions+" This is a grouping step: choose the group containing the best next action. All members are listed. The group itself is never executed; a following question selects its concrete action.", "group")
 		if err != nil {
-			return "", err
+			return sim.ActionIntent{}, err
 		}
 		remaining = members[selected]
 	}
@@ -118,19 +139,16 @@ func (j Jev) Select(ctx context.Context, p sim.Perception, options []Option) (ch
 	}
 	chosen, err := j.selectChoice(ctx, p, leafCriteria, instructions, "action")
 	if err != nil {
-		return "", err
+		return sim.ActionIntent{}, err
+	}
+	candidate, ok := findCandidateByID(candidates, chosen)
+	if !ok {
+		return sim.ActionIntent{}, fmt.Errorf("Jev chose unknown candidate %q", chosen)
 	}
 	if j.RulebookAdvisor != nil {
-		var basisID int64
-		for _, option := range remaining {
-			if option.ID == chosen {
-				basisID = option.Action.BasisEventID
-				break
-			}
-		}
-		j.RulebookAdvisor.SetLastTriggerEventID(p.Self.ID, basisID)
+		j.RulebookAdvisor.SetLastTriggerEventID(p.Self.ID, candidate.BasisEventID)
 	}
-	return chosen, nil
+	return candidate.Intent, nil
 }
 
 // LastTriggerEventID returns the causal trigger event ID recorded for actorID when Jev uses RulebookAdvisor.

@@ -26,7 +26,7 @@ func TestMentorshipBondFormationAndProtectiveVendetta(t *testing.T) {
 	mentor.Trust[killer.ID] = 0
 
 	// 1. Teaching a skill establishes a formal MentorshipBond and emits mentorship_formed.
-	evs := w.applyTeachSkill(mentor, Action{Kind: "teach_knowledge", SkillID: "sword_art", TargetID: apprentice.ID}, apprentice)
+	evs := w.applyTeachSkill(w.BeginTx(mentor.ID, ActionIntent{}), mentor, Action{Kind: "teach_knowledge", SkillID: "sword_art", TargetID: apprentice.ID}, apprentice)
 	foundFormed := false
 	for _, ev := range evs {
 		if ev.Kind == "mentorship_formed" {
@@ -42,7 +42,7 @@ func TestMentorshipBondFormationAndProtectiveVendetta(t *testing.T) {
 
 	// 2. Subsequent lesson increments Lessons without duplicating the bond.
 	mentor.Energy = 90
-	w.applyTeachSkill(mentor, Action{Kind: "teach_knowledge", SkillID: "sword_art", TargetID: apprentice.ID}, apprentice)
+	w.applyTeachSkill(w.BeginTx(mentor.ID, ActionIntent{}), mentor, Action{Kind: "teach_knowledge", SkillID: "sword_art", TargetID: apprentice.ID}, apprentice)
 	if len(w.Relations.Mentorships) != 1 || w.Relations.Mentorships[0].Lessons != 2 {
 		t.Fatalf("expected single MentorshipBond with Lessons=2, got %+v", w.Relations.Mentorships)
 	}

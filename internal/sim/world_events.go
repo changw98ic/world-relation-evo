@@ -331,6 +331,39 @@ func (w *World) TriggerWorldEvent(specID, districtID string) []Event {
 			}
 			events = append(events, impactEvs...)
 		}
+		// Apply proportional shock casualties to co-district PopulationCohorts (cross-LOD parity).
+		for ci := range w.Cohorts {
+			c := &w.Cohorts[ci]
+			anonPop := w.anonymousCohort(*c).Population
+			if anonPop <= 0 || c.District != districtID {
+				continue
+			}
+			// Respect district-anchored barriers reducing shock casualties.
+			barrierMit := 0
+			for ei := range w.ActiveEffects {
+				eff := w.ActiveEffects[ei]
+				if (eff.ExpiresTick == 0 || w.Tick < eff.ExpiresTick) &&
+					eff.Anchor.Kind == "district" && eff.Anchor.ID == districtID &&
+					eff.AbsorbDamageWithIntegrity && eff.Integrity > 0 {
+					barrierMit = 60
+					break
+				}
+			}
+			effPermille := (spec.CasualtyPermille * (100 - barrierMit)) / 100
+			if effPermille <= 0 {
+				continue
+			}
+			estWounded := (anonPop * effPermille) / 1000
+			estDead := (anonPop * effPermille) / 10000
+			if estWounded == 0 && effPermille >= 50 && anonPop >= 20 {
+				estWounded = 1
+			}
+			if estWounded > 0 || estDead > 0 {
+				cw, cd, _ := w.applyCohortCasualtiesWithCause(c, estWounded, estDead, 0, cause)
+				wounded += cw
+				dead += cd
+			}
+		}
 	}
 	ev.Payload["wounded"], ev.Payload["deaths"] = wounded, dead
 	// 4. Cascade regional geo-anomaly when a terrain/geo world event erupts in a mapped GeoRegion.
@@ -405,7 +438,7 @@ func (w *World) distributeWorldEventObservations(ev Event, active ActiveWorldEve
 							break
 						}
 					}
-					if !granted || (indoor && !spec.PenetratesIndoor && encShielding > spec.PenetrationPower) {
+					if !granted || (indoor && (!spec.PenetratesIndoor || encShielding > spec.PenetrationPower)) {
 						continue
 					}
 					modality = spec.ID
@@ -435,16 +468,16 @@ func (w *World) distributeWorldEventObservations(ev Event, active ActiveWorldEve
 			Text:        fmt.Sprintf("Witnessed %s (%s) at %s via %s", active.Name, active.Category, active.DistrictID, modality),
 			Observation: &obs,
 		}
-		a.Memories = appendMemory(a.Memories, mem)
+		appendActorMemory(a, mem)
 		witnessIDs = append(witnessIDs, a.ID)
 	}
 	return witnessIDs
 }
 
 // applyClaimWorldEvent lets an outdoor co-located actor claim an unclaimed artifact_emergence world event.
-func (w *World) applyClaimWorldEvent(a *Actor, x Action) []Event {
+func (w *World) applyClaimWorldEvent(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	if a.InsideHouse != "" {
 		return fail("must step outdoors to claim world event discovery")
@@ -477,13 +510,13 @@ func (w *World) applyClaimWorldEvent(a *Actor, x Action) []Event {
 	if ev.RequiredPowerTier > 0 && w.Catalog.ActorPowerTier(*a) < ev.RequiredPowerTier {
 		return fail(fmt.Sprintf("requires power tier >= %d to claim %s", ev.RequiredPowerTier, ev.Name))
 	}
-	a.Energy -= 8
+	tx.setEnergy(a, a.Energy-8, x.Kind)
 	ev.ClaimedBy = a.ID
 	if ev.RewardItem != "" && ev.RewardQty > 0 {
-		w.adjustActorItem(a, ev.RewardItem, ev.RewardQty, true)
+		tx.ProduceOrConsumeItem(a, ev.RewardItem, ev.RewardQty, x.Kind)
 	}
 	if ev.RewardCoins > 0 {
-		w.adjustActorCurrency(a, "coins", int64(ev.RewardCoins), true)
+		tx.MintOrBurnCurrency(a, "coins", int64(ev.RewardCoins), x.Kind)
 	}
 	obs := Observation{
 		Kind:      "world_event_claimed",
@@ -509,10 +542,10 @@ func (w *World) applyClaimWorldEvent(a *Actor, x Action) []Event {
 	}
 	claimPayload["root_event_id"] = ev.RootEventID
 	claimPayload["cause_event_id"] = ev.RootEventID
-	claimEv := w.record(a, x, "world_event_claimed", claimPayload, witnesses...)
+	claimEv := tx.record(a, x, "world_event_claimed", claimPayload, witnesses...)
 	outEvs := []Event{claimEv}
 	if ev.RewardCoins > 0 {
-		outEvs = append(outEvs, w.settlePartyRewardSplit(a, ev.RewardCoins, claimEv)...)
+		outEvs = append(outEvs, w.settlePartyRewardSplit(tx, a, ev.RewardCoins, claimEv)...)
 	}
 	return outEvs
 }

@@ -210,9 +210,9 @@ func (w *World) CanResearchTech(a Actor, tech TechSpec) (bool, string) {
 	return CanResearchTechWithKnown(w.Catalog, a, tech, w.ActorKnownTechs(a.ID))
 }
 
-func (w *World) applyResearchTech(a *Actor, x Action) []Event {
+func (w *World) applyResearchTech(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	if x.TechID == "" {
 		return fail("research_tech requires tech_id")
@@ -224,9 +224,10 @@ func (w *World) applyResearchTech(a *Actor, x Action) []Event {
 	if can, reason := w.CanResearchTech(*a, tech); !can {
 		return fail(reason)
 	}
-	a.Energy -= tech.ResearchEnergyCost
-	for itemID, qty := range tech.ResearchInputs {
-		w.adjustActorItem(a, itemID, -qty, true)
+	tx.setEnergy(a, a.Energy-tech.ResearchEnergyCost, x.Kind)
+	for _, itemID := range sortedProductionKeys(tech.ResearchInputs) {
+		qty := tech.ResearchInputs[itemID]
+		tx.ProduceOrConsumeItem(a, itemID, -qty, x.Kind)
 	}
 	ticks := tech.ResearchTicks
 	if ticks < 1 {
@@ -234,27 +235,27 @@ func (w *World) applyResearchTech(a *Actor, x Action) []Event {
 	}
 	task := Task{Action: x, TotalTicks: ticks, Remaining: ticks - 1, StartedTick: w.Tick}
 	if task.Remaining <= 0 {
-		return w.finishTask(a, task)
+		return w.finishTaskWithTx(tx, a, task)
 	}
 	a.Task = &task
-	return []Event{w.record(a, x, "task_started", map[string]any{
+	return []Event{tx.record(a, x, "task_started", map[string]any{
 		"text":            fmt.Sprintf("%s began researching %s (%d ticks)", a.Name, tech.Name, ticks),
 		"tech_id":         tech.ID,
 		"remaining_ticks": task.Remaining,
 	})}
 }
 
-func (w *World) finishResearchTech(a *Actor, t Task) []Event {
+func (w *World) finishResearchTech(tx *WorldTx, a *Actor, t Task) []Event {
 	x := t.Action
 	tech, ok := w.Catalog.Techs[x.TechID]
 	if !ok {
 		return nil
 	}
-	return w.unlockTechForActor(a, x, tech)
+	return w.unlockTechForActor(tx, a, x, tech)
 }
 
 // unlockTechForActor records personal discovery/unlock of tech in KnowledgeBook and emits tech_discovered.
-func (w *World) unlockTechForActor(a *Actor, x Action, tech TechSpec) []Event {
+func (w *World) unlockTechForActor(tx *WorldTx, a *Actor, x Action, tech TechSpec) []Event {
 	kb := w.ensureKnowledge()
 	if kb.Records == nil {
 		kb.Records = make(map[string]*KnowledgeRecord)
@@ -287,7 +288,7 @@ func (w *World) unlockTechForActor(a *Actor, x Action, tech TechSpec) []Event {
 		Location:  a.Location,
 		Quantity:  1,
 	}
-	ev := w.record(a, x, "tech_discovered", map[string]any{
+	ev := tx.record(a, x, "tech_discovered", map[string]any{
 		"text":          fmt.Sprintf("%s discovered %s (%s)", a.Name, tech.Name, tech.ID),
 		"tech_id":       tech.ID,
 		"tech_name":     tech.Name,
@@ -297,12 +298,12 @@ func (w *World) unlockTechForActor(a *Actor, x Action, tech TechSpec) []Event {
 	return []Event{ev}
 }
 
-func (w *World) applyTeachKnowledge(a *Actor, x Action, b *Actor) []Event {
+func (w *World) applyTeachKnowledge(tx *WorldTx, a *Actor, x Action, b *Actor) []Event {
 	fail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	if x.TechID == "" && x.SkillID != "" {
-		return w.applyTeachSkill(a, x, b)
+		return w.applyTeachSkill(tx, a, x, b)
 	}
 	if x.TechID == "" {
 		return fail("teach_knowledge requires tech_id or skill_id")
@@ -317,7 +318,7 @@ func (w *World) applyTeachKnowledge(a *Actor, x Action, b *Actor) []Event {
 	if b == nil || b.ID == a.ID || b.Dead || w.Tick < b.JailedUntil {
 		return fail("student is unavailable")
 	}
-	if b.Task != nil && b.Task.Action.Kind == "sleep" {
+	if b.Task != nil && (b.Task.Action.Kind == "sleep" || b.Task.Dormant) {
 		return fail("student is asleep")
 	}
 	if w.KnowsTech(b.ID, tech.ID) {
@@ -374,7 +375,7 @@ func (w *World) applyTeachKnowledge(a *Actor, x Action, b *Actor) []Event {
 		if !w.communicationRangeAllows(*a, *b, ch.RangeKm) {
 			return fail("student is outside channel range or distance is unavailable for " + ch.ID)
 		}
-		a.Energy -= ch.EnergyCost
+		tx.setEnergy(a, a.Energy-ch.EnergyCost, x.Kind)
 		usedChannel = ch.ID
 	}
 
@@ -393,8 +394,8 @@ func (w *World) applyTeachKnowledge(a *Actor, x Action, b *Actor) []Event {
 
 	rec := w.Knowledge.Records[tech.ID]
 	rec.KnownActors = appendUnique(rec.KnownActors, b.ID)
-	a.Trust[b.ID]++
-	b.Trust[a.ID]++
+	tx.MutateTrust(a, b.ID, 1)
+	tx.MutateTrust(b, a.ID, 1)
 
 	msgText := x.Text
 	if msgText == "" {
@@ -410,7 +411,7 @@ func (w *World) applyTeachKnowledge(a *Actor, x Action, b *Actor) []Event {
 			Location:  a.Location,
 			Quantity:  1,
 		}
-		ev := w.record(a, x, "knowledge_taught", map[string]any{
+		ev := tx.record(a, x, "knowledge_taught", map[string]any{
 			"text":          msgText,
 			"tech_id":       tech.ID,
 			"tech_name":     tech.Name,
@@ -419,7 +420,7 @@ func (w *World) applyTeachKnowledge(a *Actor, x Action, b *Actor) []Event {
 			"discoverer_id": rec.DiscovererID,
 			"observation":   obs,
 		}, b)
-		return append([]Event{ev}, w.ensureRelations().RecordMentorship(w, a, b, tech.ID)...)
+		return append([]Event{ev}, w.ensureRelations().recordMentorshipWithTx(tx, w, a, b, tech.ID)...)
 	}
 
 	// Remote channel instruction records Channel + Statement and never fabricates an Observation on student.
@@ -477,7 +478,7 @@ func (w *World) applyTeachKnowledge(a *Actor, x Action, b *Actor) []Event {
 		RootEventID:  root,
 		Statement:    &stmt,
 	}
-	a.Memories = appendMemory(a.Memories, teacherMem)
+	tx.RecordMemory(a, teacherMem)
 
 	studentStmt := stmt
 	studentMem := Memory{
@@ -494,14 +495,14 @@ func (w *World) applyTeachKnowledge(a *Actor, x Action, b *Actor) []Event {
 		RootEventID:  root,
 		Statement:    &studentStmt,
 	}
-	b.Memories = appendMemory(b.Memories, studentMem)
+	tx.RecordMemory(b, studentMem)
 	w.ObserveContinuity(e)
-	return append([]Event{e}, w.ensureRelations().RecordMentorship(w, a, b, tech.ID)...)
+	return append([]Event{e}, w.ensureRelations().recordMentorshipWithTx(tx, w, a, b, tech.ID)...)
 }
 
-func (w *World) applyTeachSkill(a *Actor, x Action, b *Actor) []Event {
+func (w *World) applyTeachSkill(tx *WorldTx, a *Actor, x Action, b *Actor) []Event {
 	fail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	skill, ok := w.Catalog.Skills[x.SkillID]
 	if !ok {
@@ -514,7 +515,7 @@ func (w *World) applyTeachSkill(a *Actor, x Action, b *Actor) []Event {
 	if b == nil || b.ID == a.ID || b.Dead || w.Tick < b.JailedUntil {
 		return fail("student is unavailable")
 	}
-	if b.Task != nil && b.Task.Action.Kind == "sleep" {
+	if b.Task != nil && (b.Task.Action.Kind == "sleep" || b.Task.Dormant) {
 		return fail("student is asleep")
 	}
 	studentLv := b.Skills[skill.ID]
@@ -527,11 +528,11 @@ func (w *World) applyTeachSkill(a *Actor, x Action, b *Actor) []Event {
 	if a.Energy < 4 {
 		return fail("insufficient energy to mentor skill " + skill.ID)
 	}
-	a.Energy -= 4
-	a.Trust[b.ID]++
-	b.Trust[a.ID] += 2
+	tx.setEnergy(a, a.Energy-4, x.Kind)
+	tx.MutateTrust(a, b.ID, 1)
+	tx.MutateTrust(b, a.ID, 2)
 	xpGain := 12 + teacherLv*2
-	skillEvents := w.grantSkillXP(b, x, skill.ID, xpGain)
+	skillEvents := w.grantSkillXP(tx, b, x, skill.ID, xpGain)
 	newLv := b.Skills[skill.ID]
 	msgText := x.Text
 	if msgText == "" {
@@ -545,7 +546,7 @@ func (w *World) applyTeachSkill(a *Actor, x Action, b *Actor) []Event {
 		Location:  a.Location,
 		Quantity:  newLv,
 	}
-	ev := w.record(a, x, "knowledge_taught", map[string]any{
+	ev := tx.record(a, x, "knowledge_taught", map[string]any{
 		"text":                msgText,
 		"skill_id":            skill.ID,
 		"skill_name":          skill.Name,
@@ -557,7 +558,7 @@ func (w *World) applyTeachSkill(a *Actor, x Action, b *Actor) []Event {
 		"observation":         obs,
 	}, b)
 	out := append([]Event{ev}, skillEvents...)
-	return append(out, w.ensureRelations().RecordMentorship(w, a, b, skill.ID)...)
+	return append(out, w.ensureRelations().recordMentorshipWithTx(tx, w, a, b, skill.ID)...)
 }
 
 func (w *World) facilityAdoptionSiteFailure(a Actor, x Action) string {
@@ -587,9 +588,9 @@ func (w *World) facilityAdoptionSiteFailure(a Actor, x Action) string {
 	return ""
 }
 
-func (w *World) applyAdoptFacility(a *Actor, x Action) []Event {
+func (w *World) applyAdoptFacility(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	if x.TechID == "" {
 		return fail("adopt_facility requires tech_id")
@@ -647,40 +648,50 @@ func (w *World) applyAdoptFacility(a *Actor, x Action) []Event {
 	if a.Energy < tech.AdoptEnergyCost {
 		return fail("insufficient energy to adopt facility " + tech.ID)
 	}
-	for itemID, qty := range tech.AdoptInputs {
+	for _, itemID := range sortedProductionKeys(tech.AdoptInputs) {
+		qty := tech.AdoptInputs[itemID]
 		if a.Items[itemID] < qty {
 			return fail(fmt.Sprintf("adopting %s requires %d %s", tech.ID, qty, itemID))
 		}
 	}
-	a.Energy -= tech.AdoptEnergyCost
-	for itemID, qty := range tech.AdoptInputs {
-		w.adjustActorItem(a, itemID, -qty, true)
+	tx.setEnergy(a, a.Energy-tech.AdoptEnergyCost, x.Kind)
+	var prepaidItems map[string]int
+	for _, itemID := range sortedProductionKeys(tech.AdoptInputs) {
+		qty := tech.AdoptInputs[itemID]
+		if qty > 0 {
+			if prepaidItems == nil {
+				prepaidItems = map[string]int{}
+			}
+			prepaidItems[itemID] += qty
+		}
+		tx.ProduceOrConsumeItem(a, itemID, -qty, x.Kind)
 	}
 
 	ticks := tech.AdoptTicks
 	if ticks < 1 {
 		ticks = 1
 	}
-	task := Task{Action: x, TotalTicks: ticks, Remaining: ticks - 1, StartedTick: w.Tick}
+	task := Task{Action: x, TotalTicks: ticks, Remaining: ticks - 1, StartedTick: w.Tick, PrepaidItems: prepaidItems}
 	if task.Remaining <= 0 {
-		return w.finishTask(a, task)
+		return w.finishTaskWithTx(tx, a, task)
 	}
 	a.Task = &task
 	siteLabel := targetVenueID
 	if targetHouseID != "" {
 		siteLabel = targetHouseID
 	}
-	return []Event{w.record(a, x, "task_started", map[string]any{
+	return []Event{tx.record(a, x, "task_started", map[string]any{
 		"text":            fmt.Sprintf("%s began constructing %s at %s (%d ticks)", a.Name, tech.Name, siteLabel, ticks),
 		"tech_id":         tech.ID,
 		"remaining_ticks": task.Remaining,
 	})}
 }
 
-func (w *World) finishAdoptFacility(a *Actor, t Task) []Event {
+func (w *World) finishAdoptFacility(tx *WorldTx, a *Actor, t Task) []Event {
 	x := t.Action
 	if reason := w.facilityAdoptionSiteFailure(*a, x); reason != "" {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		w.refundTaskPrepayments(tx, a, t)
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	tech, ok := w.Catalog.Techs[x.TechID]
 	if !ok {
@@ -738,7 +749,7 @@ func (w *World) finishAdoptFacility(a *Actor, t Task) []Event {
 		Location:  a.Location,
 		Quantity:  1,
 	}
-	ev := w.record(a, x, "facility_adopted", map[string]any{
+	ev := tx.record(a, x, "facility_adopted", map[string]any{
 		"text":          fmt.Sprintf("%s adopted %s (%s) at %s", a.Name, tech.Name, facilityName, siteID),
 		"tech_id":       tech.ID,
 		"tech_name":     tech.Name,
@@ -985,10 +996,10 @@ func (w *World) distributeAmbientShiftObservations(ev Event, regID, siteID, fiel
 	witnesses := 0
 	for i := range w.Actors {
 		a := &w.Actors[i]
-		if a.Dead || w.Tick < a.JailedUntil {
+		if a.Dead || w.Tick < a.JailedUntil || a.InTransit() {
 			continue
 		}
-		if a.Task != nil && a.Task.Action.Kind == "sleep" {
+		if a.Task != nil && (a.Task.Action.Kind == "sleep" || a.Task.Dormant) {
 			continue
 		}
 		actorRegID := w.Map.GeoRegionIDForLocation(a.Location, a.VenueID)
@@ -1021,7 +1032,7 @@ func (w *World) distributeAmbientShiftObservations(ev Event, regID, siteID, fiel
 					if !granted {
 						continue
 					}
-					if indoor && !spec.PenetratesIndoor && encShielding > spec.PenetrationPower {
+					if indoor && (!spec.PenetratesIndoor || encShielding > spec.PenetrationPower) {
 						continue
 					}
 					modality = spec.ID
@@ -1053,7 +1064,7 @@ func (w *World) distributeAmbientShiftObservations(ev Event, regID, siteID, fiel
 			Text:        fmt.Sprintf("Perceived %s shift in %s (%d -> %d via %s)", field, regID, prevVal, newVal, modality),
 			Observation: &obs,
 		}
-		a.Memories = appendMemory(a.Memories, mem)
+		appendActorMemory(a, mem)
 		witnesses++
 	}
 	return witnesses
@@ -1116,17 +1127,21 @@ func (w *World) EffectiveWorldLaws() map[string]int {
 // Any attempt without explicit world-pack authorization (`authorized == true`) is strictly
 // rejected with an `action_failed` event and non-nil error.
 func (w *World) ApplyWorldLawChange(a *Actor, x Action, authorized bool, delta map[string]int) ([]Event, error) {
+	return w.applyWorldLawChangeWithTx(nil, a, x, authorized, delta)
+}
+
+func (w *World) applyWorldLawChangeWithTx(tx *WorldTx, a *Actor, x Action, authorized bool, delta map[string]int) ([]Event, error) {
 	if w == nil || a == nil {
 		return nil, fmt.Errorf("world or actor is nil")
 	}
 	if !authorized {
-		ev := w.record(a, x, "action_failed", map[string]any{
+		ev := w.recordWithTx(tx, a, x, "action_failed", map[string]any{
 			"text": fmt.Sprintf("%s lacks world-pack authorization to rewrite fundamental world laws", a.Name),
 		})
 		return []Event{ev}, fmt.Errorf("world law rewrite not authorized")
 	}
 	if len(delta) == 0 {
-		ev := w.record(a, x, "action_failed", map[string]any{
+		ev := w.recordWithTx(tx, a, x, "action_failed", map[string]any{
 			"text": "world law rewrite requires at least one law change",
 		})
 		return []Event{ev}, fmt.Errorf("empty world law delta")
@@ -1154,7 +1169,7 @@ func (w *World) ApplyWorldLawChange(a *Actor, x Action, authorized bool, delta m
 	if summary == "" {
 		summary = fmt.Sprintf("%s rewrote fundamental world laws (%v)", a.Name, updated)
 	}
-	ev := w.record(a, x, "world_law_rewritten", map[string]any{
+	ev := w.recordWithTx(tx, a, x, "world_law_rewritten", map[string]any{
 		"text":     summary,
 		"previous": prev,
 		"updated":  updated,
@@ -1162,7 +1177,7 @@ func (w *World) ApplyWorldLawChange(a *Actor, x Action, authorized bool, delta m
 	return []Event{ev}, nil
 }
 
-func (w *World) applyRewriteWorldLaw(a *Actor, x Action) []Event {
+func (w *World) applyRewriteWorldLaw(tx *WorldTx, a *Actor, x Action) []Event {
 	// Authorization requires explicit world-pack capability mapping for "rewrite_world_law" in Catalog.TagActions.
 	tags := actorEffectiveTags(w.Catalog, *a)
 	authorized := false
@@ -1181,7 +1196,7 @@ func (w *World) applyRewriteWorldLaw(a *Actor, x Action) []Event {
 	if x.Item != "" {
 		delta = map[string]int{x.Item: x.Quantity}
 	}
-	evs, _ := w.ApplyWorldLawChange(a, x, authorized, delta)
+	evs, _ := w.applyWorldLawChangeWithTx(tx, a, x, authorized, delta)
 	return evs
 }
 

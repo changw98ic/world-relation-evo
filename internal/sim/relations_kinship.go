@@ -11,6 +11,7 @@ import (
 // RelationEvoSpec holds genre-decoupled configuration parameters for kinship,
 // marriage dowries, blood-feud intensity/mediation, turf sovereignty, and monopoly charters.
 type RelationEvoSpec struct {
+	ExplicitZero            bool  `json:"explicit_zero,omitempty"`
 	DefaultDowryCoins       int   `json:"default_dowry_coins,omitempty"`
 	CohortWeddingDowryCoins int64 `json:"cohort_wedding_dowry_coins,omitempty"`
 	DefaultBloodMoneyCoins  int64 `json:"default_blood_money_coins,omitempty"`
@@ -20,6 +21,7 @@ type RelationEvoSpec struct {
 	ExclusiveMarginPermille int   `json:"exclusive_margin_permille,omitempty"`
 	MaxGrudgeIntensity      int   `json:"max_grudge_intensity,omitempty"`
 	VendettaTriggerMin      int   `json:"vendetta_trigger_min,omitempty"`
+	explicitFields          map[string]bool
 }
 
 // DefaultRelationEvoSpec returns balanced genre-decoupled defaults for social and faction evolution.
@@ -40,33 +42,15 @@ func DefaultRelationEvoSpec() RelationEvoSpec {
 // EffectiveRelationEvoSpec fills zero/invalid fields with DefaultRelationEvoSpec values.
 func EffectiveRelationEvoSpec(s RelationEvoSpec) RelationEvoSpec {
 	def := DefaultRelationEvoSpec()
-	if s.DefaultDowryCoins <= 0 {
-		s.DefaultDowryCoins = def.DefaultDowryCoins
-	}
-	if s.CohortWeddingDowryCoins <= 0 {
-		s.CohortWeddingDowryCoins = def.CohortWeddingDowryCoins
-	}
-	if s.DefaultBloodMoneyCoins <= 0 {
-		s.DefaultBloodMoneyCoins = def.DefaultBloodMoneyCoins
-	}
-	if s.CharterBaseFee <= 0 {
-		s.CharterBaseFee = def.CharterBaseFee
-	}
-	if s.CharterDurationTicks <= 0 {
-		s.CharterDurationTicks = def.CharterDurationTicks
-	}
-	if s.KickbackBasePermille <= 0 {
-		s.KickbackBasePermille = def.KickbackBasePermille
-	}
-	if s.ExclusiveMarginPermille <= 0 {
-		s.ExclusiveMarginPermille = def.ExclusiveMarginPermille
-	}
-	if s.MaxGrudgeIntensity <= 0 {
-		s.MaxGrudgeIntensity = def.MaxGrudgeIntensity
-	}
-	if s.VendettaTriggerMin <= 0 {
-		s.VendettaTriggerMin = def.VendettaTriggerMin
-	}
+	s.DefaultDowryCoins = resolveSpecNumber(s.DefaultDowryCoins, def.DefaultDowryCoins, s.ExplicitZero || s.explicitFields["default_dowry_coins"])
+	s.CohortWeddingDowryCoins = resolveSpecNumber(s.CohortWeddingDowryCoins, def.CohortWeddingDowryCoins, s.ExplicitZero || s.explicitFields["cohort_wedding_dowry_coins"])
+	s.DefaultBloodMoneyCoins = resolveSpecNumber(s.DefaultBloodMoneyCoins, def.DefaultBloodMoneyCoins, s.ExplicitZero || s.explicitFields["default_blood_money_coins"])
+	s.CharterBaseFee = resolveSpecNumber(s.CharterBaseFee, def.CharterBaseFee, s.ExplicitZero || s.explicitFields["charter_base_fee"])
+	s.CharterDurationTicks = resolveSpecNumber(s.CharterDurationTicks, def.CharterDurationTicks, s.ExplicitZero || s.explicitFields["charter_duration_ticks"])
+	s.KickbackBasePermille = resolveSpecNumber(s.KickbackBasePermille, def.KickbackBasePermille, s.ExplicitZero || s.explicitFields["kickback_base_permille"])
+	s.ExclusiveMarginPermille = resolveSpecNumber(s.ExclusiveMarginPermille, def.ExclusiveMarginPermille, s.ExplicitZero || s.explicitFields["exclusive_margin_permille"])
+	s.MaxGrudgeIntensity = resolveSpecNumber(s.MaxGrudgeIntensity, def.MaxGrudgeIntensity, s.ExplicitZero || s.explicitFields["max_grudge_intensity"])
+	s.VendettaTriggerMin = resolveSpecNumber(s.VendettaTriggerMin, def.VendettaTriggerMin, s.ExplicitZero || s.explicitFields["vendetta_trigger_min"])
 	return s
 }
 
@@ -480,16 +464,10 @@ func (rs *RelationEvoState) clanTrustDelta(clanA, clanB string, delta int) {
 	cA := rs.Clans[clanA]
 	cB := rs.Clans[clanB]
 	if cA != nil {
-		if cA.Trust == nil {
-			cA.Trust = map[string]int{}
-		}
-		cA.Trust[clanB] += delta
+		adjustTrust(&cA.Trust, clanB, delta)
 	}
 	if cB != nil {
-		if cB.Trust == nil {
-			cB.Trust = map[string]int{}
-		}
-		cB.Trust[clanA] += delta
+		adjustTrust(&cB.Trust, clanA, delta)
 	}
 }
 
@@ -752,7 +730,7 @@ func (rs *RelationEvoState) entityClanID(w *World, entityID string) string {
 	return ""
 }
 
-func (rs *RelationEvoState) recordGrudge(w *World, aggrievedID, offenderID, cause string, intensity int, rootEventID, sourceEventID int64) []Event {
+func (rs *RelationEvoState) recordGrudge(tx *WorldTx, w *World, aggrievedID, offenderID, cause string, intensity int, rootEventID, sourceEventID int64) []Event {
 	if rs == nil || w == nil || aggrievedID == "" || offenderID == "" || aggrievedID == offenderID {
 		return nil
 	}
@@ -798,7 +776,7 @@ func (rs *RelationEvoState) recordGrudge(w *World, aggrievedID, offenderID, caus
 		if a.Trust == nil {
 			a.Trust = map[string]int{}
 		}
-		a.Trust[offenderID] -= 3
+		tx.MutateTrust(a, offenderID, -3)
 	}
 	rs.clanTrustDelta(aggClan, offClan, -2)
 
@@ -849,7 +827,7 @@ func (rs *RelationEvoState) bondedToDeceased(listenerID, victimID string) bool {
 		ActorHasTag(k.SwornIDs, victimID) || ActorHasTag(k.ProtegeIDs, victimID))
 }
 
-func (rs *RelationEvoState) recordHomicideGrudge(w *World, aggrievedID, killerID string, rootID, deathID, reportID int64) []Event {
+func (rs *RelationEvoState) recordHomicideGrudge(tx *WorldTx, w *World, aggrievedID, killerID string, rootID, deathID, reportID int64) []Event {
 	listener := w.actor(aggrievedID)
 	if listener == nil || listener.Dead || aggrievedID == killerID || slices.Contains(listener.KnownHomicides, deathID) {
 		return nil
@@ -861,12 +839,12 @@ func (rs *RelationEvoState) recordHomicideGrudge(w *World, aggrievedID, killerID
 		if listener.Trust == nil {
 			listener.Trust = map[string]int{}
 		}
-		listener.Trust[killerID] -= 4
+		tx.MutateTrust(listener, killerID, -4)
 	}
-	return rs.recordGrudge(w, aggrievedID, killerID, cause, intensity, rootID, reportID)
+	return rs.recordGrudge(tx, w, aggrievedID, killerID, cause, intensity, rootID, reportID)
 }
 
-func (rs *RelationEvoState) settleDeathAndInheritance(w *World, e Event) []Event {
+func (rs *RelationEvoState) settleDeathAndInheritance(tx *WorldTx, w *World, e Event) []Event {
 	deceasedID := e.ActorID
 	if deceasedID == "" {
 		return nil
@@ -881,8 +859,10 @@ func (rs *RelationEvoState) settleDeathAndInheritance(w *World, e Event) []Event
 		if deceased.Items == nil {
 			deceased.Items = map[string]int{}
 		}
-		for _, item := range deceased.Equipped {
+		for _, slot := range sortedProductionKeys(deceased.Equipped) {
+			item := deceased.Equipped[slot]
 			deceased.Items[item]++
+			tx.recordTransfer("transfer_item", deceased.ID, slot, item, 1, "inheritance")
 		}
 		deceased.Equipped = nil
 	}
@@ -1011,8 +991,7 @@ func (rs *RelationEvoState) settleDeathAndInheritance(w *World, e Event) []Event
 		// Settle estate (0-error coin & item conservation).
 		inheritedCoins := deceased.Money
 		if inheritedCoins > 0 {
-			deceased.Money = 0
-			primaryHeir.Money += inheritedCoins
+			tx.TransferCurrency(deceased, primaryHeir, "coins", int64(inheritedCoins), "inheritance")
 		}
 		if len(deceased.Currencies) > 0 {
 			curKeys := make([]string, 0, len(deceased.Currencies))
@@ -1025,6 +1004,7 @@ func (rs *RelationEvoState) settleDeathAndInheritance(w *World, e Event) []Event
 			for _, cur := range curKeys {
 				amt := deceased.Currencies[cur]
 				w.addActorCurrency(primaryHeir, cur, amt)
+				tx.recordTransfer("transfer_currency", deceased.ID, primaryHeir.ID, cur, -amt, "inheritance")
 			}
 			deceased.Currencies = nil
 		}
@@ -1039,8 +1019,7 @@ func (rs *RelationEvoState) settleDeathAndInheritance(w *World, e Event) []Event
 		}
 		sort.Strings(itemKeys)
 		for _, itemID := range itemKeys {
-			primaryHeir.Items[itemID] += deceased.Items[itemID]
-			delete(deceased.Items, itemID)
+			tx.TransferItem(deceased, primaryHeir, itemID, deceased.Items[itemID], "inheritance")
 		}
 		w.transferGrowingAssets("actor", deceasedID, "actor", primaryHeir.ID)
 		firstHouseID := ""
@@ -1053,14 +1032,8 @@ func (rs *RelationEvoState) settleDeathAndInheritance(w *World, e Event) []Event
 		}
 
 		if lowTrust && rivalHeir != nil {
-			if primaryHeir.Trust == nil {
-				primaryHeir.Trust = map[string]int{}
-			}
-			if rivalHeir.Trust == nil {
-				rivalHeir.Trust = map[string]int{}
-			}
-			primaryHeir.Trust[rivalHeir.ID] -= 2
-			rivalHeir.Trust[primaryHeir.ID] -= 2
+			tx.MutateTrust(primaryHeir, rivalHeir.ID, -2)
+			tx.MutateTrust(rivalHeir, primaryHeir.ID, -2)
 			dispEv := Event{
 				ID:       w.NextID,
 				Tick:     w.Tick,
@@ -1080,8 +1053,11 @@ func (rs *RelationEvoState) settleDeathAndInheritance(w *World, e Event) []Event
 				},
 			}
 			w.NextID++
+			dispMem := Memory{Kind: dispEv.Kind, EventID: dispEv.ID, RootEventID: e.ID, CauseEventID: e.ID, Tick: w.Tick, Source: rivalHeir.ID, TargetID: primaryHeir.ID, Text: relPayloadString(dispEv.Payload, "text")}
+			tx.RecordMemory(primaryHeir, dispMem)
+			tx.RecordMemory(rivalHeir, dispMem)
 			events = append(events, dispEv)
-			events = append(events, rs.recordGrudge(w, rivalHeir.ID, primaryHeir.ID, "inheritance_dispute", 35, e.ID, dispEv.ID)...)
+			events = append(events, rs.recordGrudge(tx, w, rivalHeir.ID, primaryHeir.ID, "inheritance_dispute", 35, e.ID, dispEv.ID)...)
 		} else {
 			settleEv := Event{
 				ID:       w.NextID,
@@ -1101,15 +1077,17 @@ func (rs *RelationEvoState) settleDeathAndInheritance(w *World, e Event) []Event
 				},
 			}
 			w.NextID++
+			tx.RecordMemory(primaryHeir, Memory{Kind: settleEv.Kind, EventID: settleEv.ID, RootEventID: e.ID, CauseEventID: e.ID, Tick: w.Tick, Source: primaryHeir.ID, TargetID: deceasedID, Text: relPayloadString(settleEv.Payload, "text")})
 			events = append(events, settleEv)
 		}
 	} else {
 		// Only an estate with no living claimant escheats to the public treasury.
 		if deceased.Money > 0 {
 			w.creditTreasury(int64(deceased.Money), "confiscated")
-			deceased.Money = 0
+			tx.recordTransfer("transfer_currency", deceased.ID, "treasury", "coins", -int64(deceased.Money), "inheritance")
+			w.adjustActorCurrency(deceased, "coins", -int64(deceased.Money), false)
 		}
-		w.settleUnclaimedActorEstate(deceased, ownedHouses)
+		w.settleUnclaimedActorEstate(tx, deceased, ownedHouses)
 	}
 
 	if killerID := relPayloadString(e.Payload, "killer_id"); killerID != "" && killerID != deceasedID {
@@ -1120,7 +1098,7 @@ func (rs *RelationEvoState) settleDeathAndInheritance(w *World, e Event) []Event
 		}
 		for _, id := range witnesses {
 			if rs.bondedToDeceased(id, deceasedID) {
-				events = append(events, rs.recordHomicideGrudge(w, id, killerID, rootID, e.ID, e.ID)...)
+				events = append(events, rs.recordHomicideGrudge(tx, w, id, killerID, rootID, e.ID, e.ID)...)
 			}
 		}
 	}
@@ -1152,6 +1130,10 @@ func extractStringSlicePayload(payload map[string]any, key string) ([]string, bo
 
 // RecordMentorship creates or deepens a formal mentor-apprentice bond when knowledge/skills are taught.
 func (rs *RelationEvoState) RecordMentorship(w *World, mentor, apprentice *Actor, topicID string) []Event {
+	return rs.recordMentorshipWithTx(nil, w, mentor, apprentice, topicID)
+}
+
+func (rs *RelationEvoState) recordMentorshipWithTx(tx *WorldTx, w *World, mentor, apprentice *Actor, topicID string) []Event {
 	if rs == nil || w == nil || mentor == nil || apprentice == nil || mentor.ID == "" || apprentice.ID == "" || mentor.ID == apprentice.ID {
 		return nil
 	}
@@ -1185,9 +1167,9 @@ func (rs *RelationEvoState) RecordMentorship(w *World, mentor, apprentice *Actor
 	if apprentice.Trust == nil {
 		apprentice.Trust = map[string]int{}
 	}
-	mentor.Trust[apprentice.ID] += 2
-	apprentice.Trust[mentor.ID] += 3
-	ev := w.record(mentor, Action{Kind: "teach_knowledge", TargetID: apprentice.ID, SkillID: topicID}, "mentorship_formed", map[string]any{
+	tx.MutateTrust(mentor, apprentice.ID, 2)
+	tx.MutateTrust(apprentice, mentor.ID, 3)
+	ev := w.recordWithTx(tx, mentor, Action{Kind: "teach_knowledge", TargetID: apprentice.ID, SkillID: topicID}, "mentorship_formed", map[string]any{
 		"text":             fmt.Sprintf("%s and %s formed a formal mentor-apprentice bond (%s)", mentor.Name, apprentice.Name, topicID),
 		"mentor_id":        mentor.ID,
 		"apprentice_id":    apprentice.ID,
@@ -1215,6 +1197,10 @@ func (rs *RelationEvoState) mentorshipPartners(actorID string) []string {
 // ObserveCausalRelationEvents inspects newly settled simulation events to update lineage
 // succession, settle funerals/inheritance, and record causal blood-feud grudges preserving RootEventID.
 func (rs *RelationEvoState) ObserveCausalRelationEvents(w *World, events []Event) []Event {
+	return rs.observeCausalRelationEventsWithTx(nil, w, events)
+}
+
+func (rs *RelationEvoState) observeCausalRelationEventsWithTx(tx *WorldTx, w *World, events []Event) []Event {
 	if rs == nil || w == nil || len(events) == 0 {
 		return nil
 	}
@@ -1233,32 +1219,28 @@ func (rs *RelationEvoState) ObserveCausalRelationEvents(w *World, events []Event
 		case "raided":
 			dmg := int(payloadInt64(e.Payload, "damage"))
 			coins := int(payloadInt64(e.Payload, "coins"))
-			out = append(out, rs.recordGrudge(w, e.TargetID, e.ActorID, "raided", 32+dmg/2+coins, rootID, e.ID)...)
+			out = append(out, rs.recordGrudge(tx, w, e.TargetID, e.ActorID, "raided", 32+dmg/2+coins, rootID, e.ID)...)
+			victim := w.actor(e.TargetID)
 			for _, partnerID := range rs.mentorshipPartners(e.TargetID) {
 				if partnerID != e.ActorID {
-					if partner := w.actor(partnerID); partner != nil && !partner.Dead {
-						if partner.Trust == nil {
-							partner.Trust = map[string]int{}
-						}
-						partner.Trust[e.ActorID] -= 2
+					if partner := w.actor(partnerID); partner != nil && victim != nil && CanObserveActor(*partner, *victim, w.Tick) {
+						tx.MutateTrust(partner, e.ActorID, -2)
 					}
 				}
 			}
 		case "attacked":
 			dmg := int(payloadInt64(e.Payload, "damage"))
-			out = append(out, rs.recordGrudge(w, e.TargetID, e.ActorID, "attacked", 24+dmg/2, rootID, e.ID)...)
+			out = append(out, rs.recordGrudge(tx, w, e.TargetID, e.ActorID, "attacked", 24+dmg/2, rootID, e.ID)...)
+			victim := w.actor(e.TargetID)
 			for _, partnerID := range rs.mentorshipPartners(e.TargetID) {
 				if partnerID != e.ActorID {
-					if partner := w.actor(partnerID); partner != nil && !partner.Dead {
-						if partner.Trust == nil {
-							partner.Trust = map[string]int{}
-						}
-						partner.Trust[e.ActorID] -= 2
+					if partner := w.actor(partnerID); partner != nil && victim != nil && CanObserveActor(*partner, *victim, w.Tick) {
+						tx.MutateTrust(partner, e.ActorID, -2)
 					}
 				}
 			}
 		case "extort_resisted":
-			out = append(out, rs.recordGrudge(w, e.TargetID, e.ActorID, "extort_resisted", 28, rootID, e.ID)...)
+			out = append(out, rs.recordGrudge(tx, w, e.TargetID, e.ActorID, "extort_resisted", 28, rootID, e.ID)...)
 		case "cohort_raided":
 			off := relPayloadString(e.Payload, "attacker_cohort")
 			if off == "" {
@@ -1270,7 +1252,7 @@ func (rs *RelationEvoState) ObserveCausalRelationEvents(w *World, events []Event
 			}
 			deaths := int(payloadInt64(e.Payload, "deaths"))
 			wounded := int(payloadInt64(e.Payload, "wounded"))
-			out = append(out, rs.recordGrudge(w, agg, off, "cohort_raided", 30+deaths*15+wounded*2, rootID, e.ID)...)
+			out = append(out, rs.recordGrudge(tx, w, agg, off, "cohort_raided", 30+deaths*15+wounded*2, rootID, e.ID)...)
 		case "cohort_racket_clashed":
 			off := relPayloadString(e.Payload, "gang_cohort")
 			if off == "" {
@@ -1282,7 +1264,7 @@ func (rs *RelationEvoState) ObserveCausalRelationEvents(w *World, events []Event
 			}
 			deaths := int(payloadInt64(e.Payload, "deaths"))
 			wounded := int(payloadInt64(e.Payload, "wounded"))
-			out = append(out, rs.recordGrudge(w, agg, off, "cohort_racket_clashed", 28+deaths*15+wounded*2, rootID, e.ID)...)
+			out = append(out, rs.recordGrudge(tx, w, agg, off, "cohort_racket_clashed", 28+deaths*15+wounded*2, rootID, e.ID)...)
 		case "wrongful_conviction":
 			agg := relPayloadString(e.Payload, "victim_id")
 			if agg == "" {
@@ -1298,9 +1280,9 @@ func (rs *RelationEvoState) ObserveCausalRelationEvents(w *World, events []Event
 			if off == "" {
 				off = e.ActorID
 			}
-			out = append(out, rs.recordGrudge(w, agg, off, "wrongful_conviction", 48, rootID, e.ID)...)
+			out = append(out, rs.recordGrudge(tx, w, agg, off, "wrongful_conviction", 48, rootID, e.ID)...)
 		case "actor_died":
-			out = append(out, rs.settleDeathAndInheritance(w, e)...)
+			out = append(out, rs.settleDeathAndInheritance(tx, w, e)...)
 		case "speech", "channel_message", "channel_transmitted":
 			listeners, _ := extractStringSlicePayload(e.Payload, "delivered_to")
 			stmt := e.Action.Statement
@@ -1314,7 +1296,7 @@ func (rs *RelationEvoState) ObserveCausalRelationEvents(w *World, events []Event
 			}
 			for _, id := range listeners {
 				if listener := w.actor(id); listener != nil && listener.Trust[e.ActorID] >= -1 && rs.bondedToDeceased(id, victim.ID) {
-					out = append(out, rs.recordHomicideGrudge(w, id, stmt.SubjectID, rootID, deathID, e.ID)...)
+					out = append(out, rs.recordHomicideGrudge(tx, w, id, stmt.SubjectID, rootID, deathID, e.ID)...)
 				}
 			}
 		case "actor_succeeded":
@@ -1396,103 +1378,25 @@ func (rs *RelationEvoState) findCohort(w *World, id string) *PopulationCohort {
 	return nil
 }
 
-func (rs *RelationEvoState) transferBloodMoney(w *World, offenderID, aggrievedID, offenderClanID, aggrievedClanID string, requested int64) (paid int64, ok bool) {
-	if requested <= 0 {
-		return 0, true
-	}
-	// Resolve actor or cohort accounts, or clan patriarch / clan cohort fallback.
-	resolvePayer := func(id, clanFallback string) (*Actor, *PopulationCohort) {
-		if a := w.actor(id); a != nil && !a.Dead {
-			return a, nil
-		}
-		if c := rs.findCohort(w, id); c != nil && c.Population > 0 {
-			return nil, c
-		}
-		clanID := id
-		if rs.Clans[clanID] == nil {
-			clanID = clanFallback
-		}
-		if clan := rs.Clans[clanID]; clan != nil {
-			if p := w.actor(clan.PatriarchID); p != nil && !p.Dead {
-				return p, nil
-			}
-			for _, cid := range clan.MemberCohortIDs {
-				if c := rs.findCohort(w, cid); c != nil && c.Population > 0 {
-					return nil, c
-				}
-			}
-		}
-		return nil, nil
-	}
-
-	payActor, payCohort := resolvePayer(offenderID, offenderClanID)
-	recActor, recCohort := resolvePayer(aggrievedID, aggrievedClanID)
-	if (payActor == nil && payCohort == nil) || (recActor == nil && recCohort == nil) {
-		return 0, false
-	}
-	avail := int64(0)
-	if payActor != nil {
-		avail = int64(payActor.Money)
-	} else {
-		avail = payCohort.MoneyPool
-	}
-	if avail < requested {
-		return avail, false
-	}
-	if payActor != nil {
-		payActor.Money -= int(requested)
-	} else {
-		payCohort.MoneyPool -= requested
-	}
-	if recActor != nil {
-		recActor.Money += int(requested)
-	} else {
-		recCohort.MoneyPool += requested
-	}
-	return requested, true
-}
-
 // ApplyRelationAction handles focal actor actions: "marry", "swear_bond", "avenge_feud",
 // "mediate_feud", and "claim_turf". Returns (events, true) if x.Kind is one of these actions.
-func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Action) ([]Event, bool) {
-	switch x.Kind {
-	case "marry", "swear_bond", "avenge_feud", "mediate_feud", "claim_turf":
-	default:
-		return nil, false
-	}
+func (w *World) ApplyRelationAction(state *RelationEvoState, actorID string, x Action) ([]Event, bool) {
+	return w.applyRelationSubsystem(state, actorID, x)
+}
 
-	a := w.actor(actorID)
-	if a == nil {
-		return nil, true
-	}
-	if a.Items == nil {
-		a.Items = map[string]int{}
-	}
-	if a.Trust == nil {
-		a.Trust = map[string]int{}
-	}
+func (w *World) applyRelationActionTx(tx *WorldTx, rs *RelationEvoState, a *Actor, x Action) []Event {
 	emit := func(kind, text string, data map[string]any, observers ...*Actor) []Event {
 		if data == nil {
 			data = map[string]any{}
 		}
 		data["text"] = text
-		return []Event{w.record(a, x, kind, data, observers...)}
+		return []Event{tx.record(a, x, kind, data, observers...)}
 	}
 	fail := func(reason string) []Event {
 		return emit("action_failed", reason, nil)
 	}
-
-	if a.Dead {
-		return fail("actor is dead"), true
-	}
-	if w.Tick < a.JailedUntil {
-		return fail("actor is imprisoned in the Yamen jail"), true
-	}
-	if a.Task != nil {
-		return fail("actor is already busy with " + a.Task.Action.Kind), true
-	}
 	if rs == nil {
-		return fail("relation state unavailable"), true
+		return fail("relation state unavailable")
 	}
 	rs.EnsureKinshipSeeded(w)
 	spec := rs.effectiveSpec()
@@ -1501,7 +1405,7 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 	switch x.Kind {
 	case "marry":
 		if b == nil || b.ID == a.ID || b.Dead || w.Tick < b.JailedUntil || !SamePlace(*a, *b) {
-			return fail("prospective spouse is not nearby"), true
+			return fail("prospective spouse is not nearby")
 		}
 		if b.Trust == nil {
 			b.Trust = map[string]int{}
@@ -1509,10 +1413,10 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 		kA := rs.ensureActorKinship(w, *a)
 		kB := rs.ensureActorKinship(w, *b)
 		if kA.SpouseID != "" || kB.SpouseID != "" {
-			return fail("one or both actors are already married"), true
+			return fail("one or both actors are already married")
 		}
 		if ActorHasTag(kA.ParentIDs, b.ID) || ActorHasTag(kA.ChildIDs, b.ID) || ActorHasTag(kA.SwornIDs, b.ID) {
-			return fail("cannot marry direct parent, child, or sworn sibling"), true
+			return fail("cannot marry direct parent, child, or sworn sibling")
 		}
 		dowry := x.Price
 		if dowry <= 0 {
@@ -1525,10 +1429,9 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 			dowry = 0
 		}
 		if a.Money < dowry {
-			return fail("insufficient coins for marriage dowry/bride-price"), true
+			return fail("insufficient coins for marriage dowry/bride-price")
 		}
-		a.Money -= dowry
-		b.Money += dowry
+		tx.TransferCurrency(a, b, "coins", int64(dowry), x.Kind)
 
 		kA.SpouseID = b.ID
 		kB.SpouseID = a.ID
@@ -1551,8 +1454,8 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 			}
 		}
 
-		a.Trust[b.ID] += 4
-		b.Trust[a.ID] += 4
+		tx.MutateTrust(a, b.ID, 4)
+		tx.MutateTrust(b, a.ID, 4)
 		rs.clanTrustDelta(kA.ClanID, kB.ClanID, 3)
 		if clanA := rs.Clans[kA.ClanID]; clanA != nil {
 			clanA.Prestige += 2
@@ -1569,11 +1472,11 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 			"clan_b":      kB.ClanID,
 			"house_id":    mergedHouseID,
 			"district":    a.Location,
-		}, b), true
+		}, b)
 
 	case "swear_bond":
 		if b == nil || b.ID == a.ID || b.Dead || w.Tick < b.JailedUntil || !SamePlace(*a, *b) {
-			return fail("target is not nearby"), true
+			return fail("target is not nearby")
 		}
 		if b.Trust == nil {
 			b.Trust = map[string]int{}
@@ -1586,17 +1489,17 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 		if mode == "patron" || mode == "mentor" || mode == "adopt" || mode == "disciple" {
 			bondType = "patron"
 			if kA.PatronID == b.ID || ActorHasTag(kB.ProtegeIDs, a.ID) {
-				return fail("patron bond already exists"), true
+				return fail("patron bond already exists")
 			}
 			if kB.PatronID == a.ID || ActorHasTag(kA.ProtegeIDs, b.ID) {
-				return fail("reverse patronage already exists"), true
+				return fail("reverse patronage already exists")
 			}
 		} else {
 			if ActorHasTag(kA.SwornIDs, b.ID) || ActorHasTag(kB.SwornIDs, a.ID) {
-				return fail("sworn bond already exists"), true
+				return fail("sworn bond already exists")
 			}
 			if kA.SpouseID == b.ID || ActorHasTag(kA.ParentIDs, b.ID) || ActorHasTag(kA.ChildIDs, b.ID) {
-				return fail("existing kinship supersedes sworn bond"), true
+				return fail("existing kinship supersedes sworn bond")
 			}
 		}
 
@@ -1605,11 +1508,10 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 			gift = x.Quantity
 		}
 		if gift > 0 && a.Money < gift {
-			return fail("insufficient coins for bond ceremony gift"), true
+			return fail("insufficient coins for bond ceremony gift")
 		}
 		if gift > 0 {
-			a.Money -= gift
-			b.Money += gift
+			tx.TransferCurrency(a, b, "coins", int64(gift), x.Kind)
 		}
 
 		if bondType == "patron" {
@@ -1620,8 +1522,8 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 			kB.SwornIDs = appendUnique(kB.SwornIDs, a.ID)
 		}
 
-		a.Trust[b.ID] += 3
-		b.Trust[a.ID] += 3
+		tx.MutateTrust(a, b.ID, 3)
+		tx.MutateTrust(b, a.ID, 3)
 		rs.clanTrustDelta(kA.ClanID, kB.ClanID, 1)
 
 		return emit("bond_sworn", fmt.Sprintf("%s and %s swore a %s bond in %s", a.Name, b.Name, bondType, a.Location), map[string]any{
@@ -1630,7 +1532,7 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 			"clan_a":     kA.ClanID,
 			"clan_b":     kB.ClanID,
 			"district":   a.Location,
-		}, b), true
+		}, b)
 
 	case "avenge_feud":
 		var grudgeIdx = -1
@@ -1649,48 +1551,44 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 			}
 		}
 		if grudgeIdx < 0 {
-			return fail("no active blood feud against target"), true
+			return fail("no active blood feud against target")
 		}
 		g := &rs.Grudges[grudgeIdx]
 		if b == nil {
 			b = w.actor(g.OffenderID)
 		}
 		if b == nil || b.ID == a.ID || b.Dead || w.Tick < b.JailedUntil || !SamePlace(*a, *b) {
-			return fail("feud target is not nearby"), true
+			return fail("feud target is not nearby")
 		}
 		if a.Energy < 6 {
-			return fail("insufficient energy to avenge feud"), true
+			return fail("insufficient energy to avenge feud")
 		}
 		if a.Health < 25 {
-			return fail("too injured to fight; must recuperate"), true
+			return fail("too injured to fight; must recuperate")
 		}
-		a.Energy -= 6
+		tx.setEnergy(a, a.Energy-6, x.Kind)
 		atkPower := CombatPowerWithCatalog(w.Catalog, *a)
 		defPower := CombatPowerWithCatalog(w.Catalog, *b)
 		x.TargetID = b.ID
-		dmg, absorbed, immune, broken := w.applyMeleeHit(a, b, x, maxInt(14, minInt(75, 18+(atkPower-defPower))))
+		dmg, absorbed, immune, broken := w.applyMeleeHit(tx, a, b, x, maxInt(14, minInt(75, 18+(atkPower-defPower))))
 		if dmg > 0 && b.Health > 0 && a.Health > 10 {
 			counter := maxInt(2, minInt(22, defPower/4))
 			if counter > a.Health-1 {
 				counter = a.Health - 1
 			}
-			a.Health -= counter
+			tx.adjustHealth(a, -counter, 0, x.Kind)
 		}
 		loot := 0
 		if dmg > 0 {
 			loot = minInt(b.Money, 3)
 		}
 		if loot > 0 {
-			b.Money -= loot
-			a.Money += loot
+			tx.TransferCurrency(b, a, "coins", int64(loot), x.Kind)
 		}
 		if a.Health < 65 {
 			a.RestUntil = w.Tick + 4
 		}
-		if b.Trust == nil {
-			b.Trust = map[string]int{}
-		}
-		b.Trust[a.ID] -= 3
+		tx.MutateTrust(b, a.ID, -3)
 
 		g.LastActionTick = w.Tick
 		if b.Health == 0 || dmg > 0 && b.Health <= MaxHealth/3 {
@@ -1700,7 +1598,7 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 			g.Intensity = maxInt(1, g.Intensity-dmg)
 		}
 
-		ev := w.record(a, x, "feud_avenged", map[string]any{
+		avengeData := map[string]any{
 			"text":           fmt.Sprintf("%s avenged grudge %s against %s (-%d health, %d restitution coins)", a.Name, g.ID, b.Name, dmg, loot),
 			"grudge_id":      g.ID,
 			"damage":         dmg,
@@ -1708,15 +1606,16 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 			"immune_blocked": immune,
 			"coins":          loot,
 			"resolved":       g.Resolved,
-			"root_event_id":  g.RootEventID,
-		}, b)
-		if g.RootEventID > 0 {
-			ev.Payload["root_event_id"] = g.RootEventID
 		}
+		if g.RootEventID > 0 {
+			avengeData["cause_event_id"] = g.RootEventID
+			avengeData["root_event_id"] = g.RootEventID
+		}
+		ev := tx.record(a, x, "feud_avenged", avengeData, b)
 		events := append(broken, ev)
-		events = append(events, w.finishMeleeHit(a, b, x, dmg, "vendetta", ev)...)
-		events = append(events, w.grantCombatXP(a, x, 6, 2)...)
-		return events, true
+		events = append(events, w.finishMeleeHit(tx, a, b, x, dmg, "vendetta", ev)...)
+		events = append(events, w.grantCombatXP(tx, a, x, 6, 2)...)
+		return events
 
 	case "mediate_feud":
 		grudgeIdx := -1
@@ -1738,20 +1637,20 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 			}
 		}
 		if grudgeIdx < 0 {
-			return fail("no active unresolved feud found to mediate"), true
+			return fail("no active unresolved feud found to mediate")
 		}
 		g := &rs.Grudges[grudgeIdx]
 		if !actorKnowsAboutGrudge(*a, *g) {
-			return fail("actor has no witnessed or reported knowledge of this feud"), true
+			return fail("actor has no witnessed or reported knowledge of this feud")
 		}
 		offender, aggrieved := w.actor(g.OffenderID), w.actor(g.AggrievedID)
 		for _, party := range []*Actor{offender, aggrieved} {
 			if party == nil || party.Dead || w.Tick < party.JailedUntil || !SamePlace(*a, *party) || party.Task != nil && (party.Task.Action.Kind == "sleep" || party.Task.Dormant) {
-				return fail("both feud parties must be present and able to communicate"), true
+				return fail("both feud parties must be present and able to communicate")
 			}
 		}
 		if w.actorFactionRelation(*offender, *aggrieved) == "at_war" {
-			return fail("cannot mediate blood feud while factions are at war"), true
+			return fail("cannot mediate blood feud while factions are at war")
 		}
 
 		bloodMoney := int64(x.Price)
@@ -1761,6 +1660,10 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 		if bloodMoney <= 0 {
 			bloodMoney = maxInt64(2, int64(g.Intensity/5))
 		}
+		prevProposer := g.MediationProposerID
+		prevCoins := g.MediationCoins
+		prevOffAcc := g.OffenderAccepted
+		prevAggAcc := g.AggrievedAccepted
 		if g.MediationProposerID == "" || g.MediationCoins != bloodMoney {
 			g.MediationProposerID = a.ID
 			g.MediationCoins = bloodMoney
@@ -1773,13 +1676,22 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 			g.AggrievedAccepted = true
 		}
 		if !g.OffenderAccepted || !g.AggrievedAccepted {
-			return emit("feud_mediation_proposed", fmt.Sprintf("%s proposed or accepted %d blood-money coins for feud %s; awaiting both parties", a.Name, bloodMoney, g.ID), map[string]any{
+			propData := map[string]any{
 				"grudge_id": g.ID, "blood_money": bloodMoney, "offender_accepted": g.OffenderAccepted, "aggrieved_accepted": g.AggrievedAccepted,
-			}, offender, aggrieved), true
+			}
+			if g.RootEventID > 0 {
+				propData["cause_event_id"] = g.RootEventID
+				propData["root_event_id"] = g.RootEventID
+			}
+			return emit("feud_mediation_proposed", fmt.Sprintf("%s proposed or accepted %d blood-money coins for feud %s; awaiting both parties", a.Name, bloodMoney, g.ID), propData, offender, aggrieved)
 		}
-		paid, ok := rs.transferBloodMoney(w, g.OffenderID, g.AggrievedID, "", "", bloodMoney)
-		if !ok {
-			return fail("offender lacks coins for the accepted blood-money settlement"), true
+		paid := bloodMoney
+		if !tx.TransferCurrency(offender, aggrieved, "coins", paid, x.Kind) {
+			g.MediationProposerID = prevProposer
+			g.MediationCoins = prevCoins
+			g.OffenderAccepted = prevOffAcc
+			g.AggrievedAccepted = prevAggAcc
+			return fail("offender lacks coins for the accepted blood-money settlement")
 		}
 
 		g.Resolved = true
@@ -1787,32 +1699,23 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 		g.BloodMoneyPaid = paid
 		g.LastActionTick = w.Tick
 
-		if offA := w.actor(g.OffenderID); offA != nil {
-			if offA.Trust == nil {
-				offA.Trust = map[string]int{}
-			}
-			offA.Trust[g.AggrievedID] += 2
-		}
-		if aggA := w.actor(g.AggrievedID); aggA != nil {
-			if aggA.Trust == nil {
-				aggA.Trust = map[string]int{}
-			}
-			aggA.Trust[g.OffenderID] += 2
-		}
+		tx.MutateTrust(offender, g.AggrievedID, 2)
+		tx.MutateTrust(aggrieved, g.OffenderID, 2)
 		rs.clanTrustDelta(g.AggrievedClanID, g.OffenderClanID, 2)
 
-		ev := w.record(a, x, "feud_mediated", map[string]any{
-			"text":          fmt.Sprintf("%s mediated feud %s between %s and %s (%d blood-money coins)", a.Name, g.ID, g.AggrievedID, g.OffenderID, paid),
-			"grudge_id":     g.ID,
-			"aggrieved_id":  g.AggrievedID,
-			"offender_id":   g.OffenderID,
-			"blood_money":   paid,
-			"root_event_id": g.RootEventID,
-		}, b)
-		if g.RootEventID > 0 {
-			ev.Payload["root_event_id"] = g.RootEventID
+		medData := map[string]any{
+			"text":         fmt.Sprintf("%s mediated feud %s between %s and %s (%d blood-money coins)", a.Name, g.ID, g.AggrievedID, g.OffenderID, paid),
+			"grudge_id":    g.ID,
+			"aggrieved_id": g.AggrievedID,
+			"offender_id":  g.OffenderID,
+			"blood_money":  paid,
 		}
-		return []Event{ev}, true
+		if g.RootEventID > 0 {
+			medData["cause_event_id"] = g.RootEventID
+			medData["root_event_id"] = g.RootEventID
+		}
+		ev := tx.record(a, x, "feud_mediated", medData, offender, aggrieved)
+		return []Event{ev}
 
 	case "claim_turf":
 		districtID := x.Location
@@ -1820,10 +1723,10 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 			districtID = a.Location
 		}
 		if _, ok := w.Map.DistrictByID(districtID); !ok {
-			return fail("unknown district: " + districtID), true
+			return fail("unknown district: " + districtID)
 		}
 		if a.Location != districtID || a.InsideHouse != "" {
-			return fail("must stand outdoors in " + districtID + " to claim district turf"), true
+			return fail("must stand outdoors in " + districtID + " to claim district turf")
 		}
 		factionID := x.FactionID
 		if factionID == "" && len(a.Guilds) > 0 {
@@ -1831,17 +1734,16 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 		}
 		f := w.faction(factionID)
 		if f == nil || !f.HasMember(a.ID) {
-			return fail("actor must belong to target faction to claim turf"), true
+			return fail("actor must belong to target faction to claim turf")
 		}
-		if a.Energy < 5 {
-			return fail("insufficient energy to contest district turf"), true
-		}
-		a.Energy -= 5
-
 		prevFaction := rs.DistrictController(districtID)
 		if prevFaction == factionID {
-			return fail(factionID + " already holds sovereignty over " + districtID), true
+			return fail(factionID + " already holds sovereignty over " + districtID)
 		}
+		if a.Energy < 5 {
+			return fail("insufficient energy to contest district turf")
+		}
+		tx.setEnergy(a, a.Energy-5, x.Kind)
 		challengerScore := rs.factionStrengthInDistrict(w, factionID, districtID) + 15
 		prevScore := 0
 		if prevFaction != "" {
@@ -1854,7 +1756,7 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 				"controller":       prevFaction,
 				"challenger_score": challengerScore,
 				"controller_score": prevScore,
-			}), true
+			})
 		}
 
 		w.setDistrictControl(rs, districtID, factionID, challengerScore)
@@ -1868,10 +1770,10 @@ func (w *World) ApplyRelationAction(rs *RelationEvoState, actorID string, x Acti
 			"new_faction":      factionID,
 			"previous_score":   prevScore,
 			"new_score":        challengerScore,
-		}), true
+		})
 	}
 
-	return nil, false
+	return nil
 }
 
 // GrantMonopolyCharter grants factionID an exclusive Tier-2/3 tradeable item license in districtID,
@@ -1947,7 +1849,7 @@ func (w *World) GrantMonopolyCharter(rs *RelationEvoState, factionID, itemID, di
 	if payerCohort != nil {
 		payerCohort.MoneyPool -= totalOutlay
 	} else {
-		payerActor.Money -= int(totalOutlay)
+		w.adjustActorCurrency(payerActor, "coins", -totalOutlay, false)
 	}
 	w.creditTreasury(fee, "fee")
 	if collector != nil && kickback > 0 {
@@ -2340,15 +2242,15 @@ func (w *World) canChallengeLeadership(a Actor, factionID string) bool {
 	return incumbent < 0 || w.Relations.actorLeadershipScore(w, &a) >= incumbent+12
 }
 
-func (w *World) applyLeadershipChallenge(a *Actor, x Action) []Event {
+func (w *World) applyLeadershipChallenge(tx *WorldTx, a *Actor, x Action) []Event {
 	rs := w.ensureRelations()
 	if !w.canChallengeLeadership(*a, x.FactionID) {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": "challenger lacks standing at the faction seat"})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": "challenger lacks standing at the faction seat"})}
 	}
 	previous := rs.FactionLeader[x.FactionID]
 	w.setFactionLeader(x.FactionID, a.ID)
 	x.TargetID = previous
-	return []Event{w.record(a, x, "faction_leader_changed", map[string]any{
+	return []Event{tx.record(a, x, "faction_leader_changed", map[string]any{
 		"text":       fmt.Sprintf("%s won the leadership of %s", a.Name, x.FactionID),
 		"faction_id": x.FactionID, "previous_leader": previous, "new_leader": a.ID, "reason": "challenge",
 	}, w.awakeSamePlaceObservers(*a, a.ID)...)}

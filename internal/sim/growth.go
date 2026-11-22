@@ -269,12 +269,12 @@ func (w *World) AdvanceGrowth() []Event {
 		// A finished workshop batch goes directly to its local owner's stock.
 		r, _ := w.Catalog.RecipeByID(g.RecipeID)
 		if g.Ready && !g.Harvested && g.Workers > 0 && r.Growth == nil && care.Cohort && care.OwnerID == g.OwnerID && w.growthOwnerPresent(g) {
-			events = append(events, w.finishHarvest(i)...)
+			events = append(events, w.finishHarvest(nil, i)...)
 			continue
 		}
 		if g.Ready && care.Cohort && w.canHarvestGrowth(g, care.OwnerID, true) {
 			before := len(w.Growth)
-			events = append(events, w.harvestGrowth(i, care)...)
+			events = append(events, w.harvestGrowth(nil, i, care)...)
 			if len(w.Growth) < before {
 				continue
 			}
@@ -299,7 +299,7 @@ func (w *World) stallGrowth(g *GrowthBatch, elapsed int64, reason string) []Even
 	return events
 }
 
-func (w *World) harvestGrowth(i int, caller GrowthBatch) []Event {
+func (w *World) harvestGrowth(tx *WorldTx, i int, caller GrowthBatch) []Event {
 	var events []Event
 	if !w.Growth[i].Harvested {
 		required := max(int64(1), w.Growth[i].Rule.CareWorkersPerBatch*w.Growth[i].Batches)
@@ -315,12 +315,13 @@ func (w *World) harvestGrowth(i int, caller GrowthBatch) []Event {
 			return nil
 		}
 	}
-	return append(events, w.finishHarvest(i)...)
+	return append(events, w.finishHarvest(tx, i)...)
 }
 
-func (w *World) finishHarvest(i int) []Event {
+func (w *World) finishHarvest(tx *WorldTx, i int) []Event {
 	var events []Event
 	g := w.Growth[i]
+	account := fmt.Sprintf("growth:%d", g.ID)
 	care := w.growthCaretaker(g)
 	if !g.Harvested {
 		if agreement := w.careAgreement(g); agreement != nil && agreement.SharePermille > 0 {
@@ -332,12 +333,14 @@ func (w *World) finishHarvest(i int) []Event {
 				if w.growthOwnerPresent(care) {
 					w.carryLivingCare(fmt.Sprintf("growth:%d/output", g.ID), holderKey(holderKind(care.Cohort), care.OwnerID)+"/"+g.Item, care, g.Item)
 					w.changeGrowthStock(care, g.Item, share, false)
+					tx.recordTransfer("transfer_item", account, care.OwnerID, g.Item, -share, "harvest")
 					events = append(events, w.harvestAllocation(g, care, "harvest_delivered", "care_agreement", share))
 				} else {
 					// Earned compensation stays at the harvest site until collected.
 					stored := g
 					stored.SourceGrowthID = g.ID
 					stored.ID = w.NextID
+					tx.recordTransfer("transfer_item", account, fmt.Sprintf("growth:%d", stored.ID), g.Item, -share, "harvest")
 					w.NextID++
 					stored.OwnerID, stored.Cohort = care.OwnerID, care.Cohort
 					stored.Quantity, stored.Parents = share, nil
@@ -364,16 +367,19 @@ func (w *World) finishHarvest(i int) []Event {
 		w.carryLivingCare(outputKey, holderKey(holderKind(g.Cohort), g.OwnerID)+"/"+g.Item, g, g.Item)
 	}
 	w.changeGrowthStock(g, g.Item, g.Quantity, false)
+	tx.recordTransfer("transfer_item", account, g.OwnerID, g.Item, -g.Quantity, "harvest")
 	if g.Quantity > 0 {
 		events = append(events, w.harvestAllocation(g, g, "harvest_delivered", g.harvestBasis(), g.Quantity))
 	}
 	delete(w.Production.LivingCare, outputKey)
-	for item, qty := range g.Parents {
+	for _, item := range sortedProductionKeys(g.Parents) {
+		qty := g.Parents[item]
 		key := fmt.Sprintf("growth:%d/parent/%s", g.ID, item)
 		if qty > 0 {
 			w.carryLivingCare(key, holderKey(holderKind(g.Cohort), g.OwnerID)+"/"+item, g, item)
 		}
 		w.changeGrowthStock(g, item, qty, false)
+		tx.recordTransfer("transfer_item", account, g.OwnerID, item, -qty, "harvest")
 		delete(w.Production.LivingCare, key)
 	}
 	if len(w.Production.LivingCare) == 0 {
@@ -387,8 +393,8 @@ func (w *World) finishHarvest(i int) []Event {
 	if !g.Cohort {
 		a := w.actor(g.OwnerID)
 		x := Action{Kind: "harvest", TargetID: strconv.FormatInt(g.ID, 10), RecipeID: g.RecipeID, Item: g.Item, Quantity: int(g.Quantity)}
-		event := w.record(a, x, "harvested", map[string]any{"growth_id": g.ID, "recipe_id": g.RecipeID, "item": g.Item, "quantity": g.Quantity, "text": fmt.Sprintf("harvested %d %s", g.Quantity, g.Item), "observation": Observation{Kind: "item_produced", Item: g.Item, Location: g.District, Quantity: int(g.Quantity)}})
-		return append(append(events, event), w.grantProfessionXP(a, x, r.Profession, w.Catalog.CraftXP(r), w.Catalog.Items[g.Item].Tier)...)
+		event := w.recordWithTx(tx, a, x, "harvested", map[string]any{"growth_id": g.ID, "recipe_id": g.RecipeID, "item": g.Item, "quantity": g.Quantity, "text": fmt.Sprintf("harvested %d %s", g.Quantity, g.Item), "observation": Observation{Kind: "item_produced", Item: g.Item, Location: g.District, Quantity: int(g.Quantity)}})
+		return append(append(events, event), w.grantProfessionXP(tx, a, x, r.Profession, w.Catalog.CraftXP(r), w.Catalog.Items[g.Item].Tier)...)
 	}
 	c := w.findCohort(g.OwnerID)
 	e := Event{ID: w.NextID, Tick: w.Tick, ActorID: g.OwnerID, Kind: "cohort_crafted", Action: Action{Kind: "craft", RecipeID: g.RecipeID, Item: g.Item, Quantity: int(g.Quantity)}, Payload: map[string]any{"growth_id": g.ID, "item": g.Item, "quantity": g.Quantity, "batches": g.Batches, "recipe_id": g.RecipeID, "cohort_id": g.OwnerID}}
@@ -402,10 +408,26 @@ func (w *World) finishHarvest(i int) []Event {
 
 }
 
+// visibleGrowth shows telemetry only for local batches the actor owns, tends,
+// or has been invited to tend.
 func (w *World) visibleGrowth(actor Actor) []GrowthBatch {
 	var result []GrowthBatch
+	if actor.InTransit() {
+		return result
+	}
+	invited := map[int64]bool{}
+	for _, proposal := range w.Production.CareProposals {
+		if proposal.CaretakerKind == "actor" && proposal.CaretakerID == actor.ID {
+			invited[proposal.GrowthID] = true
+		}
+	}
 	for _, g := range w.Growth {
-		if care := w.careAgreement(g); (!g.Cohort && g.OwnerID == actor.ID) || (care != nil && care.CaretakerKind == "actor" && care.CaretakerID == actor.ID) {
+		if g.District != actor.Location {
+			continue
+		}
+		care := w.careAgreement(g)
+		if (!g.Cohort && g.OwnerID == actor.ID) || (invited[g.ID] && care == nil) ||
+			(care != nil && care.CaretakerKind == "actor" && care.CaretakerID == actor.ID) {
 			g.Rule = *cloneGrowthRule(&g.Rule)
 			g.Parents = cloneInt64Map(g.Parents)
 			result = append(result, g)
@@ -457,4 +479,27 @@ func (r Recipe) StartRequirements() map[string]int {
 		required[item] += qty
 	}
 	return required
+}
+
+// AtGrowthSite compares an actor's location with an observed batch.
+func (p Perception) AtGrowthSite(g GrowthBatch) bool {
+	a := p.Self
+	return !a.Dead && !a.InTransit() && p.Tick >= a.JailedUntil && p.Tick >= a.RestUntil &&
+		a.Location == g.District && (g.VenueID == "" || a.VenueID == g.VenueID)
+}
+
+// CanHarvestObservedGrowth checks rights and local labor using the observed batch.
+func (p Perception) CanHarvestObservedGrowth(g GrowthBatch) bool {
+	if !g.Ready || !p.AtGrowthSite(g) || p.Self.Task != nil || p.LaborUsed >= 1 {
+		return false
+	}
+	if !g.Cohort && g.OwnerID == p.Self.ID {
+		return true
+	}
+	for _, care := range p.CareAgreements {
+		if care.GrowthID == g.ID {
+			return !g.Harvested && care.Harvest && care.CaretakerKind == "actor" && care.CaretakerID == p.Self.ID
+		}
+	}
+	return false
 }

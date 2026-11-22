@@ -266,8 +266,16 @@ func (w *World) IsActorPinnedFocal(a Actor) bool {
 	if a.PinFocal {
 		return true
 	}
-	if w.ActorCombatTier(a) >= 3 {
+	if w.ActorCombatTier(a) >= 3 || w.Catalog.ActorPowerTier(a) >= 3 {
 		return true
+	}
+	if len(w.Catalog.ActiveGoldenFingersFor(a)) > 0 {
+		return true
+	}
+	for _, eff := range w.ActiveEffects {
+		if eff.SustainActorID == a.ID && (eff.ExpiresTick == 0 || w.Tick < eff.ExpiresTick) {
+			return true
+		}
 	}
 	if w.Polities != nil && w.Polities.NodeLedBy(a.ID) != nil {
 		return true
@@ -334,7 +342,12 @@ func (w *World) actorEffectiveTags(a Actor) []string {
 }
 
 func (w *World) neighborEffectiveTags(a Actor) []string {
-	tags := w.Catalog.ActorEffectiveTags(a)
+	// Respect active disguise: resolve innate form tags from PerceivedFormID, not true FormID.
+	perceived := a
+	if pForm := w.Catalog.PerceivedFormID(a); pForm != a.FormID {
+		perceived.FormID = pForm
+	}
+	tags := w.Catalog.ActorEffectiveTags(perceived)
 	for _, t := range w.activeEffectGrantedTags(a) {
 		tags = appendUnique(tags, t)
 	}
@@ -685,7 +698,7 @@ func (w *World) addActorStateSlot(a *Actor, slotID string, delta int) {
 	setActorSlotValue(a, slotID, next)
 }
 
-func (w *World) interruptTaskOnDamage(b *Actor, cause string, source ...Event) []Event {
+func (w *World) interruptTaskOnDamage(tx *WorldTx, b *Actor, cause string, source ...Event) []Event {
 	if b == nil || b.Task == nil {
 		return nil
 	}
@@ -701,7 +714,7 @@ func (w *World) interruptTaskOnDamage(b *Actor, cause string, source ...Event) [
 			data["cause_event_id"] = source[0].ID
 			data["root_event_id"] = payloadInt64(source[0].Payload, "root_event_id")
 		}
-		return []Event{w.record(b, act, "dormant_interrupted", data)}
+		return []Event{w.recordWithTx(tx, b, act, "dormant_interrupted", data)}
 	}
 	if b.Task.Action.Kind == "sleep" {
 		b.Task = nil
@@ -709,22 +722,25 @@ func (w *World) interruptTaskOnDamage(b *Actor, cause string, source ...Event) [
 	return nil
 }
 
-func (w *World) deductDeclarativeCosts(a *Actor, spec ActionSpec) {
-	a.Energy -= spec.EnergyCost
-	for curID, amt := range declarativeCurrencyCosts(spec) {
+func (w *World) deductDeclarativeCosts(tx *WorldTx, a *Actor, spec ActionSpec, reason string) {
+	tx.setEnergy(a, a.Energy-spec.EnergyCost, reason)
+	costs := declarativeCurrencyCosts(spec)
+	for _, curID := range sortedProductionKeys(costs) {
+		amt := costs[curID]
 		if amt == 0 {
 			continue
 		}
 		if (curID == "" || curID == "coins") && len(w.Cohorts) > 0 {
-			w.adjustActorCurrency(a, curID, -amt, false)
+			tx.moveCurrency(a, curID, -amt, "treasury", reason)
 			w.creditTreasury(amt, "fee")
 		} else {
-			w.adjustActorCurrency(a, curID, -amt, true)
+			tx.MintOrBurnCurrency(a, curID, -amt, reason)
 		}
 	}
-	for itemID, qty := range spec.ItemCosts {
+	for _, itemID := range sortedProductionKeys(spec.ItemCosts) {
+		qty := spec.ItemCosts[itemID]
 		if qty > 0 && a.Items != nil {
-			w.adjustActorItem(a, itemID, -qty, true)
+			tx.ProduceOrConsumeItem(a, itemID, -qty, reason)
 		}
 	}
 	for slotID, amt := range spec.SlotCosts {
@@ -917,6 +933,15 @@ func CheckActionSpecPrerequisites(ctx ActionSpecContext, spec ActionSpec) string
 	if ok, reason := ActorMeetsDeclarativeCosts(a, spec); !ok {
 		return reason
 	}
+	if spec.TransitionID != "" {
+		trans, ok := ctx.Catalog.Transitions[spec.TransitionID]
+		if !ok {
+			return "unknown transition: " + spec.TransitionID
+		}
+		if reason := transitionRequirementReasonForActor(a, trans); reason != "" {
+			return reason
+		}
+	}
 	return ""
 }
 
@@ -946,32 +971,33 @@ func (w *World) ActionSpecBlockReason(a Actor, x Action, spec ActionSpec) string
 			return "venue lacks power: " + venueID
 		}
 	}
-	if spec.TransitionID != "" {
-		trans, ok := w.Catalog.Transitions[spec.TransitionID]
-		if !ok {
-			return "unknown transition: " + spec.TransitionID
-		}
-		if reason := w.transitionRequirementReason(a, trans); reason != "" {
-			return reason
-		}
-	}
 	return ""
 }
 
 // ActionSpecBlockReason returns a non-empty reason if the perceiving actor cannot execute `spec`.
 func (p Perception) ActionSpecBlockReason(spec ActionSpec) string {
-	return CheckActionSpecPrerequisites(ActionSpecContext{
+	if reason := CheckActionSpecPrerequisites(ActionSpecContext{
 		Actor:         p.Self,
 		Catalog:       p.Catalog,
 		Map:           p.Map,
 		DistrictState: p.DistrictState,
 		KnownTechs:    p.KnownTechs,
-	}, spec)
+	}, spec); reason != "" {
+		return reason
+	}
+	if spec.RequiredVenueFeature != "" && p.Self.VenueID != "" {
+		for _, node := range p.EnergyNodes {
+			if node.Kind == "consumer" && node.VenueID == p.Self.VenueID && !node.Powered {
+				return "venue lacks power: " + p.Self.VenueID
+			}
+		}
+	}
+	return ""
 }
 
-func (w *World) applyDeclarativeAction(a *Actor, x Action, spec ActionSpec) []Event {
+func (w *World) applyDeclarativeAction(tx *WorldTx, a *Actor, x Action, spec ActionSpec) []Event {
 	emitFail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	if reason := w.ActionSpecBlockReason(*a, x, spec); reason != "" {
 		return emitFail(reason)
@@ -982,7 +1008,18 @@ func (w *World) applyDeclarativeAction(a *Actor, x Action, spec ActionSpec) []Ev
 		return emitFail(reason)
 	}
 
-	w.deductDeclarativeCosts(a, spec)
+	w.deductDeclarativeCosts(tx, a, spec, x.Kind)
+	prepaidCurrencies := declarativeCurrencyCosts(spec)
+	prepaidTreasury := len(w.Cohorts) > 0
+	var prepaidItems map[string]int
+	for itemID, qty := range spec.ItemCosts {
+		if qty > 0 {
+			if prepaidItems == nil {
+				prepaidItems = map[string]int{}
+			}
+			prepaidItems[itemID] += qty
+		}
+	}
 	if spec.ResourcePool != "" {
 		need := spec.ResourceDraw
 		if need < 1 {
@@ -991,28 +1028,31 @@ func (w *World) applyDeclarativeAction(a *Actor, x Action, spec ActionSpec) []Ev
 		w.drawDistrictResource(a.Location, spec.ResourcePool, need)
 	}
 	if spec.ToolItem != "" {
-		w.wearToolItem("actor", a.ID, spec.ToolItem, 1)
+		w.wearToolItem(tx, "actor", a.ID, spec.ToolItem, 1)
 	}
 	ticks := spec.Ticks
 	if ticks < 1 {
 		ticks = 1
 	}
 	task := Task{
-		Action:      x,
-		TotalTicks:  ticks,
-		Remaining:   ticks - 1,
-		StartedTick: w.Tick,
-		Dormant:     spec.Dormant,
+		Action:            x,
+		TotalTicks:        ticks,
+		Remaining:         ticks - 1,
+		StartedTick:       w.Tick,
+		Dormant:           spec.Dormant,
+		PrepaidCurrencies: prepaidCurrencies,
+		PrepaidTreasury:   prepaidTreasury,
+		PrepaidItems:      prepaidItems,
 	}
 	if task.Remaining <= 0 {
-		return w.finishDeclarativeAction(a, task, spec)
+		return w.finishDeclarativeAction(tx, a, task, spec)
 	}
 	a.Task = &task
 	kind := "task_started"
 	if spec.Dormant {
 		kind = "dormant_started"
 	}
-	return []Event{w.record(a, x, kind, map[string]any{
+	return []Event{tx.record(a, x, kind, map[string]any{
 		"text":            fmt.Sprintf("%s began %s (%d ticks, dormant=%v)", a.Name, spec.Name, ticks, spec.Dormant),
 		"action_spec":     spec.ID,
 		"dormant":         spec.Dormant,
@@ -1020,13 +1060,14 @@ func (w *World) applyDeclarativeAction(a *Actor, x Action, spec ActionSpec) []Ev
 	})}
 }
 
-func (w *World) finishDeclarativeAction(a *Actor, t Task, spec ActionSpec) []Event {
+func (w *World) finishDeclarativeAction(tx *WorldTx, a *Actor, t Task, spec ActionSpec) []Event {
 	x := t.Action
 	if blocked, reason := w.IsActionBlockedByWorldLaw(*a, x); blocked {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		w.refundTaskPrepayments(tx, a, t)
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	if reason := w.declarativeTargetFailure(*a, &x, spec); reason != "" {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	var events []Event
 
@@ -1035,10 +1076,13 @@ func (w *World) finishDeclarativeAction(a *Actor, t Task, spec ActionSpec) []Eve
 		w.addActorStateSlot(a, slotID, gain)
 	}
 	if spec.HealthGain != 0 {
-		a.Health = maxInt(0, min(MaxHealth, a.Health+spec.HealthGain))
+		tx.adjustHealth(a, spec.HealthGain, 0, x.Kind)
+		if a.Health == 0 && !a.Dead {
+			events = append(events, w.markDeadIfZeroWithTx(tx, a, nil, x, "declarative_action")...)
+		}
 	}
 	if spec.EnergyGain != 0 {
-		a.Energy = maxInt(0, min(MaxEnergy, a.Energy+spec.EnergyGain))
+		tx.setEnergy(a, maxInt(0, min(MaxEnergy, a.Energy+spec.EnergyGain)), x.Kind)
 	}
 	var primaryItem string
 	var primaryQty int
@@ -1053,7 +1097,7 @@ func (w *World) finishDeclarativeAction(a *Actor, t Task, spec ActionSpec) []Eve
 			if qty <= 0 {
 				continue
 			}
-			w.adjustActorItem(a, itemID, qty, true)
+			tx.ProduceOrConsumeItem(a, itemID, qty, x.Kind)
 			if primaryItem == "" {
 				primaryItem, primaryQty = itemID, qty
 			}
@@ -1107,7 +1151,7 @@ func (w *World) finishDeclarativeAction(a *Actor, t Task, spec ActionSpec) []Eve
 	// 1c. Tech unlocks & profession XP.
 	for _, techID := range spec.UnlockTechs {
 		if tech, ok := w.Catalog.Techs[techID]; ok {
-			events = append(events, w.unlockTechForActor(a, x, tech)...)
+			events = append(events, w.unlockTechForActor(tx, a, x, tech)...)
 		}
 	}
 	xpProf := spec.XPProfession
@@ -1115,7 +1159,7 @@ func (w *World) finishDeclarativeAction(a *Actor, t Task, spec ActionSpec) []Eve
 		xpProf = spec.Profession
 	}
 	if xpProf != "" && spec.ProfessionXP > 0 {
-		events = append(events, w.grantProfessionXP(a, x, xpProf, spec.ProfessionXP, 1)...)
+		events = append(events, w.grantProfessionXP(tx, a, x, xpProf, spec.ProfessionXP, 1)...)
 	}
 
 	// 2. Spawn sustained ActiveEffect if declared.
@@ -1167,7 +1211,7 @@ func (w *World) finishDeclarativeAction(a *Actor, t Task, spec ActionSpec) []Eve
 		w.NextID++
 		w.ActiveEffects = append(w.ActiveEffects, eff)
 		observers := w.awakeSamePlaceObservers(*a, a.ID)
-		events = append(events, w.record(a, x, "effect_spawned", map[string]any{
+		events = append(events, tx.record(a, x, "effect_spawned", map[string]any{
 			"text":        fmt.Sprintf("%s activated %s on %s:%s (integrity %d, expires tick %d)", a.Name, eff.Name, anchor.Kind, anchor.ID, eff.Integrity, eff.ExpiresTick),
 			"effect_id":   eff.ID,
 			"effect_spec": eff.SpecID,
@@ -1183,22 +1227,17 @@ func (w *World) finishDeclarativeAction(a *Actor, t Task, spec ActionSpec) []Eve
 		if spec.TargetKind == "cohort" || atk.AreaScope == "cohort" {
 			c := w.findCohort(x.TargetID)
 			if c != nil && c.Population > 0 {
-				_, _, _, profCohortDmg := w.Catalog.ActorCombatProfile(*a)
-				cas := atk.CohortCasualties
-				if cas <= 0 {
-					cas = profCohortDmg
-				}
-				if cas <= 0 {
-					cas = 25
-				}
-				wounded, dead, _ := w.applyCohortCasualtiesWithCause(c, cas*2, cas, 0, "combat")
+				wounded, dead, absorbed, immune, broken := w.resolveCohortAttack(*a, c, atk, x)
+				events = append(events, broken...)
 				observers := w.awakeSamePlaceObservers(*a, a.ID)
-				events = append(events, w.record(a, x, "cohort_struck", map[string]any{
-					"text":        fmt.Sprintf("%s unleashed %s upon %s (%d wounded, %d killed)", a.Name, spec.Name, c.Name, wounded, dead),
-					"action_spec": spec.ID,
-					"cohort_id":   c.ID,
-					"wounded":     wounded,
-					"deaths":      dead,
+				events = append(events, tx.record(a, x, "cohort_struck", map[string]any{
+					"text":           fmt.Sprintf("%s unleashed %s upon %s (%d wounded, %d killed, absorbed=%d, immune=%v)", a.Name, spec.Name, c.Name, wounded, dead, absorbed, immune),
+					"action_spec":    spec.ID,
+					"cohort_id":      c.ID,
+					"wounded":        wounded,
+					"deaths":         dead,
+					"absorbed":       absorbed,
+					"immune_blocked": immune,
 				}, observers...))
 			}
 		} else if atk.AreaScope == "venue" {
@@ -1219,18 +1258,18 @@ func (w *World) finishDeclarativeAction(a *Actor, t Task, spec ActionSpec) []Eve
 					if dmg > b.Health {
 						dmg = b.Health
 					}
-					b.Health -= dmg
+					tx.adjustHealth(b, -dmg, 0, x.Kind)
 					var interruptEvs []Event
 					if b.Health > 0 {
-						interruptEvs = w.interruptTaskOnDamage(b, "combat")
+						interruptEvs = w.interruptTaskOnDamage(tx, b, "combat")
 					}
 					hitCount++
 					totalDmg += dmg
 					deathEvs = append(deathEvs, interruptEvs...)
-					deathEvs = append(deathEvs, w.markDeadIfZero(b, a, x, "combat")...)
+					deathEvs = append(deathEvs, w.markDeadIfZeroWithTx(tx, b, a, x, "combat")...)
 				}
 			}
-			events = append(events, w.record(a, x, "action_resolved", map[string]any{
+			events = append(events, tx.record(a, x, "action_resolved", map[string]any{
 				"text":        fmt.Sprintf("%s unleashed %s across %s (%d targets hit, %d total damage)", a.Name, spec.Name, targetVenue, hitCount, totalDmg),
 				"action_spec": spec.ID,
 				"targets_hit": hitCount,
@@ -1243,34 +1282,32 @@ func (w *World) finishDeclarativeAction(a *Actor, t Task, spec ActionSpec) []Eve
 			if dmg > b.Health {
 				dmg = b.Health
 			}
-			b.Health -= dmg
+			tx.adjustHealth(b, -dmg, 0, x.Kind)
 			var interruptEvs []Event
 			if dmg > 0 && b.Health > 0 {
-				interruptEvs = w.interruptTaskOnDamage(b, "combat")
+				interruptEvs = w.interruptTaskOnDamage(tx, b, "combat")
 			}
-			if b.Trust == nil {
-				b.Trust = map[string]int{}
-			}
-			b.Trust[a.ID] -= 2
-			events = append(events, w.record(a, x, "attacked", map[string]any{
+			tx.MutateTrust(b, a.ID, -2)
+			atkEv := tx.record(a, x, "attacked", map[string]any{
 				"text":           fmt.Sprintf("%s struck %s with %s (%d damage, %d absorbed, immune=%v)", a.Name, b.Name, spec.Name, dmg, absorbed, immune),
 				"action_spec":    spec.ID,
 				"damage":         dmg,
 				"absorbed":       absorbed,
 				"immune_blocked": immune,
-			}, b))
+			}, b)
+			events = append(events, atkEv)
 			events = append(events, interruptEvs...)
-			events = append(events, w.markDeadIfZero(b, a, x, "combat")...)
+			events = append(events, w.markDeadIfZeroWithTx(tx, b, a, x, "combat", atkEv)...)
 		}
 	}
 
 	// Phase 3 & 4 hooks: spec.TransitionID (executeTransition) & spec.AllowRewriteWorldLaw (WorldLaws).
 	if spec.TransitionID != "" {
 		transitionAction := Action{Kind: "attempt_transition", TransitionID: spec.TransitionID, BasisEventID: x.BasisEventID}
-		events = append(events, w.applyAttemptTransition(a, transitionAction)...)
+		events = append(events, w.applyAttemptTransition(tx, a, transitionAction)...)
 	}
 	if len(spec.WorldLawDelta) > 0 {
-		lawEvs, _ := w.ApplyWorldLawChange(a, x, spec.AllowRewriteWorldLaw, spec.WorldLawDelta)
+		lawEvs, _ := w.applyWorldLawChangeWithTx(tx, a, x, spec.AllowRewriteWorldLaw, spec.WorldLawDelta)
 		events = append(events, lawEvs...)
 	}
 
@@ -1286,7 +1323,7 @@ func (w *World) finishDeclarativeAction(a *Actor, t Task, spec ActionSpec) []Eve
 			payload["item_gains"] = cloneIntMap(spec.ItemGains)
 			payload["observation"] = Observation{Kind: "item_produced", Item: primaryItem, Location: a.Location, Quantity: primaryQty}
 		}
-		events = append([]Event{w.record(a, x, "action_resolved", payload)}, events...)
+		events = append([]Event{tx.record(a, x, "action_resolved", payload)}, events...)
 	}
 	return events
 }
@@ -1350,9 +1387,9 @@ func CanEquipItem(cat Catalog, a Actor, itemID string) (bool, string) {
 	return true, ""
 }
 
-func (w *World) applyEquip(a *Actor, x Action) []Event {
+func (w *World) applyEquip(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	if ok, reason := CanEquipItem(w.Catalog, *a, x.Item); !ok {
 		return fail(reason)
@@ -1368,15 +1405,12 @@ func (w *World) applyEquip(a *Actor, x Action) []Event {
 	if a.Items == nil {
 		a.Items = map[string]int{}
 	}
-	a.Items[x.Item]--
-	if a.Items[x.Item] == 0 {
-		delete(a.Items, x.Item)
-	}
+	tx.moveItem(a, x.Item, -1, spec.EquipSlot, x.Kind)
 	if prev != "" {
-		a.Items[prev]++
+		tx.moveItem(a, prev, 1, spec.EquipSlot, x.Kind)
 	}
 	a.Equipped[spec.EquipSlot] = x.Item
-	return []Event{w.record(a, x, "item_equipped", map[string]any{
+	return []Event{tx.record(a, x, "item_equipped", map[string]any{
 		"text":          fmt.Sprintf("%s equipped %s into %s", a.Name, x.Item, spec.EquipSlot),
 		"item":          x.Item,
 		"equip_slot":    spec.EquipSlot,
@@ -1384,9 +1418,9 @@ func (w *World) applyEquip(a *Actor, x Action) []Event {
 	})}
 }
 
-func (w *World) applyUnequip(a *Actor, x Action) []Event {
+func (w *World) applyUnequip(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
-		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
 	slot := x.TargetID
 	if slot == "" && x.Item != "" {
@@ -1403,8 +1437,8 @@ func (w *World) applyUnequip(a *Actor, x Action) []Event {
 	if a.Items == nil {
 		a.Items = map[string]int{}
 	}
-	a.Items[itemID]++
-	return []Event{w.record(a, x, "item_unequipped", map[string]any{
+	tx.moveItem(a, itemID, 1, slot, x.Kind)
+	return []Event{tx.record(a, x, "item_unequipped", map[string]any{
 		"text":       fmt.Sprintf("%s unequipped %s from %s", a.Name, itemID, slot),
 		"item":       itemID,
 		"equip_slot": slot,
@@ -1413,7 +1447,7 @@ func (w *World) applyUnequip(a *Actor, x Action) []Event {
 
 // applyMeleeHit resolves a physical strike through the same defenses as a
 // typed attack. A zero base uses the attacker's declared attack profile.
-func (w *World) applyMeleeHit(attacker, defender *Actor, x Action, base int) (damage, absorbed int, immune bool, effects []Event) {
+func (w *World) applyMeleeHit(tx *WorldTx, attacker, defender *Actor, x Action, base int) (damage, absorbed int, immune bool, effects []Event) {
 	var override *AttackSpec
 	support := 0
 	if party := w.ActorParty(attacker.ID); party != nil && !ActorHasTag(party.MemberIDs, defender.ID) {
@@ -1433,16 +1467,16 @@ func (w *World) applyMeleeHit(attacker, defender *Actor, x Action, base int) (da
 	}
 	damage, absorbed, immune, effects = w.resolveMultiDimCombatHit(*attacker, defender, override, x)
 	damage = minInt(defender.Health, damage)
-	defender.Health -= damage
+	tx.adjustHealth(defender, -damage, 0, x.Kind)
 	return
 }
 
-func (w *World) finishMeleeHit(attacker, defender *Actor, x Action, damage int, cause string, event Event) []Event {
+func (w *World) finishMeleeHit(tx *WorldTx, attacker, defender *Actor, x Action, damage int, cause string, event Event) []Event {
 	if damage == 0 {
 		return nil
 	}
 	if defender.Health == 0 {
-		return w.markDeadIfZero(defender, attacker, x, cause, event)
+		return w.markDeadIfZeroWithTx(tx, defender, attacker, x, cause, event)
 	}
-	return w.interruptTaskOnDamage(defender, cause, event)
+	return w.interruptTaskOnDamage(tx, defender, cause, event)
 }

@@ -13,23 +13,26 @@ import (
 
 // WorldPack is an external JSON world definition supporting arbitrary genres (historical, xianxia, sci-fi, etc.).
 type WorldPack struct {
-	ID             string                 `json:"id"`
-	Name           string                 `json:"name"`
-	Genre          string                 `json:"genre"`
-	Description    string                 `json:"description,omitempty"`
-	SeedTick       int64                  `json:"seed_tick,omitempty"`
-	PublicTreasury int64                  `json:"public_treasury,omitempty"`
-	Catalog        sim.Catalog            `json:"catalog"`
-	Map            sim.WorldMap           `json:"map"`
-	Polities       *sim.PolityNetwork     `json:"polities,omitempty"`
-	Houses         []sim.House            `json:"houses,omitempty"`
-	Factions       []sim.Faction          `json:"factions,omitempty"`
-	Actors         []sim.Actor            `json:"actors"`
-	Cohorts        []sim.PopulationCohort `json:"cohorts,omitempty"`
-	Ecology        *sim.EcologySpec       `json:"ecology,omitempty"`
-	Production     *sim.ProductionState   `json:"production,omitempty"`
+	SchemaVersion  int                     `json:"schema_version,omitempty"`
+	ID             string                  `json:"id"`
+	Name           string                  `json:"name"`
+	Genre          string                  `json:"genre"`
+	Description    string                  `json:"description,omitempty"`
+	SeedTick       int64                   `json:"seed_tick,omitempty"`
+	PublicTreasury int64                   `json:"public_treasury,omitempty"`
+	Catalog        sim.Catalog             `json:"catalog"`
+	Map            sim.WorldMap            `json:"map"`
+	Polities       *sim.PolityNetwork      `json:"polities,omitempty"`
+	Houses         []sim.House             `json:"houses,omitempty"`
+	Factions       []sim.Faction           `json:"factions,omitempty"`
+	Actors         []sim.Actor             `json:"actors"`
+	Cohorts        []sim.PopulationCohort  `json:"cohorts,omitempty"`
+	Ecology        *sim.EcologySpec        `json:"ecology,omitempty"`
+	Production     *sim.ProductionState    `json:"production,omitempty"`
 	Governance     *sim.GovernanceSpec     `json:"governance,omitempty"`
 	MarketCredit   *sim.MarketCreditSpec   `json:"market_credit,omitempty"`
+	JusticeRevolt  *sim.JusticeRevoltSpec  `json:"justice_revolt,omitempty"`
+	SpotlightRumor *sim.SpotlightRumorSpec `json:"spotlight_rumor,omitempty"`
 	FlowGrid       *sim.FlowGridState      `json:"flow_grid,omitempty"`
 	WorldLaws      map[string]int          `json:"world_laws,omitempty"`
 	Knowledge      *sim.KnowledgeBook      `json:"knowledge,omitempty"`
@@ -615,9 +618,8 @@ func (p *WorldPack) Instantiate(worldIDOverride string) (*sim.World, error) {
 	}
 	if p.Governance != nil {
 		cat.Governance = *p.Governance
-	} else if cat.Governance == (sim.GovernanceSpec{}) {
-		cat.Governance = sim.DefaultGovernanceSpec()
 	}
+	cat.Governance = cat.EffectiveGovernance()
 
 	worldMap := normalizeMap(sim.CloneMap(p.Map))
 	polities := normalizePolities(sim.ClonePolityNetwork(p.Polities))
@@ -927,6 +929,13 @@ func (p *WorldPack) Instantiate(worldIDOverride string) (*sim.World, error) {
 	if p.MarketCredit != nil {
 		w.MarketCredit.Spec = sim.EffectiveMarketCreditSpec(*p.MarketCredit)
 	}
+	if p.JusticeRevolt != nil {
+		spec := sim.EffectiveJusticeRevoltSpec(*p.JusticeRevolt)
+		w.JusticeRevolt.Spec = &spec
+	}
+	if p.SpotlightRumor != nil {
+		w.SpotlightRumor.Spec = sim.EffectiveSpotlightRumorSpec(*p.SpotlightRumor)
+	}
 
 	// Synchronize faction membership lists and actor Guilds slices consistently.
 	factionByID := make(map[string]*sim.Faction, len(w.Factions))
@@ -971,6 +980,8 @@ func (p *WorldPack) Instantiate(worldIDOverride string) (*sim.World, error) {
 	if p.Ecology != nil {
 		if p.Ecology.Enabled || p.Ecology.ScalePop > 0 || len(p.Ecology.DistrictStates) > 0 {
 			initEco = true
+		} else if p.SchemaVersion >= 2 {
+			initEco = false
 		}
 		if p.Ecology.ScalePop > 0 {
 			scalePop = p.Ecology.ScalePop
@@ -994,10 +1005,10 @@ func (p *WorldPack) Instantiate(worldIDOverride string) (*sim.World, error) {
 				if ov.Weather != "" {
 					base.Weather = ov.Weather
 				}
-				if ov.Sanitation > 0 {
+				if ov.Sanitation > 0 || p.SchemaVersion >= 2 {
 					base.Sanitation = ov.Sanitation
 				}
-				if ov.Corruption > 0 {
+				if ov.Corruption > 0 || p.SchemaVersion >= 2 {
 					base.Corruption = ov.Corruption
 				}
 				if ov.MoraleBonus != 0 {
@@ -1120,7 +1131,7 @@ func normalizeCatalog(cat sim.Catalog) sim.Catalog {
 	if len(cat.Weathers) == 0 {
 		cat.Weathers = sim.DefaultWeatherSpecs()
 	}
-	if cat.Lifecycle.MaxExpectancy <= 0 {
+	if !cat.Lifecycle.Ageless && cat.Lifecycle.MaxExpectancy <= 0 {
 		lc := sim.DefaultLifecycleSpec()
 		if _, hasWaste := cat.Items[lc.WasteItem]; !hasWaste {
 			lc.WasteItem = ""

@@ -14,6 +14,7 @@ import (
 // Blueprint is a compact, LLM-friendly world specification (~100-250 lines JSON) that compiles
 // into a strictly validated, conservation-balanced WorldPack with automatic survival scaffolding.
 type Blueprint struct {
+	SchemaVersion int                       `json:"schema_version,omitempty"`
 	ID            string                    `json:"id"`
 	Name          string                    `json:"name"`
 	Genre         string                    `json:"genre"`
@@ -26,7 +27,7 @@ type Blueprint struct {
 	FoodItemName  string                    `json:"food_item_name,omitempty"`
 	WaterItemID   string                    `json:"water_item_id,omitempty"`
 	WaterItemName string                    `json:"water_item_name,omitempty"`
-	SupplyDays    int                       `json:"supply_days,omitempty"`
+	SupplyDays    *int                      `json:"supply_days,omitempty"`
 	Institutions   *sim.InstitutionToggles `json:"institutions,omitempty"`
 	Forms          []BlueprintForm         `json:"forms,omitempty"`
 	Skills         []sim.SkillSpec         `json:"skills,omitempty"`
@@ -50,12 +51,13 @@ type Blueprint struct {
 }
 
 type BlueprintForm struct {
-	ID             string   `json:"id"`
-	Name           string   `json:"name"`
-	PowerTier      int      `json:"power_tier"`
-	CombatBonus    int      `json:"combat_bonus,omitempty"`
-	VigilanceBonus int      `json:"vigilance_bonus,omitempty"`
-	InnateTags     []string `json:"innate_tags,omitempty"`
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	PowerTier           *int     `json:"power_tier,omitempty"`
+	LifeExpectancyYears int      `json:"life_expectancy_years,omitempty"`
+	CombatBonus         int      `json:"combat_bonus,omitempty"`
+	VigilanceBonus      int      `json:"vigilance_bonus,omitempty"`
+	InnateTags          []string `json:"innate_tags,omitempty"`
 }
 
 type BlueprintItem struct {
@@ -65,9 +67,9 @@ type BlueprintItem struct {
 	Edible         bool   `json:"edible,omitempty"`
 	Potable        bool   `json:"potable,omitempty"`
 	Tradeable      *bool  `json:"tradeable,omitempty"`
-	BatchPrice     int    `json:"batch_price,omitempty"`
+	BatchPrice     *int   `json:"batch_price,omitempty"`
 	NutritionUnits int64  `json:"nutrition_units,omitempty"`
-	MassUnits      int64  `json:"mass_units,omitempty"`
+	MassUnits      *int64 `json:"mass_units,omitempty"`
 	CombatBonus    int    `json:"combat_bonus,omitempty"`
 	EquipSlot      string `json:"equip_slot,omitempty"`
 }
@@ -114,7 +116,7 @@ type BlueprintActor struct {
 	Hobbies     []string            `json:"hobbies,omitempty"`
 	FormID      string              `json:"form_id,omitempty"`
 	Attributes  *sim.Attributes     `json:"attributes,omitempty"`
-	AgeYears    int                 `json:"age_years,omitempty"`
+	AgeYears    *int                `json:"age_years,omitempty"`
 	Money       *int                `json:"money,omitempty"`
 	Goal        string              `json:"goal,omitempty"`
 	Trust       map[string]int      `json:"trust,omitempty"`
@@ -137,7 +139,7 @@ type BlueprintDiplomacy struct {
 	FactionA      string `json:"faction_a"`
 	FactionB      string `json:"faction_b"`
 	Stance        string `json:"stance"` // allied | friendly | neutral | hostile | at_war
-	RelationScore int    `json:"relation_score,omitempty"`
+	RelationScore *int   `json:"relation_score,omitempty"`
 	Reason        string `json:"reason,omitempty"`
 }
 
@@ -208,41 +210,39 @@ func CompileBlueprint(bp Blueprint) (*WorldPack, error) {
 	if genre == "" {
 		genre = "custom"
 	}
-	currency := strings.TrimSpace(bp.CurrencyName)
-	if currency == "" {
-		currency = "钱币"
+	useCJKDefaults := containsCJK(name) || containsCJK(genre) || containsCJK(bp.Summary)
+	defStr := func(val, cjk, ascii string) string {
+		if v := strings.TrimSpace(val); v != "" {
+			return v
+		}
+		if useCJKDefaults {
+			return cjk
+		}
+		return ascii
 	}
-	actorNoun := strings.TrimSpace(bp.ActorNoun)
-	if actorNoun == "" {
-		actorNoun = "人物"
-	}
-	authority := strings.TrimSpace(bp.AuthorityName)
-	if authority == "" {
-		authority = "执法机构"
-	}
-	oversight := strings.TrimSpace(bp.OversightName)
-	if oversight == "" {
-		oversight = "监察机构"
-	}
+	currency := defStr(bp.CurrencyName, "钱币", "coins")
+	actorNoun := defStr(bp.ActorNoun, "人物", "actor")
+	authority := defStr(bp.AuthorityName, "执法机构", "authority")
+	oversight := defStr(bp.OversightName, "监察机构", "oversight")
 	foodID := strings.TrimSpace(bp.FoodItemID)
 	if foodID == "" {
 		foodID = "ration"
 	}
-	foodName := strings.TrimSpace(bp.FoodItemName)
-	if foodName == "" {
-		foodName = "口粮"
-	}
+	foodName := defStr(bp.FoodItemName, "口粮", "ration")
 	waterID := strings.TrimSpace(bp.WaterItemID)
 	if waterID == "" {
 		waterID = "drinking_water"
 	}
-	waterName := strings.TrimSpace(bp.WaterItemName)
-	if waterName == "" {
-		waterName = "饮水"
-	}
-	supplyDays := bp.SupplyDays
-	if supplyDays <= 0 {
-		supplyDays = 180
+	waterName := defStr(bp.WaterItemName, "饮水", "drinking water")
+	medName := defStr("", "疗伤药剂", "medicine pack")
+	messengerName := defStr("", "驿传讯息", "messenger")
+	waterPoolName := defStr("", "水源", "fresh water")
+	supplyDays := 180
+	if bp.SupplyDays != nil {
+		supplyDays = *bp.SupplyDays
+		if supplyDays < 0 {
+			supplyDays = 0
+		}
 	}
 
 	// 1. Environment & Catalog scaffolding.
@@ -301,7 +301,7 @@ func CompileBlueprint(bp Blueprint) (*WorldPack, error) {
 			OfferThreshold: 12, SurplusThreshold: 18, ShortageThreshold: 6,
 		},
 		"medicine_pack": {
-			ID: "medicine_pack", Name: "疗伤药剂", Tier: 2, Tradeable: true,
+			ID: "medicine_pack", Name: medName, Tier: 2, Tradeable: true,
 			MedicinalHeal: 25, DiseaseCure: 1,
 			MassUnits: 1, BatchQty: 1, BatchPrice: 6, OfferThreshold: 4, SurplusThreshold: 6,
 		},
@@ -310,17 +310,23 @@ func CompileBlueprint(bp Blueprint) (*WorldPack, error) {
 		if strings.TrimSpace(ci.ID) == "" {
 			continue
 		}
-		mass := ci.MassUnits
-		if mass <= 0 {
-			mass = 1
+		mass := int64(1)
+		if ci.MassUnits != nil {
+			mass = *ci.MassUnits
+			if mass < 0 {
+				mass = 0
+			}
 		}
 		tier := ci.Tier
 		if tier <= 0 {
 			tier = 2
 		}
-		price := ci.BatchPrice
-		if price <= 0 {
-			price = tier * 5
+		price := tier * 5
+		if ci.BatchPrice != nil {
+			price = *ci.BatchPrice
+			if price < 0 {
+				price = 0
+			}
 		}
 		nm := ci.Name
 		if nm == "" {
@@ -344,21 +350,25 @@ func CompileBlueprint(bp Blueprint) (*WorldPack, error) {
 		if strings.TrimSpace(f.ID) == "" {
 			continue
 		}
-		tier := f.PowerTier
-		if tier <= 0 {
-			tier = 1
+		tier := 1
+		if f.PowerTier != nil {
+			tier = *f.PowerTier
+			if tier < 0 {
+				tier = 0
+			}
 		}
 		nm := f.Name
 		if nm == "" {
 			nm = f.ID
 		}
 		forms[f.ID] = sim.FormSpec{
-			ID:             f.ID,
-			Name:           nm,
-			PowerTier:      tier,
-			CombatBonus:    f.CombatBonus,
-			VigilanceBonus: f.VigilanceBonus,
-			InnateTags:     append([]string(nil), f.InnateTags...),
+			ID:                  f.ID,
+			Name:                nm,
+			PowerTier:           tier,
+			LifeExpectancyYears: f.LifeExpectancyYears,
+			CombatBonus:         f.CombatBonus,
+			VigilanceBonus:      f.VigilanceBonus,
+			InnateTags:          append([]string(nil), f.InnateTags...),
 		}
 	}
 
@@ -366,7 +376,7 @@ func CompileBlueprint(bp Blueprint) (*WorldPack, error) {
 	commChannels := map[string]sim.CommChannelSpec{
 		"messenger": {
 			ID:               "messenger",
-			Name:             "驿传讯息",
+			Name:             messengerName,
 			RangeKm:          200,
 			PenetrationPower: 100,
 			EnergyCost:       2,
@@ -377,7 +387,7 @@ func CompileBlueprint(bp Blueprint) (*WorldPack, error) {
 	// Ensure a minimal potable district resource pool so actors don't die of thirst when traveling.
 	resources := map[string]sim.ResourcePoolSpec{
 		"fresh_water": {
-			ID: "fresh_water", Name: "水源",
+			ID: "fresh_water", Name: waterPoolName,
 			RegenPermillePerDay: 100, PotableWater: true,
 		},
 	}
@@ -403,9 +413,11 @@ func CompileBlueprint(bp Blueprint) (*WorldPack, error) {
 		if nm == "" {
 			nm = d.ID
 		}
-		feats := append([]string(nil), d.Features...)
-		if len(feats) == 0 {
+		var feats []string
+		if d.Features == nil {
 			feats = []string{"public_forum", "market"}
+		} else {
+			feats = append([]string{}, d.Features...)
 		}
 		worldMap.Districts = append(worldMap.Districts, sim.District{
 			ID:          d.ID,
@@ -552,9 +564,12 @@ func CompileBlueprint(bp Blueprint) (*WorldPack, error) {
 				money = 0
 			}
 		}
-		age := ba.AgeYears
-		if age <= 0 {
-			age = 24 + (i % 20)
+		age := 24 + (i % 20)
+		if ba.AgeYears != nil {
+			age = *ba.AgeYears
+			if age < 0 {
+				age = 0
+			}
 		}
 		pin := true
 		if ba.PinFocal != nil {
@@ -575,9 +590,13 @@ func CompileBlueprint(bp Blueprint) (*WorldPack, error) {
 		}
 
 		houseID := "house_" + ba.ID
+		houseName := nm + " Quarters"
+		if useCJKDefaults {
+			houseName = nm + "居所"
+		}
 		houses = append(houses, sim.House{
 			ID:        houseID,
-			Name:      nm + "居所",
+			Name:      houseName,
 			District:  loc,
 			OwnerID:   ba.ID,
 			Residents: []string{ba.ID},
@@ -675,8 +694,10 @@ func CompileBlueprint(bp Blueprint) (*WorldPack, error) {
 			if stance == "" {
 				stance = "neutral"
 			}
-			score := d.RelationScore
-			if score == 0 {
+			score := 0
+			if d.RelationScore != nil {
+				score = *d.RelationScore
+			} else {
 				switch stance {
 				case "allied":
 					score = 65
@@ -907,4 +928,13 @@ func maxIntBP(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func containsCJK(s string) bool {
+	for _, r := range s {
+		if (r >= 0x4E00 && r <= 0x9FFF) || (r >= 0x3400 && r <= 0x4DBF) {
+			return true
+		}
+	}
+	return false
 }

@@ -8,6 +8,8 @@ import (
 	"github.com/changw98ic/world-relation-evo/internal/sim"
 )
 
+func intPtrGF(v int) *int { return &v }
+
 func TestGoldenFingerEndToEndBlueprintAndAgentLoop(t *testing.T) {
 	bp := pack.Blueprint{
 		ID:    "gf-e2e-demo",
@@ -20,8 +22,8 @@ func TestGoldenFingerEndToEndBlueprintAndAgentLoop(t *testing.T) {
 			{ID: "sys_pts", Name: "系统积分"},
 		},
 		Forms: []pack.BlueprintForm{
-			{ID: "qi_1", Name: "炼气一层", PowerTier: 1, CombatBonus: 0},
-			{ID: "qi_2", Name: "筑基初期", PowerTier: 2, CombatBonus: 15},
+			{ID: "qi_1", Name: "炼气一层", PowerTier: intPtrGF(1), CombatBonus: 0},
+			{ID: "qi_2", Name: "筑基初期", PowerTier: intPtrGF(2), CombatBonus: 15},
 		},
 		Transitions: []sim.TransitionSpec{
 			{
@@ -35,7 +37,7 @@ func TestGoldenFingerEndToEndBlueprintAndAgentLoop(t *testing.T) {
 			},
 		},
 		CustomItems: []pack.BlueprintItem{
-			{ID: "foundation_pill", Name: "筑基丹", Tier: 4, BatchPrice: 80},
+			{ID: "foundation_pill", Name: "筑基丹", Tier: 4, BatchPrice: intPtrGF(80)},
 		},
 		Districts: []pack.BlueprintDistrict{
 			{ID: "sect_outer", Name: "外门广场", Features: []string{"public_forum", "market"}},
@@ -53,10 +55,10 @@ func TestGoldenFingerEndToEndBlueprintAndAgentLoop(t *testing.T) {
 				},
 				Triggers: []sim.GFTriggerSpec{
 					{
-						ID:              "daily_signin",
-						Name:            "每日签到",
-						OnEvents:        []string{"day_start"},
-						Reward:          sim.GFRewardSpec{Currencies: map[string]int64{"sys_pts": 60}},
+						ID:       "daily_signin",
+						Name:     "每日签到",
+						OnEvents: []string{"day_start"},
+						Reward:   sim.GFRewardSpec{Currencies: map[string]int64{"sys_pts": 60}},
 					},
 				},
 				Shop: []sim.GFShopItemSpec{
@@ -71,11 +73,11 @@ func TestGoldenFingerEndToEndBlueprintAndAgentLoop(t *testing.T) {
 				},
 				Quests: []sim.GFQuestSpec{
 					{
-						ID:          "q_visit_valley",
-						Title:       "探索秘境灵谷",
-						Kind:        "visit_district",
-						TargetID:    "secret_valley",
-						Reward:      sim.GFRewardSpec{Coins: 50},
+						ID:       "q_visit_valley",
+						Title:    "探索秘境灵谷",
+						Kind:     "visit_district",
+						TargetID: "secret_valley",
+						Reward:   sim.GFRewardSpec{Coins: 50},
 					},
 				},
 				Foresights: []sim.GFForesight{

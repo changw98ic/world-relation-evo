@@ -149,11 +149,18 @@ func BuildChronicleArcs(sortedEvents []sim.Event) ([]ChronicleArc, DramaStats) {
 			rSummary := entry.Text
 			rTick := e.Tick
 			rDay := int64(clk.Day)
+			unverified := isUnverifiedNarrativeEvent(e)
 			if hasRoot {
 				rKind = rootEv.Kind
 				rSummary = eventPayloadText(rootEv)
 				rTick = rootEv.Tick
 				rDay = int64(sim.ClockAt(rootEv.Tick).Day)
+				if isUnverifiedNarrativeEvent(rootEv) {
+					unverified = true
+				}
+			}
+			if unverified && rSummary != "" && !strings.HasPrefix(rSummary, "[Unverified claim]") {
+				rSummary = "[Unverified claim] " + rSummary
 			}
 			arc = &ChronicleArc{
 				RootEventID: rootID,
@@ -180,7 +187,7 @@ func BuildChronicleArcs(sortedEvents []sim.Event) ([]ChronicleArc, DramaStats) {
 		if e.ActorID != "" && e.ActorID != "world" {
 			partSet[rootID][e.ActorID] = true
 		}
-		if e.TargetID != "" && e.TargetID != "world" {
+		if e.TargetID != "" && e.TargetID != "world" && chronicleTargetIsPerson(e.Kind) {
 			partSet[rootID][e.TargetID] = true
 		}
 		arc.KeyEvents = append(arc.KeyEvents, entry)
@@ -275,6 +282,34 @@ func QueryEvents(events []sim.Event, f EventQueryFilter) QueryResult {
 		})
 	}
 	return res
+}
+
+func isUnverifiedNarrativeEvent(e sim.Event) bool {
+	if e.Kind == "rumor_panic_triggered" {
+		if verified, ok := e.Payload["verified"].(bool); ok && !verified {
+			return true
+		}
+		if _, ok := e.Payload["verified"]; !ok {
+			return true
+		}
+		return false
+	}
+	if e.Kind == "speech" || e.Kind == "channel_message" || e.Kind == "channel_transmitted" {
+		hasFact := false
+		if v, ok := e.Payload["fact_event_id"]; ok {
+			switch n := v.(type) {
+			case int64:
+				hasFact = n > 0
+			case int:
+				hasFact = n > 0
+			case float64:
+				hasFact = n > 0
+			}
+		}
+		hasWitness, _ := e.Payload["witness_id"].(string)
+		return !hasFact && hasWitness == ""
+	}
+	return false
 }
 
 func eventInvolvesActor(e sim.Event, actorID string) bool {

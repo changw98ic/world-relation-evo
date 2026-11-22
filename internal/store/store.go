@@ -86,6 +86,15 @@ func (s *Store) Load(ctx context.Context, id string) (*sim.World, error) {
 // hold Lock for their world and never wait for model responses in this transaction.
 // Events are persisted in multi-row batches to minimize database round-trips on large worlds.
 func (s *Store) Save(ctx context.Context, w *sim.World, events []sim.Event) error {
+	return s.SaveTick(ctx, w, events, nil, false)
+}
+
+// SaveTick atomically persists the world state, settled events, optional decision log,
+// and optional replay checkpoint inside a single SQL transaction.
+func (s *Store) SaveTick(ctx context.Context, w *sim.World, events []sim.Event, decisionLog *sim.TickDecisionLog, saveCheckpoint bool) error {
+	if w == nil {
+		return fmt.Errorf("world is nil")
+	}
 	state, err := json.Marshal(w)
 	if err != nil {
 		return err
@@ -95,9 +104,8 @@ func (s *Store) Save(ctx context.Context, w *sim.World, events []sim.Event) erro
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO worlds (id,tick,state) VALUES ($1,$2,$3)
-        ON CONFLICT (id) DO UPDATE SET tick=EXCLUDED.tick,state=EXCLUDED.state,updated_at=now()`, w.ID, w.Tick, string(state))
-	if err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO worlds (id,tick,state) VALUES ($1,$2,$3)
+        ON CONFLICT (id) DO UPDATE SET tick=EXCLUDED.tick,state=EXCLUDED.state,updated_at=now()`, w.ID, w.Tick, string(state)); err != nil {
 		return err
 	}
 	const batchSize = 200
@@ -130,6 +138,28 @@ func (s *Store) Save(ctx context.Context, w *sim.World, events []sim.Event) erro
 			return fmt.Errorf("persist world %q event batch starting at %d: %w", w.ID, chunk[0].ID, err)
 		}
 	}
+	if decisionLog != nil {
+		raw, err := json.Marshal(decisionLog)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO world_decision_logs (world_id, tick, decisions, created_at)
+			VALUES ($1, $2, $3::jsonb, now())
+			ON CONFLICT (world_id, tick) DO UPDATE
+			SET decisions = EXCLUDED.decisions, created_at = now()`, w.ID, decisionLog.Tick, string(raw)); err != nil {
+			return err
+		}
+	}
+	if saveCheckpoint {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO world_checkpoints (world_id, tick, state, created_at)
+			VALUES ($1, $2, $3::jsonb, now())
+			ON CONFLICT (world_id, tick) DO UPDATE
+			SET state = EXCLUDED.state, created_at = now()`, w.ID, w.Tick, string(state)); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 
@@ -155,26 +185,6 @@ func CompactEvents(events []sim.Event) []sim.Event {
 	return out
 }
 
-// SaveCheckpoint persists a full World snapshot keyed by (world_id, tick) for deterministic replay.
-func (s *Store) SaveCheckpoint(ctx context.Context, w *sim.World) error {
-	if w == nil {
-		return fmt.Errorf("world is nil")
-	}
-	state, err := json.Marshal(w)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO world_checkpoints (world_id, tick, state, created_at)
-		VALUES ($1, $2, $3::jsonb, now())
-		ON CONFLICT (world_id, tick) DO UPDATE
-			SET state = EXCLUDED.state, created_at = now()`, w.ID, w.Tick, string(state))
-	if err != nil {
-		return fmt.Errorf("save checkpoint world=%q tick=%d: %w", w.ID, w.Tick, err)
-	}
-	return nil
-}
-
 // LoadNearestCheckpoint returns the latest checkpoint for worldID with tick <= maxTick,
 // along with its raw JSON bytes so replay starts from the exact serialized snapshot.
 func (s *Store) LoadNearestCheckpoint(ctx context.Context, worldID string, maxTick int64) (*sim.World, []byte, error) {
@@ -192,23 +202,6 @@ func (s *Store) LoadNearestCheckpoint(ctx context.Context, worldID string, maxTi
 		return nil, nil, fmt.Errorf("unmarshal checkpoint world=%q: %w", worldID, err)
 	}
 	return w, raw, nil
-}
-
-// SaveDecisionLog persists the settled actor decisions for a single tick.
-func (s *Store) SaveDecisionLog(ctx context.Context, worldID string, log sim.TickDecisionLog) error {
-	raw, err := json.Marshal(log)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO world_decision_logs (world_id, tick, decisions, created_at)
-		VALUES ($1, $2, $3::jsonb, now())
-		ON CONFLICT (world_id, tick) DO UPDATE
-			SET decisions = EXCLUDED.decisions, created_at = now()`, worldID, log.Tick, string(raw))
-	if err != nil {
-		return fmt.Errorf("save decision log world=%q tick=%d: %w", worldID, log.Tick, err)
-	}
-	return nil
 }
 
 // LoadDecisionLogs loads ordered per-tick decision logs for worldID across [fromTick, toTick].

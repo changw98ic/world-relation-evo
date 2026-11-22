@@ -36,7 +36,7 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 				}
 			}
 			if home := primaryHome(p); home != nil {
-				if step, ok := stepToHouse(p, *home); ok && consider(step) {
+				if step, ok := stepToHouse(p, home.Site()); ok && consider(step) {
 					return
 				}
 			}
@@ -57,7 +57,7 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 	// returning to care work or resting because starvation has lowered health.
 	if a.Hunger > 0 && !p.Catalog.ActorIsHungerDisabled(a) && totalEdibleItems(p.Catalog, a) == 0 {
 		for _, o := range p.Offers {
-			if o.Buyer == a.ID && o.ResponderID() == a.ID && p.OfferBlockReasons[o.ID] == "" && p.Catalog.ActorAcceptsFood(a, p.Catalog.Items[o.Item]) && availableMoneyAfterAgreements(p) >= o.Price && a.Trust[o.Seller] >= 0 {
+			if o.Buyer == a.ID && o.ResponderID() == a.ID && p.OfferAcceptanceBlockReason(o) == "" && p.Catalog.ActorAcceptsFood(a, p.Catalog.Items[o.Item]) && availableMoneyAfterAgreements(p) >= o.Price && a.Trust[o.Seller] >= 0 {
 				for _, n := range p.Nearby {
 					if n.ID == o.Seller && !n.Jailed && consider(sim.Action{Kind: "accept", OfferID: o.ID, TargetID: o.Seller}) {
 						return
@@ -103,7 +103,7 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 			if !canCollect {
 				continue
 			}
-			for _, action := range p.GrowthCareActions {
+			for _, action := range growthCareActions(p) {
 				if action.Kind == "harvest" && action.TargetID == fmt.Sprint(g.ID) && p.Capabilities()["harvest"] && consider(action) {
 					return
 				}
@@ -140,19 +140,13 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 			}
 			continue
 		}
-		if g.District != a.Location {
-			if step, ok := stepTowardDistrict(p, g.District, 0); ok && consider(step) {
-				return
-			}
-			continue
-		}
 		if g.HouseID == "" && a.InsideHouse != "" && consider(sim.Action{Kind: "leave_house"}) {
 			return
 		}
 		if g.HouseID != "" && a.InsideHouse != g.HouseID {
 			for _, h := range p.AccessibleHouses {
 				if h.ID == g.HouseID {
-					if step, ok := stepToHouse(p, h); ok && consider(step) {
+					if step, ok := stepToHouse(p, h.Site()); ok && consider(step) {
 						return
 					}
 					break
@@ -195,7 +189,7 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 			available := availableItemAfterAgreements(p, o.Item)
 			willing = available >= o.Quantity && ((a.Plan != nil && a.Plan.Status == "active" && a.Plan.Item == o.Item) || p.Catalog.TagsProduce(a.IdentityTags(), o.Item) || available >= desiredBuyerStock(p, o.Item)+o.Quantity)
 		}
-		if here && p.OfferBlockReasons[o.ID] == "" && willing && a.Trust[other] >= 0 && consider(sim.Action{Kind: "accept", OfferID: o.ID, TargetID: other}) {
+		if here && p.OfferAcceptanceBlockReason(o) == "" && willing && a.Trust[other] >= 0 && consider(sim.Action{Kind: "accept", OfferID: o.ID, TargetID: other}) {
 			return
 		}
 		if consider(sim.Action{Kind: "reject", OfferID: o.ID, TargetID: other}) {
@@ -739,11 +733,16 @@ func planSleep(p sim.Perception) sim.Action {
 		ticks = 20
 	}
 	home := primaryHome(p)
+	if deed, known := p.KnownHouse(a.HomeID); known && deed.District != a.Location {
+		if step, ok := stepToHouseNoSleep(p, deed); ok {
+			return step
+		}
+	}
 	if home != nil {
 		if a.InsideHouse == home.ID {
 			return sim.Action{Kind: "sleep", Quantity: ticks}
 		}
-		if step, ok := stepToHouseNoSleep(p, *home); ok {
+		if step, ok := stepToHouseNoSleep(p, home.Site()); ok {
 			return step
 		}
 	}
@@ -753,7 +752,7 @@ func planSleep(p sim.Perception) sim.Action {
 	return sim.Action{Kind: "wait"}
 }
 
-func stepToHouseNoSleep(p sim.Perception, h sim.House) (sim.Action, bool) {
+func stepToHouseNoSleep(p sim.Perception, h sim.HouseSite) (sim.Action, bool) {
 	a := p.Self
 	if a.InsideHouse == h.ID {
 		return sim.Action{}, false
@@ -856,7 +855,7 @@ func stepTowardDistrict(p sim.Perception, targetDistrict string, basisEventID in
 	return sim.Action{Kind: "move", Location: next.To, BasisEventID: basisEventID}, true
 }
 
-func stepToHouse(p sim.Perception, h sim.House) (sim.Action, bool) {
+func stepToHouse(p sim.Perception, h sim.HouseSite) (sim.Action, bool) {
 	a := p.Self
 	if a.InsideHouse == h.ID {
 		return sim.Action{}, false
@@ -878,7 +877,7 @@ func stepToRepairHouse(p sim.Perception, h sim.House) (sim.Action, bool) {
 	if a.Location == h.District && (a.InsideHouse == "" || a.InsideHouse == h.ID) {
 		return sim.Action{Kind: "repair_house", HouseID: h.ID}, true
 	}
-	return stepToHouse(p, h)
+	return stepToHouse(p, h.Site())
 }
 
 // planHouseUpgrade renovates an owned dwelling when the configured builder profession has materials.
@@ -898,7 +897,7 @@ func planHouseUpgrade(p sim.Perception) (sim.Action, bool) {
 	if a.InsideHouse == home.ID {
 		return sim.Action{Kind: "upgrade_house", HouseID: home.ID}, true
 	}
-	return stepToHouse(p, *home)
+	return stepToHouse(p, home.Site())
 }
 
 func professionHasReachableWork(p sim.Perception, prof sim.Profession) bool {
@@ -1031,7 +1030,7 @@ func planCreditAndRelations(p sim.Perception) (sim.Action, bool) {
 		for _, nb := range p.Nearby {
 			nearbyRel[nb.ID] = nb.FactionRelation
 		}
-		for _, action := range p.MediationActions {
+		for _, action := range mediationActions(p) {
 			if rel := nearbyRel[action.TargetID]; rel == "at_war" || rel == "hostile" {
 				continue
 			}
@@ -1054,7 +1053,7 @@ func planConflictAndLaw(p sim.Perception) (sim.Action, bool) {
 	allowed := p.Capabilities()
 
 	// 0. Upright censors and honest law officers audit & purge co-located officers when backed by epistemic evidence.
-	for _, action := range p.CaseActions {
+	for _, action := range caseActions(p) {
 		if allowed[action.Kind] {
 			return action, true
 		}
@@ -1062,13 +1061,8 @@ func planConflictAndLaw(p sim.Perception) (sim.Action, bool) {
 
 	// 0b. Upright censors file censorate appeals for known local wrongful convictions (or travel to the court district they heard about).
 	if allowed["file_appeal"] && a.IllicitGain == 0 && a.Energy >= 10 {
-		if p.HasOpenWrongfulCase && p.AppealTargetID != "" {
-			return sim.Action{
-				Kind:         "file_appeal",
-				TargetID:     p.AppealTargetID,
-				Location:     a.Location,
-				BasisEventID: p.AppealBasisEventID,
-			}, true
+		if appeal, ok := appealAction(p); ok {
+			return appeal, true
 		}
 		if a.Energy >= 16 {
 			for _, lead := range sim.ActorKnownWrongfulLeads(a) {
@@ -1354,20 +1348,14 @@ func resolveRecipe(p sim.Perception, r sim.Recipe, depth int) (sim.Action, bool)
 	}
 
 	if r.HouseFacility != "" {
-		var facilityHouse *sim.House
-		for i := range p.AccessibleHouses {
-			if p.AccessibleHouses[i].HasFacility(r.HouseFacility) {
-				facilityHouse = &p.AccessibleHouses[i]
-				break
-			}
-		}
-		if facilityHouse == nil {
+		facilityHouse, known := p.KnownWorkshop(r.HouseFacility)
+		if !known {
 			return sim.Action{}, false
 		}
 		if a.InsideHouse == facilityHouse.ID {
 			return sim.Action{Kind: "craft", RecipeID: r.ID}, p.RecipeBlockReason(r) == ""
 		}
-		return stepToHouse(p, *facilityHouse)
+		return stepToHouse(p, facilityHouse)
 	}
 
 	if r.NodeFeature != "" {
@@ -1559,9 +1547,9 @@ func chooseContinuity(p sim.Perception) (sim.Action, bool) {
 			}
 		}
 		if !pending {
-			for _, q := range p.LoanQuotes {
-				if q.Principal > 0 && nearby(q.LenderID) && a.Trust[q.LenderID] >= 0 {
-					return sim.Action{Kind: "borrow_loan", TargetID: q.LenderID}, true
+			for _, peer := range p.Nearby {
+				if canRequestLoan(peer, p.CreditTerms) && nearby(peer.ID) && a.Trust[peer.ID] >= 0 {
+					return sim.Action{Kind: "borrow_loan", TargetID: peer.ID}, true
 				}
 			}
 		}
@@ -1859,7 +1847,7 @@ func learnTravelProfession(p sim.Perception, targetDistrict string) (sim.Action,
 				continue
 			}
 			if !guild.Joined {
-				if ok, _ := p.Self.Attributes.Meets(guild.Requirements); !ok {
+				if guild.JoinBlockReason != "" {
 					continue
 				}
 			}

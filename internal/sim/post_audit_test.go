@@ -289,11 +289,7 @@ func TestCoercionUsesTheSameOffenseForPreviewAndSettlement(t *testing.T) {
 	w.addSecret(victim.ID, "offense", offender.ID, 40, 0, []string{offender.ID})
 	secret := &w.Secrets[0]
 	secret.HolderStances[offender.ID] = "leverage"
-	p := w.View(offender.ID)
-	if len(p.BlackmailActions) != 1 {
-		t.Fatalf("wanted one leverage action, got %+v", p.BlackmailActions)
-	}
-	action := p.BlackmailActions[0]
+	action := Action{Kind: "blackmail", TargetID: victim.ID, Item: secret.ID, Text: "subtle", Price: 2}
 	preview := w.BlackmailAssessment(*victim, *offender, *secret, action, false)
 	events := w.Apply(offender.ID, action)
 	if events[0].Kind != "blackmailed" || payloadInt64(events[0].Payload, "accumulated_offense") != int64(preview.AccumulatedAfter) ||
@@ -310,16 +306,22 @@ func TestCoercionUsesTheSameOffenseForPreviewAndSettlement(t *testing.T) {
 			t.Fatalf("%s did not record offense at tick zero: %+v", kind, rec)
 		}
 	}
-	for i := 0; i < 8 && len(w.View(offender.ID).BlackmailActions) > 0; i++ {
+	for attempt := 0; ; attempt++ {
+		if attempt == 8 {
+			t.Fatal("repeated coercion did not reach a breaking point")
+		}
 		offender.Energy = MaxEnergy
-		w.Apply(offender.ID, action)
-	}
-	if len(w.View(offender.ID).BlackmailActions) != 0 {
-		t.Fatal("AI still proposes an attempt expected to trigger retaliation")
-	}
-	events = w.Apply(offender.ID, action)
-	if events[0].Kind != "blackmail_refused" {
-		t.Fatalf("execution should reach the predicted breaking point: %+v", events)
+		preview = w.BlackmailAssessment(*victim, *offender, *secret, action, false)
+		events = w.Apply(offender.ID, action)
+		if preview.Outcome == "breaking_point" {
+			if events[0].Kind != "blackmail_refused" || payloadInt64(events[0].Payload, "accumulated_offense") != int64(preview.AccumulatedAfter) {
+				t.Fatalf("previewed breaking point did not match settlement: %+v vs %+v", preview, events)
+			}
+			break
+		}
+		if events[0].Kind != "blackmailed" {
+			t.Fatalf("blackmail failed before the previewed breaking point: %+v", events)
+		}
 	}
 }
 
@@ -455,7 +457,7 @@ func TestPartyLeaderShareConservesCoinsWithAnotherMemberClaiming(t *testing.T) {
 	w.InitLedgerAudit()
 	w.adjustActorCurrency(claimer, "coins", 12, true)
 	event := w.record(claimer, Action{Kind: "hunt_threat"}, "threat_hunted", map[string]any{"text": "bounty earned"})
-	split := w.settlePartyRewardSplit(claimer, 12, event)
+	split := w.settlePartyRewardSplit(nil, claimer, 12, event)
 	if leader.Money != 6 || claimer.Money != 3 || other.Money != 3 || sleeper.Money != 0 || len(split) != 1 {
 		t.Fatalf("incorrect split: leader %d, claimer %d, other %d, sleeping %d", leader.Money, claimer.Money, other.Money, sleeper.Money)
 	}
@@ -475,8 +477,8 @@ func TestSwearBondRejectsDuplicateAndUpdatesEligibility(t *testing.T) {
 	w.InitLedgerAudit()
 
 	viewBefore := w.View(a.ID)
-	if !ActorHasTag(viewBefore.EligibleBondIDs, b.ID) {
-		t.Fatalf("expected %s in EligibleBondIDs before swearing bond, got %+v", b.ID, viewBefore.EligibleBondIDs)
+	if viewBefore.localNeighbor(b.ID) == nil || viewBefore.localNeighbor(b.ID).KinshipToSelf != "" {
+		t.Fatalf("expected no kinship with %s before swearing bond, got %+v", b.ID, viewBefore.Nearby)
 	}
 
 	ev1 := w.Apply(a.ID, Action{Kind: "swear_bond", TargetID: b.ID, Price: 2})
@@ -487,12 +489,12 @@ func TestSwearBondRejectsDuplicateAndUpdatesEligibility(t *testing.T) {
 	moneyAAfterFirst, moneyBAfterFirst := a.Money, b.Money
 
 	viewAfter := w.View(a.ID)
-	if ActorHasTag(viewAfter.EligibleBondIDs, b.ID) {
-		t.Fatalf("expected %s removed from EligibleBondIDs after bond, got %+v", b.ID, viewAfter.EligibleBondIDs)
+	if viewAfter.localNeighbor(b.ID) == nil || viewAfter.localNeighbor(b.ID).KinshipToSelf != "sworn" {
+		t.Fatalf("expected %s observed as sworn after the bond, got %+v", b.ID, viewAfter.Nearby)
 	}
 	viewBAfter := w.View(b.ID)
-	if ActorHasTag(viewBAfter.EligibleBondIDs, a.ID) {
-		t.Fatalf("expected %s removed from B's EligibleBondIDs after symmetric bond, got %+v", a.ID, viewBAfter.EligibleBondIDs)
+	if viewBAfter.localNeighbor(a.ID) == nil || viewBAfter.localNeighbor(a.ID).KinshipToSelf != "sworn" {
+		t.Fatalf("expected %s observed as sworn in the other direction, got %+v", a.ID, viewBAfter.Nearby)
 	}
 
 	// Repeating from either side must be rejected without transferring coins or inflating trust.

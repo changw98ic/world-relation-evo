@@ -51,7 +51,6 @@ type ActorBiography struct {
 	Alive           bool     `json:"alive"`
 	DeathCause      string   `json:"death_cause,omitempty"`
 	DeathTick       int64    `json:"death_tick,omitempty"`
-	Coins           int      `json:"coins"`
 	Guilds          []string `json:"guilds,omitempty"`
 	TopSkills       []string `json:"top_skills,omitempty"`
 	ActiveAmbitions []string `json:"active_ambitions,omitempty"`
@@ -226,8 +225,13 @@ func eventRootID(e sim.Event) int64 {
 }
 
 // BuildChronicle compiles a structured, genre-agnostic chronicle report from simulation events and optional final World state.
+// Internally projects finalWorld into an immutable WorldMetadataSnapshot so chronicle construction never touches mutable world state.
 // Passing maxTimeline <= 0 preserves all major chronological events without truncation.
 func BuildChronicle(events []sim.Event, finalWorld *sim.World, maxTimeline int) ChronicleReport {
+	return buildChronicleFromSnapshot(events, ProjectWorldMetadata(finalWorld), maxTimeline)
+}
+
+func buildChronicleFromSnapshot(events []sim.Event, snap *WorldMetadataSnapshot, maxTimeline int) ChronicleReport {
 	sortedEvents := append([]sim.Event(nil), events...)
 	sort.Slice(sortedEvents, func(i, j int) bool {
 		if sortedEvents[i].Tick != sortedEvents[j].Tick {
@@ -237,7 +241,7 @@ func BuildChronicle(events []sim.Event, finalWorld *sim.World, maxTimeline int) 
 	})
 
 	rep := ChronicleReport{
-		HasFinalState:   finalWorld != nil,
+		HasFinalState:   snap != nil,
 		TotalEvents:     len(sortedEvents),
 		EventKindCounts: map[string]int{},
 	}
@@ -361,137 +365,28 @@ func BuildChronicle(events []sim.Event, finalWorld *sim.World, maxTimeline int) 
 	}
 	rep.Arcs, rep.Drama = BuildChronicleArcs(sortedEvents)
 
-	if finalWorld != nil {
-		rep.WorldID = finalWorld.ID
-		if finalWorld.Tick > rep.TotalTicks {
-			rep.TotalTicks = finalWorld.Tick
+	if snap != nil {
+		rep.WorldID = snap.WorldID
+		if snap.Tick > rep.TotalTicks {
+			rep.TotalTicks = snap.Tick
 		}
-		if finalWorld.Catalog.Environment != nil {
-			rep.Genre = finalWorld.Catalog.Environment.Genre
-			rep.Theme = finalWorld.Catalog.Environment.Theme
+		rep.Genre = snap.Genre
+		rep.Theme = snap.Theme
+		rep.LivingActors = snap.LivingActors
+		rep.DeadActors = snap.DeadActors
+		rep.CohortPopulation = snap.CohortPopulation
+		rep.TotalCoins = snap.TotalCoins
+		rep.LedgerConserved = snap.LedgerConserved
+		rep.LedgerError = snap.LedgerError
+		rep.ActiveParties = snap.ActiveParties
+		for _, bio := range snap.Actors {
+			b := bio
+			b.MilestoneCount = milestoneByActor[b.ID]
+			rep.Biographies = append(rep.Biographies, b)
 		}
-		cons := sim.InspectWorldConservation(finalWorld)
-		rep.LivingActors = cons.LivingActors
-		rep.DeadActors = cons.DeadActors
-		rep.CohortPopulation = cons.CohortPopulation
-		rep.TotalCoins = cons.TotalCoins
-		rep.LedgerConserved = cons.LedgerConserved
-		rep.LedgerError = cons.LedgerError
-		rep.ActiveParties = len(finalWorld.Parties)
-
-		// Mentorship and grudge counts per actor.
-		mentorCount := map[string]int{}
-		grudgeCount := map[string]int{}
-		if finalWorld.Relations != nil {
-			for _, m := range finalWorld.Relations.Mentorships {
-				mentorCount[m.MentorID]++
-				mentorCount[m.ApprenticeID]++
-			}
-			for _, g := range finalWorld.Relations.Grudges {
-				if !g.Resolved {
-					grudgeCount[g.AggrievedID]++
-				}
-			}
-		}
-
-		actorsSorted := append([]sim.Actor(nil), finalWorld.Actors...)
-		sort.Slice(actorsSorted, func(i, j int) bool { return actorsSorted[i].ID < actorsSorted[j].ID })
-		for _, a := range actorsSorted {
-			var skillList []string
-			skKeys := make([]string, 0, len(a.Skills))
-			for k, lv := range a.Skills {
-				if lv > 0 {
-					skKeys = append(skKeys, k)
-				}
-			}
-			sort.Strings(skKeys)
-			for _, k := range skKeys {
-				skillList = append(skillList, fmt.Sprintf("%s:lv%d", k, a.Skills[k]))
-			}
-			var ambList []string
-			for _, amb := range a.Ambitions {
-				status := "active"
-				if amb.Completed {
-					status = "done"
-				}
-				ambList = append(ambList, fmt.Sprintf("%s(%s)", amb.Kind, status))
-			}
-			rep.Biographies = append(rep.Biographies, ActorBiography{
-				ID:              a.ID,
-				Name:            a.Name,
-				Role:            a.Role,
-				FormID:          a.FormID,
-				PowerTier:       finalWorld.Catalog.ActorPowerTier(a),
-				Alive:           !a.Dead,
-				DeathCause:      a.DeathCause,
-				DeathTick:       a.DeathTick,
-				Coins:           a.Money,
-				Guilds:          append([]string(nil), a.Guilds...),
-				TopSkills:       skillList,
-				ActiveAmbitions: ambList,
-				MentorshipCount: mentorCount[a.ID],
-				ActiveGrudges:   grudgeCount[a.ID],
-				MilestoneCount:  milestoneByActor[a.ID],
-			})
-		}
-
-		// Factions
-		distByFac := map[string][]string{}
-		if finalWorld.Relations != nil {
-			for dID, fID := range finalWorld.Relations.ControllingFaction {
-				if fID != "" {
-					distByFac[fID] = append(distByFac[fID], dID)
-				}
-			}
-			for fID := range distByFac {
-				sort.Strings(distByFac[fID])
-			}
-		}
-		facs := append([]sim.Faction(nil), finalWorld.Factions...)
-		sort.Slice(facs, func(i, j int) bool { return facs[i].ID < facs[j].ID })
-		for _, f := range facs {
-			leader := ""
-			if finalWorld.Relations != nil {
-				leader = finalWorld.Relations.FactionLeader[f.ID]
-			}
-			rep.Factions = append(rep.Factions, FactionStanding{
-				ID:                  f.ID,
-				Name:                f.Name,
-				LeaderID:            leader,
-				Members:             len(f.Members),
-				Level:               f.Level,
-				ControlledDistricts: distByFac[f.ID],
-			})
-		}
-
-		// Diplomacy
-		if finalWorld.Diplomacy != nil && len(finalWorld.Diplomacy.Relations) > 0 {
-			dKeys := make([]string, 0, len(finalWorld.Diplomacy.Relations))
-			for k := range finalWorld.Diplomacy.Relations {
-				dKeys = append(dKeys, k)
-			}
-			sort.Strings(dKeys)
-			for _, k := range dKeys {
-				if rel := finalWorld.Diplomacy.Relations[k]; rel != nil {
-					rep.Diplomacy = append(rep.Diplomacy, *rel)
-				}
-			}
-		}
-
-		// Cohorts
-		cohorts := append([]sim.PopulationCohort(nil), finalWorld.Cohorts...)
-		sort.Slice(cohorts, func(i, j int) bool { return cohorts[i].ID < cohorts[j].ID })
-		for _, c := range cohorts {
-			rep.Cohorts = append(rep.Cohorts, CohortStanding{
-				ID:         c.ID,
-				Name:       c.Name,
-				District:   c.District,
-				Profession: c.Profession,
-				FormID:     c.FormID,
-				Population: c.Population,
-				MoneyPool:  c.MoneyPool,
-			})
-		}
+		rep.Factions = append([]FactionStanding(nil), snap.Factions...)
+		rep.Diplomacy = append([]sim.FactionDiplomacy(nil), snap.Diplomacy...)
+		rep.Cohorts = append([]CohortStanding(nil), snap.Cohorts...)
 	}
 
 	rep.TotalDays = rep.TotalTicks / sim.TicksPerDay
@@ -626,8 +521,8 @@ func RenderChronicleMarkdown(rep ChronicleReport) string {
 
 	if len(rep.Biographies) > 0 {
 		b.WriteString("## Actor Biographies & Fate Cards\n\n")
-		b.WriteString("| Actor | Role | Form (Tier) | Status | Coins | Mentorships / Grudges | Ambitions |\n")
-		b.WriteString("| :--- | :--- | :--- | :--- | :---: | :---: | :--- |\n")
+		b.WriteString("| Actor | Role | Form (Tier) | Status | Mentorships / Grudges | Ambitions |\n")
+		b.WriteString("| :--- | :--- | :--- | :--- | :---: | :--- |\n")
 		for _, bio := range rep.Biographies {
 			status := "Alive"
 			if !bio.Alive {
@@ -641,8 +536,8 @@ func RenderChronicleMarkdown(rep ChronicleReport) string {
 			if ambStr == "" {
 				ambStr = "-"
 			}
-			fmt.Fprintf(&b, "| %s (`%s`) | %s | %s (T%d) | %s | %d | %d / %d | %s |\n",
-				bio.Name, bio.ID, bio.Role, formStr, bio.PowerTier, status, bio.Coins, bio.MentorshipCount, bio.ActiveGrudges, ambStr)
+			fmt.Fprintf(&b, "| %s (`%s`) | %s | %s (T%d) | %s | %d / %d | %s |\n",
+				bio.Name, bio.ID, bio.Role, formStr, bio.PowerTier, status, bio.MentorshipCount, bio.ActiveGrudges, ambStr)
 		}
 		b.WriteString("\n")
 	}
