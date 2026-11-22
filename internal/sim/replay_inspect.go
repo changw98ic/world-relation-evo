@@ -89,30 +89,6 @@ func (r *RecordingDecider) LogForTick(tick int64) (TickDecisionLog, bool) {
 	return TickDecisionLog{Tick: tick, Decisions: cp}, true
 }
 
-// Logs returns all recorded TickDecisionLogs sorted in ascending tick order.
-func (r *RecordingDecider) Logs() []TickDecisionLog {
-	if r == nil {
-		return nil
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	ticks := make([]int64, 0, len(r.byTick))
-	for t := range r.byTick {
-		ticks = append(ticks, t)
-	}
-	sort.Slice(ticks, func(i, j int) bool { return ticks[i] < ticks[j] })
-	out := make([]TickDecisionLog, 0, len(ticks))
-	for _, t := range ticks {
-		src := r.byTick[t]
-		cp := make(map[string]Action, len(src))
-		for k, v := range src {
-			cp[k] = cloneAction(v)
-		}
-		out = append(out, TickDecisionLog{Tick: t, Decisions: cp})
-	}
-	return out
-}
-
 // StepRecorded advances the world by one tick using d while recording every idle actor's
 // resolved Action into the returned TickDecisionLog.
 func (w *World) StepRecorded(ctx context.Context, d Decider) ([]Event, TickDecisionLog, error) {

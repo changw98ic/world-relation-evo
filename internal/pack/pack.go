@@ -34,6 +34,10 @@ type WorldPack struct {
 	WorldLaws      map[string]int          `json:"world_laws,omitempty"`
 	Knowledge      *sim.KnowledgeBook      `json:"knowledge,omitempty"`
 	Environment    *sim.EnvironmentProfile `json:"environment,omitempty"`
+	Relations      *sim.RelationEvoState   `json:"relations,omitempty"`
+	Diplomacy      *sim.DiplomacyState     `json:"diplomacy,omitempty"`
+	Secrets        []sim.ActorSecret       `json:"secrets,omitempty"`
+	Parties        []sim.Party             `json:"parties,omitempty"`
 }
 
 // LoadFile reads and validates a WorldPack JSON file from disk.
@@ -466,6 +470,116 @@ func (p *WorldPack) Validate() error {
 		}
 	}
 
+	if p.Relations != nil {
+		for aid, k := range p.Relations.Kinship {
+			if !actors[aid] {
+				return fmt.Errorf("relations.kinship references unknown actor %q", aid)
+			}
+			if k == nil {
+				continue
+			}
+			if k.SpouseID != "" && !actors[k.SpouseID] {
+				return fmt.Errorf("relations.kinship[%q] references unknown spouse %q", aid, k.SpouseID)
+			}
+			if k.PatronID != "" && !actors[k.PatronID] {
+				return fmt.Errorf("relations.kinship[%q] references unknown patron %q", aid, k.PatronID)
+			}
+			for _, pid := range k.ParentIDs {
+				if !actors[pid] {
+					return fmt.Errorf("relations.kinship[%q] references unknown parent %q", aid, pid)
+				}
+			}
+			for _, cid := range k.ChildIDs {
+				if !actors[cid] {
+					return fmt.Errorf("relations.kinship[%q] references unknown child %q", aid, cid)
+				}
+			}
+			for _, sid := range k.SwornIDs {
+				if !actors[sid] {
+					return fmt.Errorf("relations.kinship[%q] references unknown sworn %q", aid, sid)
+				}
+			}
+			for _, pid := range k.ProtegeIDs {
+				if !actors[pid] {
+					return fmt.Errorf("relations.kinship[%q] references unknown protege %q", aid, pid)
+				}
+			}
+		}
+		for i, m := range p.Relations.Mentorships {
+			if !actors[m.MentorID] {
+				return fmt.Errorf("relations.mentorships[%d] references unknown mentor %q", i, m.MentorID)
+			}
+			if !actors[m.ApprenticeID] {
+				return fmt.Errorf("relations.mentorships[%d] references unknown apprentice %q", i, m.ApprenticeID)
+			}
+		}
+		for i, g := range p.Relations.Grudges {
+			if g.AggrievedID != "" && !actors[g.AggrievedID] {
+				return fmt.Errorf("relations.grudges[%d] references unknown aggrieved_id %q", i, g.AggrievedID)
+			}
+			if g.OffenderID != "" && !actors[g.OffenderID] {
+				return fmt.Errorf("relations.grudges[%d] references unknown offender_id %q", i, g.OffenderID)
+			}
+		}
+		for fid, lid := range p.Relations.FactionLeader {
+			if !factions[fid] {
+				return fmt.Errorf("relations.faction_leader references unknown faction %q", fid)
+			}
+			if lid != "" && !actors[lid] {
+				return fmt.Errorf("relations.faction_leader[%q] references unknown leader %q", fid, lid)
+			}
+		}
+		for did, fid := range p.Relations.ControllingFaction {
+			if !districts[did] {
+				return fmt.Errorf("relations.controlling_faction references unknown district %q", did)
+			}
+			if fid != "" && !factions[fid] {
+				return fmt.Errorf("relations.controlling_faction[%q] references unknown faction %q", did, fid)
+			}
+		}
+	}
+	if p.Diplomacy != nil {
+		for k, rel := range p.Diplomacy.Relations {
+			if rel == nil {
+				continue
+			}
+			if !factions[rel.FactionA] {
+				return fmt.Errorf("diplomacy.relations[%q] references unknown faction_a %q", k, rel.FactionA)
+			}
+			if !factions[rel.FactionB] {
+				return fmt.Errorf("diplomacy.relations[%q] references unknown faction_b %q", k, rel.FactionB)
+			}
+		}
+	}
+	for i, s := range p.Secrets {
+		if s.OwnerID == "" || !actors[s.OwnerID] {
+			return fmt.Errorf("secrets[%d] references unknown owner_id %q", i, s.OwnerID)
+		}
+		for _, kb := range s.KnownBy {
+			if kb != "" && !actors[kb] {
+				return fmt.Errorf("secrets[%d] references unknown known_by actor %q", i, kb)
+			}
+		}
+		for _, wb := range s.WitnessedBy {
+			if wb != "" && !actors[wb] {
+				return fmt.Errorf("secrets[%d] references unknown witnessed_by actor %q", i, wb)
+			}
+		}
+	}
+	for i, party := range p.Parties {
+		if party.LeaderID == "" || !actors[party.LeaderID] {
+			return fmt.Errorf("parties[%d] references unknown leader_id %q", i, party.LeaderID)
+		}
+		if party.TargetDistrict != "" && !districts[party.TargetDistrict] {
+			return fmt.Errorf("parties[%d] references unknown target_district %q", i, party.TargetDistrict)
+		}
+		for _, mid := range party.MemberIDs {
+			if !actors[mid] {
+				return fmt.Errorf("parties[%d] references unknown member_id %q", i, mid)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -674,10 +788,106 @@ func (p *WorldPack) Instantiate(worldIDOverride string) (*sim.World, error) {
 		}
 	}
 
+	nextID := int64(1)
+	bumpNextID := func(mems []sim.Memory) {
+		for _, m := range mems {
+			if m.EventID >= nextID {
+				nextID = m.EventID + 1
+			}
+			if m.RootEventID >= nextID {
+				nextID = m.RootEventID + 1
+			}
+			if m.BasisEventID >= nextID {
+				nextID = m.BasisEventID + 1
+			}
+		}
+	}
+	for _, a := range actors {
+		bumpNextID(a.Memories)
+	}
+	for _, c := range cohorts {
+		for _, m := range c.Members {
+			bumpNextID(m.Memories)
+		}
+	}
+
+	relations := sim.NewRelationEvoState()
+	if p.Relations != nil {
+		if cloned := sim.CloneRelationEvoState(p.Relations); cloned != nil {
+			relations = cloned
+			if relations.Kinship == nil {
+				relations.Kinship = map[string]*sim.ActorKinship{}
+			}
+			if relations.Clans == nil {
+				relations.Clans = map[string]*sim.ClanRecord{}
+			}
+			if relations.FactionLeader == nil {
+				relations.FactionLeader = map[string]string{}
+			}
+			if relations.ControllingFaction == nil {
+				relations.ControllingFaction = map[string]string{}
+			}
+			if relations.CohortClans == nil {
+				relations.CohortClans = map[string]string{}
+			}
+			if relations.DistrictSovereignty == nil {
+				relations.DistrictSovereignty = map[string]sim.DistrictSovereignty{}
+			}
+			if relations.MonopolyCharters == nil {
+				relations.MonopolyCharters = map[string]sim.MonopolyCharter{}
+			}
+			if relations.ObservedEventIDs == nil {
+				relations.ObservedEventIDs = map[int64]bool{}
+			}
+			relations.Spec = sim.EffectiveRelationEvoSpec(relations.Spec)
+		}
+	}
+
+	var diplomacy *sim.DiplomacyState
+	if p.Diplomacy != nil {
+		diplomacy = sim.CloneDiplomacyState(p.Diplomacy)
+	}
+
+	var secrets []sim.ActorSecret
+	if len(p.Secrets) > 0 {
+		secrets = make([]sim.ActorSecret, len(p.Secrets))
+		for i, s := range p.Secrets {
+			sc := sim.CloneActorSecret(s)
+			if sc.ID == "" {
+				sc.ID = fmt.Sprintf("sec_init_%d_%s", i+1, sc.OwnerID)
+			}
+			if sc.OwnerID != "" && !sim.ActorHasTag(sc.KnownBy, sc.OwnerID) {
+				sc.KnownBy = append([]string{sc.OwnerID}, sc.KnownBy...)
+			}
+			if sc.Severity <= 0 {
+				sc.Severity = 50
+			}
+			if sc.RootEventID >= nextID {
+				nextID = sc.RootEventID + 1
+			}
+			secrets[i] = sc
+		}
+	}
+
+	var parties []sim.Party
+	if len(p.Parties) > 0 {
+		parties = make([]sim.Party, len(p.Parties))
+		for i, party := range p.Parties {
+			pc := sim.CloneParty(party)
+			if pc.ID == "" {
+				pc.ID = fmt.Sprintf("party_init_%d_%s", i+1, pc.LeaderID)
+			}
+			if pc.ExpiresTick <= p.SeedTick {
+				pc.ExpiresTick = p.SeedTick + 7*sim.TicksPerDay
+			}
+			parties[i] = pc
+		}
+	}
+
 	w := &sim.World{
 		ID:             worldID,
 		Tick:           p.SeedTick,
-		NextID:         1,
+		NextID:         nextID,
 		Map:            worldMap,
 		Catalog:        cat,
 		Polities:       polities,
@@ -692,7 +902,10 @@ func (p *WorldPack) Instantiate(worldIDOverride string) (*sim.World, error) {
 		},
 		Continuity:     &sim.ContinuityState{NextAgreementID: 1},
 		MarketCredit:   sim.NewMarketCreditState(),
-		Relations:      sim.NewRelationEvoState(),
+		Relations:      relations,
+		Diplomacy:      diplomacy,
+		Secrets:        secrets,
+		Parties:        parties,
 		JusticeRevolt:  sim.NewJusticeRevoltState(),
 		SpotlightRumor: sim.NewSpotlightRumorState(),
 		FlowGrid:       sim.CloneFlowGridState(p.FlowGrid),
@@ -752,8 +965,8 @@ func (p *WorldPack) Instantiate(worldIDOverride string) (*sim.World, error) {
 		}
 	}
 
-	// Initialize ecology if configured or if macro cohorts are present.
-	initEco := len(w.Cohorts) > 0
+	// Initialize ecology if configured, if macro cohorts are present, or if declarative WorldEvents require DistrictStates.
+	initEco := len(w.Cohorts) > 0 || len(w.Catalog.WorldEvents) > 0
 	scalePop := w.TotalPopulation()
 	if p.Ecology != nil {
 		if p.Ecology.Enabled || p.Ecology.ScalePop > 0 || len(p.Ecology.DistrictStates) > 0 {
@@ -908,7 +1121,22 @@ func normalizeCatalog(cat sim.Catalog) sim.Catalog {
 		cat.Weathers = sim.DefaultWeatherSpecs()
 	}
 	if cat.Lifecycle.MaxExpectancy <= 0 {
-		cat.Lifecycle = sim.DefaultLifecycleSpec()
+		lc := sim.DefaultLifecycleSpec()
+		if _, hasWaste := cat.Items[lc.WasteItem]; !hasWaste {
+			lc.WasteItem = ""
+			lc.WastePerFoodDivisor = 0
+		}
+		hasCompost := false
+		for _, r := range cat.Recipes {
+			if r.ID == lc.CompostRecipeID {
+				hasCompost = true
+				break
+			}
+		}
+		if !hasCompost {
+			lc.CompostRecipeID = ""
+		}
+		cat.Lifecycle = lc
 	}
 	if len(cat.Resources) == 0 {
 		cat.Resources = nil

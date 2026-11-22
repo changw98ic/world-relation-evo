@@ -79,6 +79,7 @@ type ActiveRumor struct {
 	Item         string   `json:"item,omitempty"`
 	Speakers     []string `json:"speakers"`
 	FirstEventID int64    `json:"first_event_id,omitempty"`
+	RootEventID  int64    `json:"root_event_id,omitempty"`
 	LastEventID  int64    `json:"last_event_id,omitempty"`
 	FirstTick    int64    `json:"first_tick"`
 	LastTick     int64    `json:"last_tick"`
@@ -118,61 +119,6 @@ func NewSpotlightRumorState() *SpotlightRumorState {
 		PanicUntilTick:      map[string]int64{},
 		SeededGossipEvents:  map[int64]bool{},
 	}
-}
-
-// CloneSpotlightRumorState returns a nil-safe deep copy of SpotlightRumorState.
-func CloneSpotlightRumorState(s *SpotlightRumorState) *SpotlightRumorState {
-	if s == nil {
-		return nil
-	}
-	out := *s
-	if s.ActorSalience != nil {
-		out.ActorSalience = cloneIntMap(s.ActorSalience)
-	}
-	if s.CohortHeat != nil {
-		out.CohortHeat = cloneIntMap(s.CohortHeat)
-	}
-	if s.HydratedCohort != nil {
-		out.HydratedCohort = cloneStringMap(s.HydratedCohort)
-	}
-	if s.HydratedTick != nil {
-		out.HydratedTick = make(map[string]int64, len(s.HydratedTick))
-		for k, v := range s.HydratedTick {
-			out.HydratedTick[k] = v
-		}
-	}
-	if s.ActiveRumors != nil {
-		out.ActiveRumors = make(map[string]*ActiveRumor, len(s.ActiveRumors))
-		for k, r := range s.ActiveRumors {
-			if r == nil {
-				continue
-			}
-			rc := *r
-			if r.Speakers != nil {
-				rc.Speakers = append([]string(nil), r.Speakers...)
-			}
-			out.ActiveRumors[k] = &rc
-		}
-	}
-	if s.PanicDemandPermille != nil {
-		out.PanicDemandPermille = make(map[string]map[string]int, len(s.PanicDemandPermille))
-		for dID, items := range s.PanicDemandPermille {
-			out.PanicDemandPermille[dID] = cloneIntMap(items)
-		}
-	}
-	if s.PanicUntilTick != nil {
-		out.PanicUntilTick = make(map[string]int64, len(s.PanicUntilTick))
-		for k, v := range s.PanicUntilTick {
-			out.PanicUntilTick[k] = v
-		}
-	}
-	if s.SeededGossipEvents != nil {
-		out.SeededGossipEvents = make(map[int64]bool, len(s.SeededGossipEvents))
-		for k, v := range s.SeededGossipEvents {
-			out.SeededGossipEvents[k] = v
-		}
-	}
-	return &out
 }
 
 func (sr *SpotlightRumorState) ensureInit() {
@@ -274,7 +220,7 @@ func (w *World) ObserveSpotlightAndRumors(sr *SpotlightRumorState, settled []Eve
 	var emitted []Event
 	for _, ev := range settled {
 		switch ev.Kind {
-		case "gossip_seeded", "rumor_panic_triggered", "spotlight_promoted", "spotlight_demoted":
+		case "rumor_panic_triggered", "spotlight_promoted", "spotlight_demoted":
 			continue
 		case "wait", "slept", "action_failed":
 			continue
@@ -284,17 +230,17 @@ func (w *World) ObserveSpotlightAndRumors(sr *SpotlightRumorState, settled []Eve
 		switch ev.Kind {
 		case "profession_joined", "actor_succeeded":
 			addActorSalience(ev.ActorID, 15)
-		case "faction_joined", "married", "ritual_performed", "threat_hunted":
+		case "faction_joined", "actor_married", "bond_sworn", "ritual_performed", "threat_hunted":
 			addActorSalience(ev.ActorID, 10)
 			addActorSalience(ev.TargetID, 8)
-		case "attacked", "raided", "robbed", "extorted", "extort_resisted", "turf_war", "vendetta_clash":
+		case "attacked", "raided", "stolen", "extorted", "extort_resisted", "cohort_turf_war", "vendetta_clash":
 			addActorSalience(ev.ActorID, 14)
 			addActorSalience(ev.TargetID, 12)
-		case "arrested", "corruption_purged", "court_tried", "appeal_filed", "suspect_framed",
+		case "arrested", "corruption_purged", "court_warrant_issued", "court_trial_held",
 			"conviction_overturned", "wrongful_conviction", "granary_riot", "revolt_erupted":
 			addActorSalience(ev.ActorID, 16)
 			addActorSalience(ev.TargetID, 12)
-		case "bribed", "loan_issued", "house_foreclosed", "feud_started", "feud_mediated":
+		case "bribed", "loan_issued", "house_foreclosed", "grudge_formed", "feud_avenged", "feud_mediated":
 			addActorSalience(ev.ActorID, 10)
 			addActorSalience(ev.TargetID, 8)
 		case "released_from_jail":
@@ -351,7 +297,7 @@ func (w *World) ObserveSpotlightAndRumors(sr *SpotlightRumorState, settled []Eve
 		}
 
 		// 3. Micro -> Macro Rumor Amplification (strictly from interpersonal speech, never macro injection).
-		if ev.Kind == "speech" && (ev.Action.Statement != nil || ev.Action.Text != "") {
+		if (ev.Kind == "speech" || ev.Kind == "channel_transmitted" || ev.Kind == "channel_message") && (ev.Action.Statement != nil || ev.Action.Text != "") {
 			if panicEv, triggered := w.processRumorSpeech(sr, ev); triggered {
 				emitted = append(emitted, panicEv)
 			}
@@ -367,11 +313,22 @@ func (w *World) processRumorSpeech(sr *SpotlightRumorState, ev Event) (Event, bo
 		stmt = *ev.Action.Statement
 	}
 
-	speaker := w.actor(ev.ActorID)
-	distID := ""
-	if speaker != nil && speaker.Location != "" {
+	if delivered, exists := extractStringSlicePayload(ev.Payload, "delivered_to"); exists && len(delivered) == 0 {
+		return Event{}, false
+	}
+	source := relPayloadString(ev.Payload, "witness_id")
+	if source == "" {
+		source = ev.ActorID
+		// A relay of an unverified statement still has an original speaker.
+		if original := relPayloadString(ev.Payload, "report_source_id"); original != "" {
+			source = original
+		}
+	}
+	speaker := w.actor(source)
+	distID := relPayloadString(ev.Payload, "district")
+	if distID == "" && speaker != nil && speaker.Location != "" {
 		distID = speaker.Location
-	} else if stmt.Location != "" {
+	} else if distID == "" && stmt.Location != "" {
 		distID = stmt.Location
 	}
 	if distID == "" {
@@ -405,6 +362,7 @@ func (w *World) processRumorSpeech(sr *SpotlightRumorState, ev Event) (Event, bo
 			Topic:        topic,
 			Item:         item,
 			FirstEventID: ev.ID,
+			RootEventID:  payloadInt64(ev.Payload, "root_event_id"),
 			FirstTick:    w.Tick,
 		}
 		sr.ActiveRumors[rumorKey] = r
@@ -414,14 +372,14 @@ func (w *World) processRumorSpeech(sr *SpotlightRumorState, ev Event) (Event, bo
 
 	alreadySpoke := false
 	for _, s := range r.Speakers {
-		if s == ev.ActorID {
+		if s == source {
 			alreadySpoke = true
 			break
 		}
 	}
 	highTrust := w.isHighTrustPublicFigure(speaker)
 	if !alreadySpoke {
-		r.Speakers = append(r.Speakers, ev.ActorID)
+		r.Speakers = append(r.Speakers, source)
 		weight := 1
 		if highTrust {
 			weight = 2
@@ -456,7 +414,10 @@ func (w *World) processRumorSpeech(sr *SpotlightRumorState, ev Event) (Event, bo
 		}
 	}
 
-	rootID := r.FirstEventID
+	rootID := r.RootEventID
+	if rootID == 0 {
+		rootID = r.FirstEventID
+	}
 	if rootID == 0 {
 		rootID = ev.ID
 	}
@@ -483,6 +444,7 @@ func (w *World) processRumorSpeech(sr *SpotlightRumorState, ev Event) (Event, bo
 			"morale_bonus":          moraleAfter,
 			"panic_until":           r.PanicUntil,
 			"basis_event_id":        ev.ID,
+			"cause_event_id":        ev.ID,
 			"root_event_id":         rootID,
 		},
 	}
@@ -762,8 +724,21 @@ func (w *World) canDehydrateSpotlightActor(sr *SpotlightRumorState, a Actor, hou
 	if srIsCoreBaselineActor(a.ID) {
 		return false
 	}
-	if sr.HydratedCohort[a.ID] == "" && !strings.Contains(a.ID, "_a") {
+	if sr.HydratedCohort[a.ID] == "" && !hasCohortHydratedIDSuffix(a.ID) {
 		return false
+	}
+	return true
+}
+
+func hasCohortHydratedIDSuffix(id string) bool {
+	idx := strings.LastIndex(id, "_a")
+	if idx < 0 || idx+2 >= len(id) {
+		return false
+	}
+	for i := idx + 2; i < len(id); i++ {
+		if id[i] < '0' || id[i] > '9' {
+			return false
+		}
 	}
 	return true
 }

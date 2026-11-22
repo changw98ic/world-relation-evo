@@ -32,6 +32,47 @@ func ValidateCitation(memories []Memory, basis int64, statement *Statement) erro
 	return fmt.Errorf("unavailable memory event %d", basis)
 }
 
+func citedRoot(memories []Memory, basis int64) int64 {
+	if basis != 0 {
+		for i := len(memories) - 1; i >= 0; i-- {
+			m := memories[i]
+			if m.EventID == basis {
+				if m.RootEventID != 0 {
+					return m.RootEventID
+				}
+				return m.EventID
+			}
+		}
+	}
+	return 0
+}
+
+// citedReport carries the original source through each relay, after checking
+// that the cited memory actually supports this statement.
+func citedReport(sender *Actor, x Action) (int64, string) {
+	if x.BasisEventID == 0 || x.Statement == nil {
+		return 0, ""
+	}
+	s := x.Statement
+	for i := len(sender.Memories) - 1; i >= 0; i-- {
+		m := sender.Memories[i]
+		if m.EventID != x.BasisEventID {
+			continue
+		}
+		if o := m.Observation; o != nil && o.Kind == s.Topic && o.SubjectID == s.SubjectID &&
+			o.ObjectID == s.ObjectID && o.CaseID == s.CaseID && (s.Modality == "" || s.Modality == o.Modality) && o.Location == s.Location && o.Proceeds == s.Proceeds && (o.Item == s.Item || s.Item == "") {
+			return m.EventID, sender.ID
+		}
+		if m.Statement != nil && *m.Statement == *s {
+			if m.WitnessID != "" {
+				return m.FactEventID, m.WitnessID
+			}
+			return 0, m.Source
+		}
+	}
+	return 0, ""
+}
+
 // MaxRecalledMemories bounds attention, not the persisted personal history.
 const MaxRecalledMemories = 32
 

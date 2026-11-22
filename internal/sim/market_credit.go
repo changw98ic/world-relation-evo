@@ -170,55 +170,6 @@ func NewMarketCreditState() *MarketCreditState {
 	}
 }
 
-// CloneMarketCreditState returns a deep copy of s (nil-safe).
-func CloneMarketCreditState(s *MarketCreditState) *MarketCreditState {
-	if s == nil {
-		return nil
-	}
-	out := &MarketCreditState{
-		Spec:                s.Spec,
-		NextLoanID:          s.NextLoanID,
-		LastPriceUpdateTick: s.LastPriceUpdateTick,
-		LastCreditDay:       s.LastCreditDay,
-	}
-	if s.DistrictPrices != nil {
-		out.DistrictPrices = make(map[string]map[string]int, len(s.DistrictPrices))
-		for d, items := range s.DistrictPrices {
-			out.DistrictPrices[d] = cloneIntMap(items)
-		}
-	}
-	if s.HoardedStock != nil {
-		out.HoardedStock = make(map[string]map[string]int64, len(s.HoardedStock))
-		for h, items := range s.HoardedStock {
-			cp := make(map[string]int64, len(items))
-			for k, v := range items {
-				cp[k] = v
-			}
-			out.HoardedStock[h] = cp
-		}
-	}
-	out.LoanRequests = append([]LoanRequest(nil), s.LoanRequests...)
-	if s.Loans != nil {
-		out.Loans = append([]LoanRecord(nil), s.Loans...)
-	}
-	if s.CohortDebts != nil {
-		out.CohortDebts = append([]CohortDebtRecord(nil), s.CohortDebts...)
-	}
-	if s.CohortEquityPermille != nil {
-		out.CohortEquityPermille = make(map[string]map[string]int, len(s.CohortEquityPermille))
-		for debtorID, shares := range s.CohortEquityPermille {
-			out.CohortEquityPermille[debtorID] = cloneIntMap(shares)
-		}
-	}
-	if s.ForeclosedTenancies != nil {
-		out.ForeclosedTenancies = make(map[string]ForeclosedTenancy, len(s.ForeclosedTenancies))
-		for k, v := range s.ForeclosedTenancies {
-			out.ForeclosedTenancies[k] = v
-		}
-	}
-	return out
-}
-
 func (mc *MarketCreditState) ensureInit() MarketCreditSpec {
 	if mc.DistrictPrices == nil {
 		mc.DistrictPrices = map[string]map[string]int{}
@@ -1089,74 +1040,6 @@ func (w *World) findCohort(id string) *PopulationCohort {
 		}
 	}
 	return nil
-}
-
-// rebindDehydratedActorContracts preserves active loan and tenancy obligations when a living focal
-// Actor is dehydrated into targetCohortID, ensuring LOD precision changes never turn a living
-// borrower into a spurious loan default or orphan a lender's claim.
-func (w *World) rebindDehydratedActorContracts(actorID, targetCohortID string, actorMoney int) {
-	mc := w.MarketCredit
-	if mc == nil || actorID == "" || targetCohortID == "" {
-		return
-	}
-	for i := range mc.LoanRequests {
-		r := &mc.LoanRequests[i]
-		if r.Status == "pending" && (r.BorrowerID == actorID || r.LenderID == actorID) {
-			r.Status = "cancelled"
-		}
-	}
-	remFunds := int64(maxInt(0, actorMoney))
-	firstBorrowerLoanIdx := -1
-	for i := range mc.Loans {
-		l := &mc.Loans[i]
-		if l.Status != "active" {
-			continue
-		}
-		if l.LenderID == actorID {
-			l.LenderCohortID = targetCohortID
-		}
-		if l.BorrowerID == actorID {
-			l.BorrowerCohortID = targetCohortID
-			if firstBorrowerLoanIdx < 0 {
-				firstBorrowerLoanIdx = i
-			}
-			owed := maxInt64(0, l.Principal+l.AccruedInterest-l.Repaid)
-			need := owed + 6
-			alloc := minInt64(remFunds, need)
-			l.BorrowerCohortFunds += alloc
-			remFunds -= alloc
-		}
-	}
-	if remFunds > 0 && firstBorrowerLoanIdx >= 0 {
-		mc.Loans[firstBorrowerLoanIdx].BorrowerCohortFunds += remFunds
-		remFunds = 0
-	}
-	if len(mc.ForeclosedTenancies) > 0 {
-		hIDs := make([]string, 0, len(mc.ForeclosedTenancies))
-		for hID := range mc.ForeclosedTenancies {
-			hIDs = append(hIDs, hID)
-		}
-		sort.Strings(hIDs)
-		for _, hID := range hIDs {
-			ten := mc.ForeclosedTenancies[hID]
-			changed := false
-			if ten.OwnerID == actorID {
-				ten.OwnerCohortID = targetCohortID
-				changed = true
-			}
-			if ten.TenantID == actorID {
-				ten.TenantCohortID = targetCohortID
-				if remFunds > 0 {
-					ten.TenantCohortFunds += remFunds
-					remFunds = 0
-				}
-				changed = true
-			}
-			if changed {
-				mc.ForeclosedTenancies[hID] = ten
-			}
-		}
-	}
 }
 
 func (w *World) actorHasActiveCreditContract(actorID string) bool {

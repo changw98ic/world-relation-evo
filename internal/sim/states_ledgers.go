@@ -181,36 +181,6 @@ type LedgerAuditState struct {
 	Items      map[string]ResourceLedgerTotals            `json:"items,omitempty"`
 }
 
-// CloneLedgerAuditState returns a deep copy of s while preserving nil maps and pointers.
-func CloneLedgerAuditState(s *LedgerAuditState) *LedgerAuditState {
-	if s == nil {
-		return nil
-	}
-	out := &LedgerAuditState{Energy: s.Energy}
-	if s.Ecology != nil {
-		out.Ecology = make(map[string]map[string]ResourceLedgerTotals, len(s.Ecology))
-		for district, pools := range s.Ecology {
-			out.Ecology[district] = make(map[string]ResourceLedgerTotals, len(pools))
-			for pool, entry := range pools {
-				out.Ecology[district][pool] = entry
-			}
-		}
-	}
-	if s.Currencies != nil {
-		out.Currencies = make(map[string]ResourceLedgerTotals, len(s.Currencies))
-		for k, v := range s.Currencies {
-			out.Currencies[k] = v
-		}
-	}
-	if s.Items != nil {
-		out.Items = make(map[string]ResourceLedgerTotals, len(s.Items))
-		for k, v := range s.Items {
-			out.Items[k] = v
-		}
-	}
-	return out
-}
-
 func cloneInt64Map(m map[string]int64) map[string]int64 {
 	if len(m) == 0 {
 		return nil
@@ -224,6 +194,8 @@ func cloneInt64Map(m map[string]int64) map[string]int64 {
 
 // CloneActor isolates every mutable part of a person's state from its source.
 func CloneActor(a Actor) Actor {
+	a.Ambitions = append([]ActorAmbition(nil), a.Ambitions...)
+	a.KnownHomicides = append([]int64(nil), a.KnownHomicides...)
 	a.Tags = append([]string(nil), a.Tags...)
 	a.Guilds = append([]string(nil), a.Guilds...)
 	a.Hobbies = append([]string(nil), a.Hobbies...)

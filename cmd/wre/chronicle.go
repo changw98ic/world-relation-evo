@@ -27,6 +27,11 @@ func loadEventsFromFile(path string) ([]sim.Event, error) {
 		if err := json.Unmarshal(trimmed, &evs); err != nil {
 			return nil, fmt.Errorf("decode events JSON array: %w", err)
 		}
+		for i, event := range evs {
+			if err := validateChronicleEvent(event); err != nil {
+				return nil, fmt.Errorf("event array entry %d: %w", i+1, err)
+			}
+		}
 		return evs, nil
 	}
 	// NDJSON fallback
@@ -40,26 +45,52 @@ func loadEventsFromFile(path string) ([]sim.Event, error) {
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
 			return nil, fmt.Errorf("decode NDJSON event line %d: %w", idx+1, err)
 		}
+		if err := validateChronicleEvent(ev); err != nil {
+			return nil, fmt.Errorf("event line %d: %w", idx+1, err)
+		}
 		evs = append(evs, ev)
 	}
 	return evs, nil
 }
 
+func validateChronicleEvent(event sim.Event) error {
+	if event.ID <= 0 || strings.TrimSpace(event.Kind) == "" || event.Kind == "tick_settled" {
+		return fmt.Errorf("expected a simulation event with a positive id and valid kind, got id=%d kind=%q", event.ID, event.Kind)
+	}
+	return nil
+}
+
+func loadEventsFromFiles(spec string) ([]sim.Event, error) {
+	var all []sim.Event
+	for _, part := range strings.Split(spec, ",") {
+		p := strings.TrimSpace(part)
+		if p == "" {
+			continue
+		}
+		evs, err := loadEventsFromFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("load events %q: %w", p, err)
+		}
+		all = append(all, evs...)
+	}
+	return all, nil
+}
+
 func runChronicle(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("chronicle", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	eventsFile := fs.String("events-file", "", "path to JSON array or NDJSON file of simulation events (required)")
+	eventsFile := fs.String("events-file", "", "comma-separated path(s) to JSON array or NDJSON file(s) of simulation events (required)")
 	stateFile := fs.String("state-file", "", "optional path to serialized World JSON snapshot")
 	format := fs.String("format", "md", "output format: md|json")
 	outPath := fs.String("out", "", "optional output file path (defaults to stdout)")
-	maxEvents := fs.Int("max-events", 120, "maximum number of major timeline events to include")
+	maxEvents := fs.Int("max-events", 0, "maximum number of major timeline events to include (0 = unlimited)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *eventsFile == "" {
 		return fmt.Errorf("chronicle requires -events-file")
 	}
-	events, err := loadEventsFromFile(*eventsFile)
+	events, err := loadEventsFromFiles(*eventsFile)
 	if err != nil {
 		return err
 	}

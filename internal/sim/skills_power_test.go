@@ -290,10 +290,10 @@ func TestIndividualActorNonCombatHazards(t *testing.T) {
 	b.Health = 100
 	b.Memories = nil
 	d0, d1 := w.Map.Districts[0].ID, w.Map.Districts[1].ID
-	if sameEvs := w.checkActorTransitHazard(b, Action{Kind: "move", Location: d0}, d0, d0, "road", ""); len(sameEvs) != 0 {
+	if sameEvs := w.checkActorTransitHazard(b, Action{Kind: "move", Location: d0}, d0, d0, "road", "", 0); len(sameEvs) != 0 {
 		t.Fatalf("expected no transit hazard on same-district hop, got %+v", sameEvs)
 	}
-	crossEvs := w.checkActorTransitHazard(b, Action{Kind: "move", Location: d1}, d0, d1, "road", "")
+	crossEvs := w.checkActorTransitHazard(b, Action{Kind: "move", Location: d1}, d0, d1, "road", "", 0)
 	if len(crossEvs) == 0 || crossEvs[0].Kind != "transit_hazard" || b.Health >= 100 {
 		t.Fatalf("expected cross-district transit_hazard on spotlight actor, got health=%d evs=%+v", b.Health, crossEvs)
 	}

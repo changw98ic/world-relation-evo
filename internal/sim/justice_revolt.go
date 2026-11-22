@@ -109,6 +109,11 @@ func EffectiveJusticeRevoltSpec(s JusticeRevoltSpec) JusticeRevoltSpec {
 // CourtCase records a focal or macro magistrate court hearing, possible corrupt scapegoat framing,
 // and any oversight/censorate appeal outcome.
 type CourtCase struct {
+	BasisEventID    int64  `json:"basis_event_id,omitempty"`
+	WarrantEventID  int64  `json:"warrant_event_id,omitempty"`
+	ArrestEventID   int64  `json:"arrest_event_id,omitempty"`
+	RootEventID     int64  `json:"root_event_id,omitempty"`
+	Proceeds        int    `json:"proceeds,omitempty"`
 	ID              int64  `json:"id"`
 	Tick            int64  `json:"tick"`
 	District        string `json:"district"`
@@ -160,39 +165,6 @@ func NewJusticeRevoltState() *JusticeRevoltState {
 		DistrictGrievance: map[string]int{},
 		TaxStrikeUntil:    map[string]int64{},
 	}
-}
-
-// CloneJusticeRevoltState returns a deep copy of s (nil-safe).
-func CloneJusticeRevoltState(s *JusticeRevoltState) *JusticeRevoltState {
-	if s == nil {
-		return nil
-	}
-	out := &JusticeRevoltState{
-		NextCaseID:      s.NextCaseID,
-		NextRevoltID:    s.NextRevoltID,
-		LastAmnestyTick: s.LastAmnestyTick,
-		LastTrialTick:   s.LastTrialTick,
-	}
-	if len(s.CourtCases) > 0 {
-		out.CourtCases = append([]CourtCase(nil), s.CourtCases...)
-	}
-	if s.DistrictGrievance != nil {
-		out.DistrictGrievance = cloneIntMap(s.DistrictGrievance)
-	}
-	if s.TaxStrikeUntil != nil {
-		out.TaxStrikeUntil = make(map[string]int64, len(s.TaxStrikeUntil))
-		for k, v := range s.TaxStrikeUntil {
-			out.TaxStrikeUntil[k] = v
-		}
-	}
-	if len(s.ActiveRevolts) > 0 {
-		out.ActiveRevolts = append([]ActiveRevolt(nil), s.ActiveRevolts...)
-	}
-	if s.Spec != nil {
-		sp := *s.Spec
-		out.Spec = &sp
-	}
-	return out
 }
 
 func (s *JusticeRevoltState) ensureInitialized() {
@@ -530,7 +502,7 @@ func (w *World) ApplyJusticeAction(jr *JusticeRevoltState, actorID string, x Act
 		remoteDistrict := ""
 		for i := len(jr.CourtCases) - 1; i >= 0; i-- {
 			c := jr.CourtCases[i]
-			if c.Status != "convicted" || !c.Wrongful {
+			if (c.Status != "convicted" && c.Status != "served") || !c.Wrongful {
 				continue
 			}
 			if x.TargetID != "" && c.SuspectID != x.TargetID && c.MagistrateID != x.TargetID {
@@ -558,7 +530,7 @@ func (w *World) ApplyJusticeAction(jr *JusticeRevoltState, actorID string, x Act
 		}
 
 		cc := &jr.CourtCases[caseIdx]
-		if !w.courtPartiesPresent(*cc) {
+		if cc.IsCohort && !w.courtPartiesPresent(*cc) {
 			return fail("court parties must be present in the case district for release and enforcement"), true
 		}
 		a.Energy -= 4
@@ -645,6 +617,8 @@ func (w *World) ApplyJusticeAction(jr *JusticeRevoltState, actorID string, x Act
 			"relief_coins":      reliefCoins,
 			"confiscated_coins": confiscatedCoins,
 			"grievance":         grievance,
+			"observation": Observation{Kind: "conviction_overturned", SubjectID: a.ID, ObjectID: cc.SuspectID,
+				CaseID: cc.ID, Location: cc.District},
 		}, observers...)
 		events := []Event{ev}
 		if appealProf := w.Catalog.BestProfessionForCapability(*a, "file_appeal"); appealProf != "" {
@@ -703,7 +677,7 @@ func (jr *JusticeRevoltState) pruneResolvedHistory(tick int64) {
 	if len(jr.CourtCases) > 64 {
 		kept := jr.CourtCases[:0]
 		for _, c := range jr.CourtCases {
-			if c.Status == "convicted" || tick-c.ResolvedTick < retention {
+			if c.Status == "wanted" || c.Status == "arrested" || c.Status == "convicted" || c.RootEventID > 0 && !c.IsCohort || tick-c.ResolvedTick < retention {
 				kept = append(kept, c)
 			}
 		}
@@ -888,6 +862,8 @@ func (w *World) stepMacroCourtTrials(jr *JusticeRevoltState, spec JusticeRevoltS
 					Action:   Action{Kind: "frame_suspect", TargetID: civ.ID, Location: dID},
 					Payload: map[string]any{
 						"text":           fmt.Sprintf("Wrongful conviction #%d in %s: %d innocent %s members jailed as scapegoats (real culprit: %s, grievance=%d)", caseID, dID, jailed, civ.Name, realCulpritID, grievance),
+						"root_event_id":  trialEv.ID,
+						"cause_event_id": trialEv.ID,
 						"case_id":        caseID,
 						"district":       dID,
 						"magistrate_id":  mag.ID,
@@ -899,6 +875,16 @@ func (w *World) stepMacroCourtTrials(jr *JusticeRevoltState, spec JusticeRevoltS
 					},
 				}
 				w.NextID++
+				obs := Observation{Kind: "wrongful_conviction", Modality: "eyewitness",
+					SubjectID: mag.ID, ObjectID: civ.ID, CaseID: caseID, Location: dID}
+				for i := range w.Actors {
+					witness := &w.Actors[i]
+					if witness.Location == dID && witness.InsideHouse == "" && !witness.InTransit() && w.partyMateAvailable(witness) {
+						witness.Memories = appendMemory(witness.Memories, Memory{Kind: frameEv.Kind, EventID: frameEv.ID,
+							Tick: w.Tick, Source: mag.ID, TargetID: civ.ID, RootEventID: trialEv.ID,
+							CauseEventID: trialEv.ID, Observation: &obs, Text: relPayloadString(frameEv.Payload, "text")})
+					}
+				}
 				events = append(events, frameEv)
 			}
 			continue
@@ -1831,4 +1817,235 @@ func (w *World) reintegrateRebels(jr *JusticeRevoltState, spec JusticeRevoltSpec
 	}
 	w.NextID++
 	return []Event{ev}
+}
+
+func (w *World) personalCase(district, suspect, status string) *CourtCase {
+	if w.JusticeRevolt != nil {
+		for i := range w.JusticeRevolt.CourtCases {
+			c := &w.JusticeRevolt.CourtCases[i]
+			if !c.IsCohort && c.Status == status && c.District == district && c.SuspectID == suspect {
+				return c
+			}
+		}
+	}
+	return nil
+}
+
+func (w *World) caseEvidence(a Actor, suspectID string, basis int64) (Memory, bool) {
+	m, ok := corruptionEvidence(a, suspectID, basis)
+	if !ok {
+		return Memory{}, false
+	}
+	if w.JusticeRevolt != nil {
+		for _, c := range w.JusticeRevolt.CourtCases {
+			if !c.IsCohort && c.SuspectID == suspectID && c.RootEventID == m.RootEventID {
+				return Memory{}, false
+			}
+		}
+	}
+	return m, true
+}
+
+func (w *World) perceivedCaseActions(a Actor, nearby []Neighbor) []Action {
+	var actions []Action
+	caps := w.ActorCapabilities(a)
+	spec := w.Catalog.EffectiveEnvironment().Institutions
+	seen := map[string]bool{}
+	for _, nb := range nearby {
+		id := nb.ID
+		seen[id] = true
+		switch {
+		case spec.EnforcementEnabled() && caps["arrest"] && a.Energy >= 7 && a.Health >= 45 && w.Tick >= a.RestUntil && !nb.Jailed && w.personalCase(a.Location, id, "wanted") != nil:
+			actions = append(actions, Action{Kind: "arrest", TargetID: id})
+		case a.Energy >= 6 && a.IllicitGain == 0 && w.personalCase(a.Location, id, "arrested") != nil:
+			if spec.OversightEnabled() && caps["audit_corruption"] {
+				actions = append(actions, Action{Kind: "audit_corruption", TargetID: id})
+			} else if spec.EnforcementEnabled() && caps["hold_trial"] {
+				actions = append(actions, Action{Kind: "hold_trial", TargetID: id})
+			}
+		default:
+			if caps["open_case"] && a.IllicitGain == 0 && a.Energy >= 4 {
+				if m, ok := w.caseEvidence(a, id, 0); ok && w.mayUseSecretEvidence(a, m) {
+					actions = append(actions, Action{Kind: "open_case", TargetID: id, BasisEventID: m.EventID})
+				}
+			}
+		}
+	}
+	if caps["open_case"] && a.IllicitGain == 0 && a.Energy >= 4 {
+		for i := len(a.Memories) - 1; i >= 0; i-- {
+			m := a.Memories[i]
+			var id, district string
+			if m.Observation != nil {
+				id, district = m.Observation.SubjectID, m.Observation.Location
+			} else if m.Statement != nil {
+				id, district = m.Statement.SubjectID, m.Statement.Location
+			}
+			if id == "" || seen[id] || district != a.Location {
+				continue
+			}
+			if evidence, ok := w.caseEvidence(a, id, m.EventID); ok && w.mayUseSecretEvidence(a, evidence) {
+				seen[id] = true
+				actions = append(actions, Action{Kind: "open_case", TargetID: id, BasisEventID: evidence.EventID})
+			}
+		}
+	}
+	return actions
+}
+
+func (w *World) openPersonalCase(a, suspect *Actor, x Action) []Event {
+	fail := func(reason string) []Event {
+		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+	}
+	institutions := w.Catalog.EffectiveEnvironment().Institutions
+	if !institutions.EnforcementEnabled() && !institutions.OversightEnabled() {
+		return fail("courts are disabled in this world")
+	}
+	if suspect == nil || suspect.Dead || a.IllicitGain > 0 || a.Energy < 4 {
+		return fail("case requires a living suspect and an available officer")
+	}
+	m, ok := w.caseEvidence(*a, suspect.ID, x.BasisEventID)
+	if !ok {
+		return fail("case requires verified evidence that has not been adjudicated")
+	}
+	var district string
+	var proceeds int
+	if m.Observation != nil {
+		district, proceeds = m.Observation.Location, m.Observation.Proceeds
+	} else {
+		district, proceeds = m.Statement.Location, m.Statement.Proceeds
+	}
+	if district != a.Location {
+		return fail("the evidence belongs to a different district")
+	}
+	if w.personalCase(district, suspect.ID, "wanted") != nil || w.personalCase(district, suspect.ID, "arrested") != nil {
+		return fail("a warrant or trial is already pending for this suspect")
+	}
+	jr := w.ensureJusticeRevolt()
+	jr.ensureInitialized()
+	a.Energy -= 4
+	x.BasisEventID = m.EventID
+	cc := CourtCase{ID: jr.NextCaseID, Tick: w.Tick, District: district, Kind: "criminal_trial",
+		MagistrateID: a.ID, SuspectID: suspect.ID, Status: "wanted", BasisEventID: m.EventID, WarrantEventID: w.NextID,
+		RootEventID: m.RootEventID, Proceeds: proceeds}
+	jr.NextCaseID++
+	jr.CourtCases = append(jr.CourtCases, cc)
+	notice := Statement{Topic: "court_warrant_issued", SubjectID: suspect.ID, Location: district, CaseID: cc.ID}
+	ev := w.record(a, x, notice.Topic, map[string]any{"text": fmt.Sprintf("Court opened case #%d and issued a warrant for %s in %s", cc.ID, suspect.Name, district),
+		"case_id": cc.ID, "district": district, "statement": notice, "cause_event_id": m.EventID})
+	for i := range w.Actors {
+		resident := &w.Actors[i]
+		if resident.ID == a.ID || resident.Dead || resident.Location != district || resident.InTransit() {
+			continue
+		}
+		resident.Memories = appendMemory(resident.Memories, Memory{Kind: ev.Kind, EventID: ev.ID, RootEventID: cc.RootEventID,
+			Tick: w.Tick, Source: a.ID, TargetID: suspect.ID, Statement: &notice, Text: fmt.Sprint(ev.Payload["text"])})
+	}
+	return []Event{ev}
+}
+
+func (w *World) tryPersonalCase(a, suspect *Actor, x Action) []Event {
+	fail := func(reason string) []Event {
+		return []Event{w.record(a, x, "action_failed", map[string]any{"text": reason})}
+	}
+	institutions := w.Catalog.EffectiveEnvironment().Institutions
+	if x.Kind == "audit_corruption" && !institutions.OversightEnabled() ||
+		x.Kind == "hold_trial" && !institutions.EnforcementEnabled() {
+		return fail("the required court institution is disabled in this world")
+	}
+	if suspect == nil || suspect.ID == a.ID || suspect.Dead || !SamePlace(*a, *suspect) || a.IllicitGain > 0 || a.Energy < 6 {
+		return fail("hearing requires a nearby suspect and an available oversight officer")
+	}
+	cc := w.personalCase(a.Location, suspect.ID, "arrested")
+	if cc == nil {
+		return fail("no arrested defendant in an open case")
+	}
+	if x.BasisEventID > 0 {
+		if m, ok := corruptionEvidence(*a, suspect.ID, x.BasisEventID); !ok || m.RootEventID != cc.RootEventID {
+			return fail("cited evidence does not belong to this case")
+		}
+	}
+	a.Energy -= 6
+	seized := minInt(suspect.Money, minInt(suspect.IllicitGain, cc.Proceeds))
+	suspect.Money -= seized
+	suspect.IllicitGain -= seized
+	w.creditTreasury(int64(seized), "confiscated")
+	w.addDistrictCorruption(a.Location, -8)
+	spec := w.effectiveJusticeSpec(w.JusticeRevolt)
+	suspect.JailedUntil = w.Tick + spec.TrialSentenceTicks
+	cc.Status, cc.ResolvedTick, cc.JailedUntilTick = "convicted", w.Tick, suspect.JailedUntil
+	var revoked []string
+	for _, faction := range w.Factions {
+		if w.Relations != nil && w.Relations.FactionLeader[faction.ID] == suspect.ID {
+			w.setFactionLeader(faction.ID, "")
+			revoked = append(revoked, faction.ID)
+		}
+	}
+	observers := append([]*Actor{suspect}, w.awakeSamePlaceObservers(*a, a.ID, suspect.ID)...)
+	ev := w.record(a, x, "court_trial_held", map[string]any{
+		"text":    fmt.Sprintf("Court convicted %s in case #%d and confiscated %d coins", suspect.Name, cc.ID, seized),
+		"case_id": cc.ID, "district": cc.District, "root_event_id": cc.RootEventID, "cause_event_id": cc.ArrestEventID,
+		"confiscated_coins": seized, "jailed_until": suspect.JailedUntil, "revoked_faction_offices": revoked,
+	}, observers...)
+	outcome := w.record(a, x, "corruption_purged", map[string]any{
+		"text": fmt.Sprintf("Case #%d adjudicated against %s", cc.ID, suspect.Name), "case_id": cc.ID,
+		"root_event_id": cc.RootEventID, "cause_event_id": ev.ID,
+	}, observers...)
+	return []Event{ev, outcome}
+}
+
+func (w *World) settleReleasedCases(actorID string) {
+	if w.JusticeRevolt == nil {
+		return
+	}
+	for i := range w.JusticeRevolt.CourtCases {
+		cc := &w.JusticeRevolt.CourtCases[i]
+		if !cc.IsCohort && cc.SuspectID == actorID {
+			switch cc.Status {
+			case "convicted", "upheld":
+				cc.Status, cc.ResolvedTick = "served", w.Tick
+			case "arrested":
+				cc.Status, cc.ResolvedTick = "released", w.Tick
+			}
+		}
+	}
+}
+
+func (w *World) mayUseSecretEvidence(a Actor, m Memory) bool {
+	var topic, subject, object string
+	if m.Observation != nil {
+		topic, subject, object = m.Observation.Kind, m.Observation.SubjectID, m.Observation.ObjectID
+	} else if m.Statement != nil {
+		topic, subject, object = m.Statement.Topic, m.Statement.SubjectID, m.Statement.ObjectID
+	}
+	for _, s := range w.Secrets {
+		if secretReportTopic(topic) && s.ID == object ||
+			(topic == "corruption" || topic == "wrongful_conviction") && s.RootEventID == m.RootEventID && s.OwnerID == subject {
+			if ActorHasTag(s.ExposureKnownBy, a.ID) {
+				return true
+			}
+			stance := s.HolderStances[a.ID]
+			return stance == "confront" || stance == ""
+		}
+	}
+	return true
+}
+
+func (w *World) settleCohortRelease(cohortID string, count int) {
+	if w.JusticeRevolt == nil {
+		return
+	}
+	for i := range w.JusticeRevolt.CourtCases {
+		cc := &w.JusticeRevolt.CourtCases[i]
+		if count == 0 {
+			break
+		}
+		if cc.IsCohort && cc.SuspectID == cohortID && cc.Status == "convicted" {
+			released := minInt(cc.JailedCount, count)
+			cc.JailedCount -= released
+			count -= released
+			if cc.JailedCount == 0 {
+				cc.Status, cc.ResolvedTick = "served", w.Tick
+			}
+		}
+	}
 }

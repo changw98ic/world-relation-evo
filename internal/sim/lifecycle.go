@@ -53,6 +53,23 @@ func initCohortAgePyramid(cat Catalog, c *PopulationCohort) {
 	c.Adults = c.Population - c.Children - c.Elders
 }
 
+func (w *World) firstCarriedPotableItem(a Actor) string {
+	if len(a.Items) == 0 {
+		return ""
+	}
+	var candidates []string
+	for itemID, qty := range a.Items {
+		if qty > 0 && w.Catalog.Items[itemID].Potable {
+			candidates = append(candidates, itemID)
+		}
+	}
+	if len(candidates) == 0 {
+		return ""
+	}
+	sort.Strings(candidates)
+	return candidates[0]
+}
+
 func (w *World) potablePoolID(ds DistrictState) string {
 	chosen := ""
 	for id, spec := range w.Catalog.Resources {
@@ -288,17 +305,6 @@ func actorAnnualMortalityPermille(lc LifecycleSpec, form *FormSpec, ageYears int
 	return permille
 }
 
-// ActorAnnualMortalityPermille returns the annual old-age mortality permille for an actor of a given FormID and age.
-func (w *World) ActorAnnualMortalityPermille(formID string, ageYears int) int {
-	var formPtr *FormSpec
-	if formID != "" {
-		if f, ok := w.Catalog.Forms[formID]; ok {
-			formPtr = &f
-		}
-	}
-	return actorAnnualMortalityPermille(w.Catalog.Lifecycle, formPtr, ageYears)
-}
-
 // stepActorPhysiologyAndLifecycle settles individual Actor thirst, low-friction drinking & latrine excretion,
 // cold exposure, disease progression, annual aging, household births, elder mortality, and successor hydration.
 func (w *World) stepActorPhysiologyAndLifecycle() []Event {
@@ -371,20 +377,17 @@ func (w *World) stepActorPhysiologyAndLifecycleFor(actors []Actor, allowSuccesso
 			}
 
 			if a.Thirst >= 2 {
-				// Drink carried potable item automatically before thirst becomes severe
-				for itemID, qty := range a.Items {
+				// Drink carried potable item automatically in deterministic item-ID order before thirst becomes severe.
+				if itemID := w.firstCarriedPotableItem(*a); itemID != "" {
 					spec := w.Catalog.Items[itemID]
-					if qty > 0 && spec.Potable {
-						w.adjustActorItem(a, itemID, -1, true)
-						relief := spec.ThirstRelief
-						if relief <= 0 {
-							relief = 2
-						}
-						a.Thirst -= relief
-						if a.Thirst < 0 {
-							a.Thirst = 0
-						}
-						break
+					w.adjustActorItem(a, itemID, -1, true)
+					relief := spec.ThirstRelief
+					if relief <= 0 {
+						relief = 2
+					}
+					a.Thirst -= relief
+					if a.Thirst < 0 {
+						a.Thirst = 0
 					}
 				}
 			}

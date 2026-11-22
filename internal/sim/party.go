@@ -18,6 +18,10 @@ type Party struct {
 	LootPolicy     string   `json:"loot_policy,omitempty"` // "equal" | "leader_share"
 }
 
+func CloneParty(p Party) Party {
+	return cloneParty(p)
+}
+
 func cloneParty(p Party) Party {
 	out := p
 	if p.MemberIDs != nil {
@@ -172,7 +176,6 @@ func (w *World) applyFormParty(a *Actor, x Action) []Event {
 		LootPolicy:     lootPolicy,
 	}
 	w.Parties = append(w.Parties, p)
-	observers := w.awakeSamePlaceObservers(*a, a.ID)
 	if recruited != nil {
 		if a.Trust == nil {
 			a.Trust = map[string]int{}
@@ -183,6 +186,7 @@ func (w *World) applyFormParty(a *Actor, x Action) []Event {
 		a.Trust[recruited.ID]++
 		recruited.Trust[a.ID]++
 	}
+	observers := w.awakeSamePlaceObservers(*a, a.ID)
 	ev := w.record(a, x, "party_formed", map[string]any{
 		"text":            fmt.Sprintf("%s formed %s targeting %s (%d members)", a.Name, p.Name, targetDist, len(members)),
 		"party_id":        p.ID,
@@ -305,27 +309,35 @@ func (w *World) applyBetrayParty(a *Actor, x Action) []Event {
 		return fail("actor is not in an active party")
 	}
 	p := w.Parties[partyIdx]
-	targetID := x.TargetID
-	if targetID == "" || targetID == a.ID || !ActorHasTag(p.MemberIDs, targetID) {
-		// Default to leader if co-located, else first co-located party mate.
-		if p.LeaderID != a.ID {
-			targetID = p.LeaderID
-		} else {
-			sorted := append([]string(nil), p.MemberIDs...)
-			sort.Strings(sorted)
-			for _, mid := range sorted {
-				if mid != a.ID {
-					targetID = mid
-					break
-				}
+	var target *Actor
+	canTarget := func(peer *Actor) bool {
+		return peer != nil && peer.ID != a.ID && w.Tick >= peer.JailedUntil && SamePlace(*a, *peer)
+	}
+	if x.TargetID != "" {
+		target = w.actor(x.TargetID)
+		if !ActorHasTag(p.MemberIDs, x.TargetID) || !canTarget(target) {
+			return fail("betrayal target must be a co-located living party member")
+		}
+	} else {
+		mates := append([]string(nil), p.MemberIDs...)
+		sort.Strings(mates)
+		for _, id := range append([]string{p.LeaderID}, mates...) {
+			if peer := w.actor(id); canTarget(peer) {
+				target = peer
+				break
 			}
 		}
+		if target == nil {
+			return fail("betrayal requires a co-located party member")
+		}
 	}
-	target := w.actor(targetID)
-	if target == nil || target.Dead || !SamePlace(*a, *target) {
-		return fail("betrayal target must be a co-located living party member")
+	x.TargetID = target.ID
+	observers := w.awakeSamePlaceObservers(*a, a.ID, target.ID)
+	witnessIDs := make([]string, 0, len(observers))
+	for _, peer := range observers {
+		witnessIDs = append(witnessIDs, peer.ID)
 	}
-
+	observers = append(observers, target)
 	a.Energy -= 6
 	// Exact 0-error coin seizure from target to betrayer.
 	stolen := 0
@@ -337,15 +349,14 @@ func (w *World) applyBetrayParty(a *Actor, x Action) []Event {
 		if stolen > 30 {
 			stolen = 30
 		}
+		w.AssessAndRecordOffense(*target, *a, "betray_party", 30, stolen, target.Money, 0, "hostile")
 		target.Money -= stolen
 		a.Money += stolen
 		a.IllicitGain += stolen
+	} else {
+		w.AssessAndRecordOffense(*target, *a, "betray_party", 30, 0, target.Money, 0, "hostile")
 	}
-	dmg := maxInt(6, minInt(20, CombatPowerWithCatalog(w.Catalog, *a)/3))
-	target.Health -= dmg
-	if target.Health < 0 {
-		target.Health = 0
-	}
+	dmg, absorbed, immune, broken := w.applyMeleeHit(a, target, x, maxInt(6, minInt(20, CombatPowerWithCatalog(w.Catalog, *a)/3)))
 
 	// Expel betrayer from party (or disband if <=1 remains).
 	remaining := removeString(p.MemberIDs, a.ID)
@@ -371,7 +382,6 @@ func (w *World) applyBetrayParty(a *Actor, x Action) []Event {
 		Location:  a.Location,
 		Quantity:  maxInt(1, stolen),
 	}
-	observers := w.awakeSamePlaceObservers(*a, a.ID)
 	for _, mid := range remaining {
 		if m := w.actor(mid); m != nil && !m.Dead && (m.ID == target.ID || SamePlace(*a, *m)) {
 			if m.Trust == nil {
@@ -381,19 +391,21 @@ func (w *World) applyBetrayParty(a *Actor, x Action) []Event {
 		}
 	}
 	betrayEv := w.record(a, x, "party_betrayed", map[string]any{
-		"text":         fmt.Sprintf("%s betrayed %s in %s, ambushing %s (-%d HP) and seizing %d coins", a.Name, p.Name, a.Location, target.Name, dmg, stolen),
-		"party_id":     p.ID,
-		"victim_id":    target.ID,
-		"stolen_coins": stolen,
-		"damage":       dmg,
-		"observation":  obs,
+		"text":           fmt.Sprintf("%s betrayed %s in %s, ambushing %s (-%d HP) and seizing %d coins", a.Name, p.Name, a.Location, target.Name, dmg, stolen),
+		"party_id":       p.ID,
+		"victim_id":      target.ID,
+		"stolen_coins":   stolen,
+		"coins":          stolen,
+		"absorbed":       absorbed,
+		"immune_blocked": immune,
+		"witnesses":      witnessIDs,
+		"damage":         dmg,
+		"observation":    obs,
 	}, observers...)
 
-	events := []Event{betrayEv}
+	events := append(broken, betrayEv)
 	events = append(events, w.ensureRelations().recordGrudge(w, target.ID, a.ID, "party_betrayed", 50, betrayEv.ID, betrayEv.ID)...)
-	if target.Health <= 0 {
-		events = append(events, w.markDeadIfZero(target, a, x, "party betrayal")...)
-	}
+	events = append(events, w.finishMeleeHit(a, target, x, dmg, "party betrayal", betrayEv)...)
 	return events
 }
 
@@ -411,10 +423,10 @@ func (w *World) partyCombatSupportBonus(a Actor) int {
 			continue
 		}
 		m := w.actor(mid)
-		if m == nil || m.Dead || m.InTransit() || w.Tick < m.JailedUntil {
+		if !w.partyMateAvailable(m) {
 			continue
 		}
-		if SamePlace(a, *m) || (a.InsideHouse == "" && m.InsideHouse == "" && a.Location == m.Location) {
+		if SamePlace(a, *m) {
 			cp := CombatPowerWithCatalog(w.Catalog, *m)
 			bonus += maxInt(2, cp/4)
 		}
@@ -426,7 +438,7 @@ func (w *World) partyCombatSupportBonus(a Actor) int {
 }
 
 // partyEscortRiskReductionPct returns hazard mitigation percentage granted by co-located party escorts.
-func (w *World) partyEscortRiskReductionPct(a Actor) int {
+func (w *World) partyEscortRiskReductionPct(a Actor, destination string) int {
 	p := w.ActorParty(a.ID)
 	if p == nil || len(p.MemberIDs) <= 1 {
 		return 0
@@ -437,7 +449,7 @@ func (w *World) partyEscortRiskReductionPct(a Actor) int {
 			continue
 		}
 		m := w.actor(mid)
-		if m != nil && !m.Dead && m.Location == a.Location {
+		if w.partyMateAvailable(m) && (SamePlace(a, *m) || m.InTransit() && m.Location == a.Location && m.VenueID == a.VenueID && m.Task.Action.Location == destination) {
 			mates++
 		}
 	}
@@ -450,7 +462,7 @@ func (w *World) partyEscortRiskReductionPct(a Actor) int {
 
 // settlePartyRewardSplit distributes earned coins fairly among co-located living party mates
 // via exact actor-to-actor transfers (0 net minting -> 100% ledger conservation).
-func (w *World) settlePartyRewardSplit(a *Actor, coins int, reason string) []Event {
+func (w *World) settlePartyRewardSplit(a *Actor, coins int, source Event) []Event {
 	if w == nil || a == nil || a.Dead || coins < 2 {
 		return nil
 	}
@@ -466,7 +478,7 @@ func (w *World) settlePartyRewardSplit(a *Actor, coins int, reason string) []Eve
 			continue
 		}
 		m := w.actor(mid)
-		if m != nil && !m.Dead && !m.InTransit() && w.Tick >= m.JailedUntil && m.Location == a.Location {
+		if w.partyMateAvailable(m) && SamePlace(*a, *m) {
 			mates = append(mates, m)
 		}
 	}
@@ -475,47 +487,25 @@ func (w *World) settlePartyRewardSplit(a *Actor, coins int, reason string) []Eve
 	}
 	totalPresent := len(mates) + 1
 	available := minInt(coins, a.Money)
-	if available < totalPresent {
-		return nil
+	leaderPresent := p.LeaderID == a.ID
+	for _, m := range mates {
+		leaderPresent = leaderPresent || m.ID == p.LeaderID
 	}
-
+	leaderShare := p.LootPolicy == "leader_share" && leaderPresent
+	each, leaderCut := available/totalPresent, 0
+	if leaderShare {
+		leaderCut = (available + 1) / 2
+		each = (available - leaderCut) / (totalPresent - 1)
+	}
 	shares := make(map[string]int, len(mates))
 	totalPaid := 0
-	if p.LootPolicy == "leader_share" {
-		if p.LeaderID == a.ID {
-			// Leader keeps half; mates split the other half evenly.
-			pool := available / 2
-			each := pool / len(mates)
-			for _, m := range mates {
-				if each > 0 {
-					shares[m.ID] = each
-					totalPaid += each
-				}
-			}
-		} else {
-			// Non-leader claimer gives leader half, splits rest with remaining mates.
-			leaderCut := available / 2
-			rest := available - leaderCut
-			each := rest / totalPresent
-			for _, m := range mates {
-				cut := each
-				if m.ID == p.LeaderID {
-					cut = leaderCut
-				}
-				if cut > 0 {
-					shares[m.ID] = cut
-					totalPaid += cut
-				}
-			}
+	for _, m := range mates {
+		cut := each
+		if leaderShare && m.ID == p.LeaderID {
+			cut = leaderCut
 		}
-	} else {
-		each := available / totalPresent
-		for _, m := range mates {
-			if each > 0 {
-				shares[m.ID] = each
-				totalPaid += each
-			}
-		}
+		shares[m.ID] = cut
+		totalPaid += cut
 	}
 	if totalPaid <= 0 || totalPaid > a.Money {
 		return nil
@@ -540,12 +530,33 @@ func (w *World) settlePartyRewardSplit(a *Actor, coins int, reason string) []Eve
 		observers = append(observers, m)
 	}
 	ev := w.record(a, Action{Kind: "wait", TargetID: p.ID, Quantity: totalPaid}, "party_loot_split", map[string]any{
-		"text":        fmt.Sprintf("%s shared %d coins (%s) across %d party members of %s", a.Name, totalPaid, reason, len(mates), p.Name),
-		"party_id":    p.ID,
-		"reason":      reason,
-		"total_split": totalPaid,
-		"recipients":  len(mates),
-		"loot_policy": p.LootPolicy,
+		"text":           fmt.Sprintf("%s shared %d coins (%s) across %d party members of %s", a.Name, totalPaid, source.Kind, len(mates), p.Name),
+		"party_id":       p.ID,
+		"reason":         source.Kind,
+		"cause_event_id": source.ID,
+		"root_event_id":  payloadInt64(source.Payload, "root_event_id"),
+		"total_split":    totalPaid,
+		"recipients":     len(mates),
+		"loot_policy":    p.LootPolicy,
 	}, observers...)
 	return []Event{ev}
+}
+
+func (w *World) partyMateAvailable(a *Actor) bool {
+	return a != nil && !a.Dead && w.Tick >= a.JailedUntil &&
+		(a.Task == nil || a.Task.Action.Kind != "sleep" && !a.Task.Dormant)
+}
+
+func (w *World) partyReadyToDepart(a Actor) bool {
+	p := w.ActorParty(a.ID)
+	if p == nil {
+		return false
+	}
+	for _, id := range p.MemberIDs {
+		member := w.actor(id)
+		if !w.partyMateAvailable(member) || !SamePlace(a, *member) {
+			return false
+		}
+	}
+	return true
 }

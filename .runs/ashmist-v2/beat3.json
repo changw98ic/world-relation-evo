@@ -1,0 +1,37 @@
+{
+  "label": "Part 3: 九星旧日外神压境、000号母卡基与人族总决战",
+  "trigger_world_events": [
+    {
+      "district_id": "red_sea_rift",
+      "inline_spec": {
+        "id": "outer_god_descent",
+        "name": "九星旧日外神·灰雾之主探入大气层",
+        "category": "external_invasion",
+        "duration_ticks": 960,
+        "intensity": 98,
+        "casualty_permille": 350,
+        "damage": 40
+      }
+    },
+    {
+      "district_id": "ruins_zone7",
+      "inline_spec": {
+        "id": "antarctic_000_mother_card",
+        "name": "南极总站遗址·000号纯净母卡基现世",
+        "category": "artifact_emergence",
+        "duration_ticks": 768,
+        "intensity": 95,
+        "reward_item": "pure_mother_card_000",
+        "reward_qty": 1,
+        "reward_coins": 200,
+        "casualty_permille": 150,
+        "damage": 22
+      }
+    }
+  ],
+  "set_diplomacy": [
+    {"faction_a": "graystone_workshop", "faction_b": "high_council", "stance": "at_war", "relation_score": -100, "reason": "shatter_subspace_cocoon_war"},
+    {"faction_a": "high_council", "faction_b": "red_sea_legion", "stance": "at_war", "relation_score": -100, "reason": "frontline_mutiny_against_council"},
+    {"faction_a": "graystone_workshop", "faction_b": "red_sea_legion", "stance": "allied", "relation_score": 90, "reason": "humanity_united_front"}
+  ]
+}

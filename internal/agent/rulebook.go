@@ -194,25 +194,25 @@ func LoadRulebook(path string) (*InteractionRulebook, error) {
 
 // RulebookDecisionEvent records one dynamically bound generic rule execution.
 type RulebookDecisionEvent struct {
-	Tick                 int64    `json:"tick"`
-	Day                  int      `json:"day"`
-	Clock                string   `json:"clock"`
-	Kind                 string   `json:"kind"` // reaction | proactive
-	RuleID               string   `json:"rule_id"`
-	RuleName             string   `json:"rule_name"`
-	Category             string   `json:"category,omitempty"`
-	BranchID             string   `json:"branch_id,omitempty"`
-	Stance               string   `json:"stance,omitempty"`
-	BranchTitle          string   `json:"branch_title,omitempty"`
-	ResponderPosition    string   `json:"responder_position,omitempty"` // actor2 | witness | actor1
-	TriggerEventID       int64    `json:"trigger_event_id,omitempty"`
-	TriggerKind          string   `json:"trigger_kind,omitempty"`
-	Actor1ID             string   `json:"actor1_id"`
-	Actor1Name           string   `json:"actor1_name"`
-	Actor1Role           string   `json:"actor1_role,omitempty"`
-	Actor2ID             string   `json:"actor2_id,omitempty"`
-	Actor2Name           string   `json:"actor2_name,omitempty"`
-	Actor2Role           string   `json:"actor2_role,omitempty"`
+	Tick                     int64    `json:"tick"`
+	Day                      int      `json:"day"`
+	Clock                    string   `json:"clock"`
+	Kind                     string   `json:"kind"` // reaction | proactive
+	RuleID                   string   `json:"rule_id"`
+	RuleName                 string   `json:"rule_name"`
+	Category                 string   `json:"category,omitempty"`
+	BranchID                 string   `json:"branch_id,omitempty"`
+	Stance                   string   `json:"stance,omitempty"`
+	BranchTitle              string   `json:"branch_title,omitempty"`
+	ResponderPosition        string   `json:"responder_position,omitempty"` // actor2 | witness | actor1
+	TriggerEventID           int64    `json:"trigger_event_id,omitempty"`
+	TriggerKind              string   `json:"trigger_kind,omitempty"`
+	Actor1ID                 string   `json:"actor1_id"`
+	Actor1Name               string   `json:"actor1_name"`
+	Actor1Role               string   `json:"actor1_role,omitempty"`
+	Actor2ID                 string   `json:"actor2_id,omitempty"`
+	Actor2Name               string   `json:"actor2_name,omitempty"`
+	Actor2Role               string   `json:"actor2_role,omitempty"`
 	ResponderID              string   `json:"responder_id"`
 	ResponderName            string   `json:"responder_name"`
 	ResponderRole            string   `json:"responder_role,omitempty"`
@@ -224,11 +224,11 @@ type RulebookDecisionEvent struct {
 	PowerMultiplier          float64  `json:"power_multiplier,omitempty"`
 	RelationMultiplier       float64  `json:"relation_multiplier,omitempty"`
 	ResponderPersonality     string   `json:"responder_personality,omitempty"`
-	TargetPersonality    string   `json:"target_personality,omitempty"`
-	ResponderHobbies     []string `json:"responder_hobbies,omitempty"`
-	SharedHobbies        []string `json:"shared_hobbies,omitempty"`
-	BaseWeight           int      `json:"base_weight,omitempty"`
-	EffectiveWeight      int      `json:"effective_weight,omitempty"`
+	TargetPersonality        string   `json:"target_personality,omitempty"`
+	ResponderHobbies         []string `json:"responder_hobbies,omitempty"`
+	SharedHobbies            []string `json:"shared_hobbies,omitempty"`
+	BaseWeight               int      `json:"base_weight,omitempty"`
+	EffectiveWeight          int      `json:"effective_weight,omitempty"`
 	WeightMultiplier         float64  `json:"weight_multiplier,omitempty"`
 	EncounterRate            float64  `json:"encounter_rate,omitempty"`
 	ProfessionEncounterRate  float64  `json:"profession_encounter_rate,omitempty"`
@@ -236,13 +236,13 @@ type RulebookDecisionEvent struct {
 	PersonalityEncounterRate float64  `json:"personality_encounter_rate,omitempty"`
 	TargetAttraction         float64  `json:"target_attraction,omitempty"`
 	WeightReasons            []string `json:"weight_reasons,omitempty"`
-	Location             string   `json:"location"`
-	IntendedKind         string   `json:"intended_kind"`
-	ExecutedKind         string   `json:"executed_kind"`
-	TargetID             string   `json:"target_id,omitempty"`
-	TargetName           string   `json:"target_name,omitempty"`
-	Item                 string   `json:"item,omitempty"`
-	RenderedSummary      string   `json:"rendered_summary"`
+	Location                 string   `json:"location"`
+	IntendedKind             string   `json:"intended_kind"`
+	ExecutedKind             string   `json:"executed_kind"`
+	TargetID                 string   `json:"target_id,omitempty"`
+	TargetName               string   `json:"target_name,omitempty"`
+	Item                     string   `json:"item,omitempty"`
+	RenderedSummary          string   `json:"rendered_summary"`
 }
 
 type RulebookRunStats struct {
@@ -303,52 +303,64 @@ type RulebookSelector struct {
 	Trace    *runtrace.Writer
 	Seed     int64
 
-	mu                      sync.Mutex
-	reactedEvents           map[string]bool            // responderID:eventID -> already handled
-	proactiveCooldown       map[string]int64           // actorID:ruleID -> cooldown until tick
-	actorNextProTick        map[string]int64           // actorID -> next proactive decision tick
-	actorNextRxnTick        map[string]int64           // actorID -> next reaction tick
-	knownActorNames         map[string]string          // dynamically observed at runtime
-	knownActorRoles         map[string]string          // dynamically observed at runtime
-	knownActorForms         map[string]string          // dynamically observed at runtime
-	knownActorPowerTiers    map[string]int             // dynamically observed at runtime
-	knownActorCombatPowers  map[string]int             // dynamically observed at runtime
-	knownActorSkills        map[string]map[string]int  // dynamically observed at runtime
-	knownActorGuilds        map[string][]string        // dynamically observed at runtime
-	knownActorHobbies       map[string][]string        // dynamically observed at runtime
-	knownActorPersonalities map[string]string          // dynamically observed at runtime
-	firedProactive          map[string]int64           // ruleID -> earliest tick fired
-	firedReaction           map[string]int64           // ruleID -> earliest tick fired
-	uniquePairs             map[string]bool
-	uniqueResponders        map[string]bool
-	rulePairs               map[string]map[string]int64 // ruleID -> "a1->a2" -> earliest tick fired
-	events                  []RulebookDecisionEvent
-	stats                   RulebookRunStats
+	mu                sync.Mutex
+	reactedEvents     map[string]bool  // responderID:eventID -> already handled
+	proactiveCooldown map[string]int64 // actorID:ruleID -> cooldown until tick
+	actorNextProTick  map[string]int64 // actorID -> next proactive decision tick
+	actorNextRxnTick  map[string]int64 // actorID -> next reaction tick
+	*rulebookActorKnowledge
+	knowledgeByObserver map[string]*rulebookActorKnowledge
+	allActorNames       map[string]string
+	firedProactive      map[string]int64 // ruleID -> earliest tick fired
+	firedReaction       map[string]int64 // ruleID -> earliest tick fired
+	lastTriggerByActor  map[string]int64 // actorID -> causal trigger event ID for current decision
+	uniquePairs         map[string]bool
+	uniqueResponders    map[string]bool
+	rulePairs           map[string]map[string]int64 // ruleID -> "a1->a2" -> earliest tick fired
+	events              []RulebookDecisionEvent
+	stats               RulebookRunStats
+}
+
+type rulebookActorKnowledge struct {
+	knownActorNames         map[string]string         // dynamically observed at runtime
+	knownActorRoles         map[string]string         // dynamically observed at runtime
+	knownActorForms         map[string]string         // dynamically observed at runtime
+	knownActorPowerTiers    map[string]int            // dynamically observed at runtime
+	knownActorCombatPowers  map[string]int            // dynamically observed at runtime
+	knownActorSkills        map[string]map[string]int // dynamically observed at runtime
+	knownActorGuilds        map[string][]string       // dynamically observed at runtime
+	knownActorHobbies       map[string][]string       // dynamically observed at runtime
+	knownActorPersonalities map[string]string         // dynamically observed at runtime
+}
+
+func newRulebookActorKnowledge() *rulebookActorKnowledge {
+	return &rulebookActorKnowledge{
+		knownActorNames: map[string]string{}, knownActorRoles: map[string]string{},
+		knownActorForms: map[string]string{}, knownActorPowerTiers: map[string]int{},
+		knownActorCombatPowers: map[string]int{}, knownActorSkills: map[string]map[string]int{},
+		knownActorGuilds: map[string][]string{}, knownActorHobbies: map[string][]string{},
+		knownActorPersonalities: map[string]string{},
+	}
 }
 
 // NewRulebookSelector constructs a zero-LLM generic RulebookSelector.
 func NewRulebookSelector(rb *InteractionRulebook, trace *runtrace.Writer) *RulebookSelector {
 	return &RulebookSelector{
-		Rulebook:                rb,
-		Trace:                   trace,
-		reactedEvents:           map[string]bool{},
-		proactiveCooldown:       map[string]int64{},
-		actorNextProTick:        map[string]int64{},
-		actorNextRxnTick:        map[string]int64{},
-		knownActorNames:         map[string]string{},
-		knownActorRoles:         map[string]string{},
-		knownActorForms:         map[string]string{},
-		knownActorPowerTiers:    map[string]int{},
-		knownActorCombatPowers:  map[string]int{},
-		knownActorSkills:        map[string]map[string]int{},
-		knownActorGuilds:        map[string][]string{},
-		knownActorHobbies:       map[string][]string{},
-		knownActorPersonalities: map[string]string{},
-		firedProactive:          map[string]int64{},
-		firedReaction:           map[string]int64{},
-		uniquePairs:             map[string]bool{},
-		uniqueResponders:        map[string]bool{},
-		rulePairs:               map[string]map[string]int64{},
+		Rulebook:               rb,
+		Trace:                  trace,
+		reactedEvents:          map[string]bool{},
+		proactiveCooldown:      map[string]int64{},
+		actorNextProTick:       map[string]int64{},
+		actorNextRxnTick:       map[string]int64{},
+		rulebookActorKnowledge: newRulebookActorKnowledge(),
+		knowledgeByObserver:    map[string]*rulebookActorKnowledge{},
+		allActorNames:          map[string]string{},
+		firedProactive:         map[string]int64{},
+		firedReaction:          map[string]int64{},
+		lastTriggerByActor:     map[string]int64{},
+		uniquePairs:            map[string]bool{},
+		uniqueResponders:       map[string]bool{},
+		rulePairs:              map[string]map[string]int64{},
 		stats: RulebookRunStats{
 			TotalProactiveRules:        len(rb.ProactiveRules),
 			TotalReactionRules:         len(rb.ReactionRules),
@@ -457,7 +469,7 @@ func (s *RulebookSelector) SnapshotLog() RulebookLog {
 		}
 		gloss.Actors = cp
 	}
-	for id, nm := range s.knownActorNames {
+	for id, nm := range s.allActorNames {
 		gloss.Actors[id] = nm
 	}
 
@@ -485,7 +497,12 @@ func (s *RulebookSelector) WriteLog(path string) error {
 }
 
 func (s *RulebookSelector) observePerceptionLocked(p sim.Perception) {
+	if s.knowledgeByObserver[p.Self.ID] == nil {
+		s.knowledgeByObserver[p.Self.ID] = newRulebookActorKnowledge()
+	}
+	s.rulebookActorKnowledge = s.knowledgeByObserver[p.Self.ID]
 	if p.Self.ID != "" {
+		s.allActorNames[p.Self.ID] = p.Self.Name
 		s.knownActorNames[p.Self.ID] = p.Self.Name
 		s.knownActorRoles[p.Self.ID] = p.Self.Role
 		if p.Self.FormID != "" {
@@ -524,26 +541,13 @@ func (s *RulebookSelector) observePerceptionLocked(p sim.Perception) {
 	}
 	for _, nb := range p.Nearby {
 		if nb.ID != "" {
-			s.knownActorNames[nb.ID] = nb.Name
-			s.knownActorRoles[nb.ID] = nb.Role
-			if nb.FormID != "" {
-				s.knownActorForms[nb.ID] = nb.FormID
-			}
-			if nb.PowerTier > 0 {
-				s.knownActorPowerTiers[nb.ID] = nb.PowerTier
-			}
-			if nb.CombatPower > 0 {
-				s.knownActorCombatPowers[nb.ID] = nb.CombatPower
-			}
-			if len(nb.Skills) > 0 {
-				s.knownActorSkills[nb.ID] = cloneIntMap(nb.Skills)
-			}
-			if strings.TrimSpace(nb.Personality) != "" {
-				s.knownActorPersonalities[nb.ID] = nb.Personality
-			}
-			if len(nb.Hobbies) > 0 {
-				s.knownActorHobbies[nb.ID] = normalizeStringList(nb.Hobbies)
-			}
+			s.knownActorNames[nb.ID], s.knownActorRoles[nb.ID] = nb.Name, nb.Role
+			s.knownActorForms[nb.ID], s.knownActorPowerTiers[nb.ID] = nb.FormID, nb.PowerTier
+			s.knownActorCombatPowers[nb.ID] = nb.CombatPower
+			s.knownActorSkills[nb.ID] = cloneIntMap(nb.Skills)
+			s.knownActorPersonalities[nb.ID] = nb.Personality
+			s.knownActorHobbies[nb.ID] = normalizeStringList(nb.Hobbies)
+			s.knownActorGuilds[nb.ID] = append([]string(nil), nb.Guilds...)
 		}
 	}
 }
@@ -589,6 +593,7 @@ func (s *RulebookSelector) Select(ctx context.Context, p sim.Perception, options
 	defer s.mu.Unlock()
 
 	s.stats.TotalDecisions++
+	delete(s.lastTriggerByActor, p.Self.ID)
 	s.observePerceptionLocked(p)
 
 	day := p.Clock.Day
@@ -602,6 +607,22 @@ func (s *RulebookSelector) Select(ctx context.Context, p sim.Perception, options
 		return RuleSelector{trace: s.Trace}.Select(ctx, p, options)
 	}
 
+	// Work on existing legal process and coordinated movement before discretionary interactions.
+	for _, action := range p.CaseActions {
+		if id := ruleOptionID(action, options); id != "" {
+			return id, nil
+		}
+	}
+	if actorActiveParty(p) != nil {
+		var partyOption string
+		if planPartyAction(p, func(action sim.Action) bool {
+			partyOption = ruleOptionID(action, options)
+			return partyOption != ""
+		}) {
+			return partyOption, nil
+		}
+	}
+
 	// Tier 1: Causal Reaction Rules triggered by real engine events in p.Self.Memories / p.Offers.
 	if id, ok := s.tryCausalReactionLocked(p, options, day); ok {
 		return id, nil
@@ -610,6 +631,30 @@ func (s *RulebookSelector) Select(ctx context.Context, p sim.Perception, options
 	// Tier 1.5: Environmental crisis, major world-event & death-news reactions.
 	if id, ok := s.tryEnvAndDeathReactionLocked(p, options, day); ok {
 		return id, nil
+	}
+
+	// Tier 1.75: Ready upward realm/star breakthrough and golden-finger redemptions/simulations take precedence over routine chatter.
+	if len(p.ActiveGoldenFingers) > 0 {
+		var gfOpt string
+		if planGoldenFingerAction(p, func(action sim.Action) bool {
+			gfOpt = ruleOptionID(action, options)
+			return gfOpt != ""
+		}) {
+			return gfOpt, nil
+		}
+	}
+	if p.Self.Health >= 55 && p.Self.Energy >= 20 && len(p.Catalog.Transitions) > 0 {
+		selfTier := p.Catalog.ActorPowerTier(p.Self)
+		for _, opt := range options {
+			if opt.Action.Kind != "attempt_transition" || opt.Action.TransitionID == "" {
+				continue
+			}
+			if tr, ok := p.Catalog.Transitions[opt.Action.TransitionID]; ok && tr.SuccessFormID != "" && tr.SuccessFormID != p.Self.FormID {
+				if p.Catalog.Forms[tr.SuccessFormID].PowerTier > selfTier {
+					return opt.ID, nil
+				}
+			}
+		}
 	}
 
 	// Tier 2: Proactive Role-Pair Interaction Rules ($actor1 --[behavior]--> $actor2).
@@ -1162,9 +1207,9 @@ func inferRuntimeSocialBond(a sim.Actor, targetID string, targetGuilds []string,
 		switch m.Kind {
 		case "mentorship_formed", "knowledge_taught":
 			isMentorBond = true
-		case "sworn_bond_formed", "bond_sworn":
+		case "bond_sworn":
 			isSwornAlly = true
-		case "blood_feud_formed":
+		case "grudge_formed":
 			isFeudEnemy = true
 		}
 	}
@@ -1649,7 +1694,7 @@ func (s *RulebookSelector) tryCausalReactionLocked(p sim.Perception, options []O
 		defendingBond := false
 		if pos == "witness" && actor2ID != "" && actor2ID != a.ID && actor2ID != mem.Source {
 			switch mem.Kind {
-			case "attacked", "raided", "stolen", "framed", "extorted":
+			case "attacked", "raided", "stolen", "wrongful_conviction", "extorted":
 				vTrust, vGuild, vMentor, vSworn, _ := inferRuntimeSocialBond(a, actor2ID, s.knownActorGuilds[actor2ID], p.ActiveGrudgeTargets)
 				if vMentor || vSworn || vTrust >= 3 || vGuild {
 					defendingBond = true
@@ -1681,6 +1726,13 @@ func (s *RulebookSelector) tryCausalReactionLocked(p sim.Perception, options []O
 				targetID := resolveTargetBinding(p, br.Behavior.TargetBinding, mem.Source, actor2ID, nearbyByID)
 				opt := matchGenericBehavior(p, options, br.Behavior, targetID)
 				if opt == nil {
+					continue
+				}
+				if mem.Kind == "faction_war_declared" && opt.Action.Kind == "attack" &&
+					nearbyByID[opt.Action.TargetID].FactionRelation != "at_war" {
+					continue
+				}
+				if !secretReactionAllowed(p, mem, opt.Action) {
 					continue
 				}
 				base := br.Weight
@@ -1882,22 +1934,35 @@ func (s *RulebookSelector) tryCausalReactionLocked(p sim.Perception, options []O
 			RelationMultiplier:   math.Round(chosen.relMult*1000) / 1000,
 			ResponderPersonality: a.Personality,
 			ResponderHobbies:     append([]string(nil), selfProf.Hobbies...),
-			BaseWeight:               chosen.baseWeight,
-			EffectiveWeight:          chosen.effectiveWeight,
-			WeightMultiplier:         math.Round(chosen.mult*1000) / 1000,
-			EncounterRate:            math.Round(engageRate*1000) / 1000,
-			ProfessionEncounterRate:  math.Round(func() float64 { if pos == "witness" { return selfEncBreak.Profession.WitnessEngage }; return selfEncBreak.Profession.DirectEngage }()*1000) / 1000,
-			VenueEncounterRate:       math.Round(selfEncBreak.VenueFactor*1000) / 1000,
-			PersonalityEncounterRate: math.Round(func() float64 { if pos == "witness" { return selfEncBreak.Personality.WitnessEngage }; return selfEncBreak.Personality.DirectEngage }()*1000) / 1000,
-			WeightReasons:            append([]string(nil), chosen.reasons...),
-			Location:                 a.Location,
-			IntendedKind:             br.Behavior.EngineKind,
-			ExecutedKind:             opt.Action.Kind,
-			TargetID:                 opt.Action.TargetID,
-			TargetName:               s.actorNameLocked(opt.Action.TargetID),
-			Item:                     opt.Action.Item,
-			RenderedSummary:          rendered,
+			BaseWeight:           chosen.baseWeight,
+			EffectiveWeight:      chosen.effectiveWeight,
+			WeightMultiplier:     math.Round(chosen.mult*1000) / 1000,
+			EncounterRate:        math.Round(engageRate*1000) / 1000,
+			ProfessionEncounterRate: math.Round(func() float64 {
+				if pos == "witness" {
+					return selfEncBreak.Profession.WitnessEngage
+				}
+				return selfEncBreak.Profession.DirectEngage
+			}()*1000) / 1000,
+			VenueEncounterRate: math.Round(selfEncBreak.VenueFactor*1000) / 1000,
+			PersonalityEncounterRate: math.Round(func() float64 {
+				if pos == "witness" {
+					return selfEncBreak.Personality.WitnessEngage
+				}
+				return selfEncBreak.Personality.DirectEngage
+			}()*1000) / 1000,
+			WeightReasons:   append([]string(nil), chosen.reasons...),
+			Location:        a.Location,
+			IntendedKind:    br.Behavior.EngineKind,
+			ExecutedKind:    opt.Action.Kind,
+			TargetID:        opt.Action.TargetID,
+			TargetName:      s.actorNameLocked(opt.Action.TargetID),
+			Item:            opt.Action.Item,
+			RenderedSummary: rendered,
 		})
+		if mem.EventID > 0 {
+			s.lastTriggerByActor[a.ID] = mem.EventID
+		}
 		return opt.ID, true
 	}
 
@@ -1908,6 +1973,31 @@ func (s *RulebookSelector) tryCausalReactionLocked(p sim.Perception, options []O
 // (actor_died), major world events (artifact emergence, terrain shift, external invasion),
 // and ecological crises (disaster_struck, threat_surge, macro_anomaly), modulated by
 // personality stance weights, power tier, and runtime social bonds.
+func secretReactionAllowed(p sim.Perception, m sim.Memory, action sim.Action) bool {
+	if m.Observation == nil {
+		return true
+	}
+	o := m.Observation
+	if o.Kind != "secret_caught_red_handed" && o.Kind != "secret_discovered" {
+		return true
+	}
+	for _, secret := range p.KnownSecrets {
+		if secret.ID != o.ObjectID {
+			continue
+		}
+		stance := secret.HolderStances[p.Self.ID]
+		switch action.Kind {
+		case "attack", "arrest", "open_case", "audit_corruption", "hold_trial", "expose_secret":
+			return stance == "confront"
+		case "blackmail":
+			return stance == "leverage"
+		case "speak", "transmit_message":
+			return action.Statement == nil || secretReportAllowed(p, m.RootEventID, action.Statement)
+		}
+	}
+	return true
+}
+
 func (s *RulebookSelector) tryEnvAndDeathReactionLocked(p sim.Perception, options []Option, day int) (string, bool) {
 	a := p.Self
 	if p.Tick < s.actorNextRxnTick[a.ID] || len(a.Memories) == 0 {
@@ -1924,7 +2014,7 @@ func (s *RulebookSelector) tryEnvAndDeathReactionLocked(p sim.Perception, option
 		triggerKind := ""
 		killerID := ""
 		victimID := ""
-		eventCat := ""
+		eventCat, instanceID, secretID := "", "", ""
 		switch m.Kind {
 		case "actor_died":
 			triggerKind = "actor_died"
@@ -1941,24 +2031,43 @@ func (s *RulebookSelector) tryEnvAndDeathReactionLocked(p sim.Perception, option
 		case "world_event_triggered", "world_event_claimed":
 			triggerKind = m.Kind
 			if m.Observation != nil {
-				eventCat = m.Observation.ObjectID
+				eventCat, instanceID = m.Observation.ObjectID, m.Observation.SubjectID
 			}
 		case "disaster_struck", "threat_surge", "macro_anomaly", "wild_encounter",
 			"party_betrayed", "faction_war_declared", "alliance_formed", "peace_treaty_signed",
-			"secret_discovered", "blackmailed", "secret_exposed", "ambition_completed":
+			"secret_caught_red_handed", "witnessed_my_secret",
+			"secret_discovered", "blackmailed", "blackmail_refused", "secret_exposed", "ambition_completed":
 			triggerKind = m.Kind
+			if m.Observation != nil && killerID == "" {
+				killerID = m.Observation.SubjectID
+				secretID = m.Observation.ObjectID
+			}
+			if m.Kind == "secret_exposed" && killerID == a.ID || m.Kind == "blackmail_refused" && m.TargetID == a.ID || m.Kind == "party_betrayed" || m.Kind == "blackmailed" {
+				killerID = m.Source
+			}
+			if m.Kind == "blackmail_refused" && m.Source == a.ID {
+				killerID = m.TargetID
+			}
 		case "speech", "channel_message":
 			if m.Source == a.ID || m.Statement == nil {
 				continue
 			}
 			switch m.Statement.Topic {
 			case "actor_died":
+				if m.FactEventID == 0 {
+					continue
+				}
 				triggerKind = "actor_died"
 				killerID = m.Statement.SubjectID
 				victimID = m.Statement.ObjectID
 			case "world_event", "world_event_claimed":
 				triggerKind = "world_event_triggered"
-				eventCat = m.Statement.ObjectID
+				eventCat, instanceID = m.Statement.ObjectID, m.Statement.SubjectID
+			case "secret_caught_red_handed", "secret_discovered", "secret_exposed":
+				if m.FactEventID == 0 {
+					continue
+				}
+				triggerKind, killerID, secretID = m.Statement.Topic, m.Statement.SubjectID, m.Statement.ObjectID
 			case "macro_anomaly":
 				triggerKind = "macro_anomaly"
 			}
@@ -1981,10 +2090,33 @@ func (s *RulebookSelector) tryEnvAndDeathReactionLocked(p sim.Perception, option
 		vBonded := false
 		if victimID != "" && victimID != a.ID {
 			vt, vg, vm, vs, _ := inferRuntimeSocialBond(a, victimID, s.knownActorGuilds[victimID], p.ActiveGrudgeTargets)
-			vBonded = vm || vs || vg || vt >= 3
+			vBonded = vm || vs || vg || vt >= 3 || sim.ActorHasTag(p.ActiveGrudgeTargets, killerID)
 		}
 		killerTier := s.knownActorPowerTiers[killerID]
 		killerPower := s.knownActorCombatPowers[killerID]
+
+		stanceForSecret := ""
+		for _, secret := range p.KnownSecrets {
+			if secret.ID == secretID {
+				stanceForSecret = secret.HolderStances[a.ID]
+				break
+			}
+		}
+		invasionThreat := ""
+		for _, ev := range p.ActiveWorldEvents {
+			if ev.InstanceID == instanceID && ev.DistrictID == a.Location {
+				invasionThreat = ev.InvasionThreatID
+				break
+			}
+		}
+		enemy := func(id string) bool {
+			for _, nb := range p.Nearby {
+				if nb.ID == id {
+					return nb.FactionRelation == "at_war"
+				}
+			}
+			return false
+		}
 
 		for _, opt := range options {
 			kind := opt.Action.Kind
@@ -2012,9 +2144,11 @@ func (s *RulebookSelector) tryEnvAndDeathReactionLocked(p sim.Perception, option
 			case "world_event_triggered", "world_event_claimed":
 				switch kind {
 				case "claim_world_event":
-					stance, baseW, reason = "趁机谋利", 60, "争夺奇珍"
+					if opt.Action.TargetID == instanceID {
+						stance, baseW, reason = "趁机谋利", 60, "争夺发现的物资"
+					}
 				case "hunt_threat":
-					if eventCat == "external_invasion" {
+					if eventCat == "external_invasion" && opt.Action.TargetID == invasionThreat && invasionThreat != "" {
 						stance, baseW, reason = "秉公处置", 48, "抵御入侵"
 					}
 				case "speak", "transmit_message":
@@ -2023,6 +2157,87 @@ func (s *RulebookSelector) tryEnvAndDeathReactionLocked(p sim.Perception, option
 					}
 				case "move", "move_venue":
 					stance, baseW, reason = "避险止损", 16, "因异变转移"
+				}
+			case "secret_caught_red_handed", "secret_discovered", "party_betrayed", "blackmailed", "blackmail_refused":
+				switch kind {
+				case "expose_secret", "open_case", "arrest", "audit_corruption":
+					if stanceForSecret == "confront" && opt.Action.TargetID == killerID {
+						stance, baseW, reason = "秉公处置", 52, "撞破丑事当场揭发/缉拿"
+					}
+				case "attack":
+					if (stanceForSecret == "confront" || secretID == "") && killerID != "" && opt.Action.TargetID == killerID {
+						stance, baseW, reason = "强硬反制", 44, "嫉恶如仇/遭背刺当场出手"
+					}
+				case "blackmail":
+					if stanceForSecret == "leverage" && opt.Action.Item == secretID {
+						stance, baseW, reason = "趁机谋利", 34, "借把柄暗中牟利"
+					}
+				case "speak", "transmit_message":
+					if stanceForSecret == "confront" && opt.Action.Statement != nil && opt.Action.Statement.ObjectID == secretID {
+						stance, baseW, reason = "积极呼应", 30, "暗中举报/传递秘辛"
+					}
+				case "move", "move_venue":
+					stance, baseW, reason = "避险止损", 22, "装作未见悄然离场"
+				}
+			case "witnessed_my_secret":
+				switch kind {
+				case "attack":
+					if killerID != "" && opt.Action.TargetID == killerID {
+						stance, baseW, reason = "强硬反制", 46, "丑事败露企图灭口"
+					}
+				case "bribe":
+					if killerID != "" && opt.Action.TargetID == killerID {
+						stance, baseW, reason = "借力拉拢", 42, "行贿目击者封口"
+					}
+				case "move", "move_venue":
+					stance, baseW, reason = "避险止损", 26, "事发遁走"
+				}
+			case "secret_exposed":
+				switch kind {
+				case "open_case", "arrest", "audit_corruption":
+					if opt.Action.TargetID == killerID && (m.Observation == nil || m.Observation.SubjectID != a.ID) {
+						stance, baseW, reason = "秉公处置", 50, "丑闻公开依法追责"
+					}
+				case "attack", "avenge_feud":
+					if killerID != "" && opt.Action.TargetID == killerID {
+						stance, baseW, reason = "强硬反制", 38, "闻丑闻出手清算"
+					}
+				case "speak", "transmit_message":
+					if opt.Action.Statement != nil && opt.Action.Statement.Topic == "secret_exposed" && opt.Action.Statement.ObjectID == secretID {
+						stance, baseW, reason = "积极呼应", 26, "议论并扩散曝光丑闻"
+					}
+				case "move", "move_venue":
+					stance, baseW, reason = "避险止损", 18, "远离丑闻风波"
+				}
+			case "faction_war_declared", "alliance_formed", "peace_treaty_signed":
+				switch kind {
+				case "propose_alliance":
+					if triggerKind == "faction_war_declared" {
+						stance, baseW, reason = "借力拉拢", 46, "战事爆发寻求结盟"
+					}
+				case "make_peace":
+					if triggerKind == "faction_war_declared" {
+						stance, baseW, reason = "谈判妥协", 24, "试图斡旋停战"
+					}
+				case "attack":
+					if triggerKind == "faction_war_declared" && enemy(opt.Action.TargetID) {
+						stance, baseW, reason = "强硬反制", 36, "响应宣战正面交锋"
+					}
+				case "form_party", "join_party":
+					if triggerKind == "faction_war_declared" {
+						stance, baseW, reason = "借力拉拢", 34, "战时结伴同行"
+					}
+				case "speak", "transmit_message":
+					stance, baseW, reason = "积极呼应", 24, "传递战和外交军情"
+				case "move", "move_venue":
+					if triggerKind == "faction_war_declared" {
+						stance, baseW, reason = "避险止损", 24, "避开战区转移"
+					}
+				}
+			case "ambition_completed":
+				switch kind {
+				case "speak", "transmit_message":
+					stance, baseW, reason = "积极呼应", 22, "谈论人物志业达成"
 				}
 			default: // disaster_struck, threat_surge, macro_anomaly, wild_encounter
 				switch kind {
@@ -2121,9 +2336,22 @@ func (s *RulebookSelector) tryEnvAndDeathReactionLocked(p sim.Perception, option
 			TargetID:           chosen.opt.Action.TargetID,
 			RenderedSummary:    fmt.Sprintf("%s因%s采取[%s](%s)", a.Name, chosen.reason, chosen.stance, chosen.opt.Action.Kind),
 		})
+		if m.EventID > 0 {
+			s.lastTriggerByActor[a.ID] = m.EventID
+		}
 		return chosen.opt.ID, true
 	}
 	return "", false
+}
+
+// LastTriggerEventID returns the causal memory EventID that motivated actorID's most recent reactive decision, if any.
+func (s *RulebookSelector) LastTriggerEventID(actorID string) int64 {
+	if s == nil || actorID == "" {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastTriggerByActor[actorID]
 }
 
 func (s *RulebookSelector) tryProactiveInteractionLocked(p sim.Perception, options []Option, day int) (string, bool) {
@@ -2237,6 +2465,20 @@ func (s *RulebookSelector) tryProactiveInteractionLocked(p sim.Perception, optio
 			}
 			mult, shared, reasons := computeHobbyBehaviorMultiplier(s.Rulebook, rule, selfProf.Hobbies, tProf.Hobbies)
 			hobbyWeighted := len(reasons) > 0
+			if peer, ok := nearbyByID[opt.Action.TargetID]; ok {
+				switch opt.Action.Kind {
+				case "attack", "raid", "steal", "extort":
+					if peer.FactionRelation == "allied" {
+						mult *= 0.25
+					} else if peer.FactionRelation == "at_war" {
+						mult *= 1.5
+					}
+				case "heal", "offer", "form_party":
+					if peer.FactionRelation == "allied" {
+						mult *= 1.5
+					}
+				}
+			}
 			skillMult, skillReason := computeSkillProactiveMultiplier(p.Catalog, a.Skills, opt.Action.Kind)
 			skillModulated := false
 			if skillReason != "" {
@@ -2560,69 +2802,6 @@ func ruleSpecificity(m RoleMatcher) int {
 		n++
 	}
 	return n
-}
-
-type weightedReactionBranch struct {
-	branch          ReactionBranch
-	baseWeight      int
-	effectiveWeight int
-	mult            float64
-	reasons         []string
-}
-
-func (s *RulebookSelector) orderReactionBranches(p sim.Perception, rule *CausalReactionRule, selfProf actorProfileView, triggerEventID int64) []weightedReactionBranch {
-	var eligible []ReactionBranch
-	for _, br := range rule.Branches {
-		if matchesRole(br.WhenResponder, selfProf) {
-			eligible = append(eligible, br)
-		}
-	}
-	if len(eligible) == 0 {
-		eligible = append(eligible, rule.Branches...)
-	}
-
-	pool := make([]weightedReactionBranch, 0, len(eligible))
-	for _, br := range eligible {
-		base := br.Weight
-		if base <= 0 {
-			base = 10
-		}
-		mult, reasons := computePersonalityReactionMultiplier(s.Rulebook, br, selfProf.Personality)
-		eff := int(math.Round(float64(base) * mult))
-		if eff < 1 {
-			eff = 1
-		}
-		pool = append(pool, weightedReactionBranch{
-			branch:          br,
-			baseWeight:      base,
-			effectiveWeight: eff,
-			mult:            mult,
-			reasons:         reasons,
-		})
-	}
-
-	out := make([]weightedReactionBranch, 0, len(pool))
-	salt := fmt.Sprintf("%s|%d|%s|%s|%d", s.Rulebook.WorldID, s.Seed, p.Self.ID, rule.ID, triggerEventID)
-	for len(pool) > 0 {
-		totalW := 0
-		for _, wb := range pool {
-			totalW += wb.effectiveWeight
-		}
-		h := fnvHash(fmt.Sprintf("%s|%d", salt, len(out)))
-		pick := int(h % uint64(totalW))
-		chosen := 0
-		acc := 0
-		for i, wb := range pool {
-			acc += wb.effectiveWeight
-			if pick < acc {
-				chosen = i
-				break
-			}
-		}
-		out = append(out, pool[chosen])
-		pool = append(pool[:chosen], pool[chosen+1:]...)
-	}
-	return out
 }
 
 func resolveTargetBinding(p sim.Perception, binding, actor1ID, actor2ID string, nearbyByID map[string]sim.Neighbor) string {

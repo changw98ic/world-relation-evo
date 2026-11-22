@@ -68,7 +68,7 @@ func cloneWorldEventSpec(s WorldEventSpec) WorldEventSpec {
 // isRouteSevered reports whether an active terrain_shift world event currently severs
 // routes of `medium` touching either endpoint unless the traveler's locomotion mode can fly over ("air").
 func (w *World) isRouteSevered(fromDist, toDist, medium, modeID string) (bool, string) {
-	if len(w.ActiveWorldEvents) == 0 || fromDist == "" || toDist == "" || fromDist == toDist {
+	if len(w.ActiveWorldEvents) == 0 || fromDist == "" || toDist == "" {
 		return false, ""
 	}
 	if medium == "" {
@@ -105,6 +105,11 @@ func (w *World) stepWorldEvents() []Event {
 		for _, ev := range w.ActiveWorldEvents {
 			if w.Tick < ev.ExpiresTick {
 				kept = append(kept, ev)
+			} else {
+				if w.WorldEventLastEnded == nil {
+					w.WorldEventLastEnded = map[string]int64{}
+				}
+				w.WorldEventLastEnded[ev.SpecID] = max(w.WorldEventLastEnded[ev.SpecID], ev.ExpiresTick)
 			}
 		}
 		if len(kept) == 0 {
@@ -124,10 +129,13 @@ func (w *World) stepWorldEvents() []Event {
 		if w.Tick < spec.MinTick || spec.ProbPermillePerDay <= 0 {
 			continue
 		}
-		// Skip if already active or on cooldown.
+		if ended, exists := w.WorldEventLastEnded[spec.ID]; exists && w.Tick-ended < spec.CooldownTicks {
+			continue
+		}
+		// An active instance takes precedence over the next automatic roll.
 		blocked := false
 		for _, act := range w.ActiveWorldEvents {
-			if act.SpecID == spec.ID && (w.Tick < act.ExpiresTick || (spec.CooldownTicks > 0 && w.Tick-act.StartedTick < spec.CooldownTicks)) {
+			if act.SpecID == spec.ID {
 				blocked = true
 				break
 			}
@@ -189,7 +197,7 @@ func (w *World) TriggerWorldEvent(specID, districtID string) []Event {
 		intensity = 55
 	}
 
-	instanceID := fmt.Sprintf("%s@%d", spec.ID, w.Tick)
+	instanceID := fmt.Sprintf("%s@%d:%d", spec.ID, w.Tick, w.NextID)
 	active := ActiveWorldEvent{
 		InstanceID:        instanceID,
 		SpecID:            spec.ID,
@@ -247,9 +255,6 @@ func (w *World) TriggerWorldEvent(specID, districtID string) []Event {
 			// 2. Apply external_invasion threat surge & bounty escalation across district(s).
 			if spec.Category == "external_invasion" {
 				threatID := spec.InvasionThreatID
-				if threatID == "" && len(w.Catalog.Encounters) > 0 {
-					threatID = w.Catalog.Encounters[0].ID
-				}
 				if threatID != "" {
 					if ds.ThreatActivity == nil {
 						ds.ThreatActivity = map[string]int{}
@@ -269,6 +274,38 @@ func (w *World) TriggerWorldEvent(specID, districtID string) []Event {
 		}
 	}
 
+	// Reserve the triggering event ID first so any immediate shock casualties
+	// carry higher IDs and link back to this world event as their causal root.
+	triggerID := w.NextID
+	w.NextID++
+	active.RootEventID = triggerID
+
+	ev := Event{
+		ID:      triggerID,
+		Tick:    w.Tick,
+		ActorID: "world",
+		Kind:    "world_event_triggered",
+		Action:  Action{Kind: "wait", Location: districtID},
+		Payload: map[string]any{
+			"text":               fmt.Sprintf("Major world event [%s] (%s) erupted at %s (intensity %d)", spec.Name, spec.Category, districtID, intensity),
+			"root_event_id":      triggerID,
+			"instance_id":        instanceID,
+			"event_id":           spec.ID,
+			"event_name":         spec.Name,
+			"category":           spec.Category,
+			"district":           districtID,
+			"intensity":          intensity,
+			"reward_item":        active.RewardItem,
+			"reward_qty":         active.RewardQty,
+			"reward_coins":       active.RewardCoins,
+			"severed_medium":     active.SeveredMedium,
+			"invasion_threat_id": active.InvasionThreatID,
+		},
+	}
+	w.ActiveWorldEvents = append(w.ActiveWorldEvents, active)
+
+	witnesses := w.distributeWorldEventObservations(ev, active)
+	ev.Payload["witnesses"] = witnesses
 	// 3. Apply immediate shock casualties if declared (terrain_shift quake / external_invasion vanguard).
 	wounded, dead := 0, 0
 	if spec.CasualtyPermille > 0 {
@@ -286,42 +323,43 @@ func (w *World) TriggerWorldEvent(specID, districtID string) []Event {
 			effDmg := maxInt(3, (dmg*(100-mit.tierDefPct))/100)
 			wn := int64(spec.CasualtyPermille * (100 - mit.tierDefPct/2))
 			dn := int64(spec.CasualtyPermille*(100-mit.tierDefPct)) / 10
-			cw, cd, impactEvs := w.applyEcologyActorExposure(a, wn, dn, 100000, effDmg, "wev:"+instanceID, cause)
+			cw, cd, impactEvs := w.applyEcologyActorExposure(a, wn, dn, 100000, effDmg, "wev:"+instanceID, cause, ev)
 			wounded += cw
 			dead += cd
+			for j := range impactEvs {
+				impactEvs[j].Payload["world_event_instance_id"] = instanceID
+			}
 			events = append(events, impactEvs...)
 		}
 	}
-
-	ev := Event{
-		ID:      w.NextID,
-		Tick:    w.Tick,
-		ActorID: "world",
-		Kind:    "world_event_triggered",
-		Action:  Action{Kind: "wait", Location: districtID},
-		Payload: map[string]any{
-			"text":               fmt.Sprintf("Major world event [%s] (%s) erupted at %s (intensity %d)", spec.Name, spec.Category, districtID, intensity),
-			"instance_id":        instanceID,
-			"event_id":           spec.ID,
-			"event_name":         spec.Name,
-			"category":           spec.Category,
-			"district":           districtID,
-			"intensity":          intensity,
-			"reward_item":        active.RewardItem,
-			"reward_qty":         active.RewardQty,
-			"reward_coins":       active.RewardCoins,
-			"severed_medium":     active.SeveredMedium,
-			"invasion_threat_id": active.InvasionThreatID,
-			"wounded":            wounded,
-			"deaths":             dead,
-		},
+	ev.Payload["wounded"], ev.Payload["deaths"] = wounded, dead
+	// 4. Cascade regional geo-anomaly when a terrain/geo world event erupts in a mapped GeoRegion.
+	if (spec.Category == "terrain_shift" || spec.Category == "geo_anomaly") && len(w.Map.GeoRegions) > 0 {
+		if regID := w.Map.GeoRegionIDForLocation(districtID, ""); regID != "" {
+			flowKind := ""
+			for _, edge := range w.Map.GeoFlows {
+				if edge.FromRegion == regID && edge.ConductancePermille > 0 && (flowKind == "" || edge.Kind < flowKind) {
+					flowKind = edge.Kind
+				}
+			}
+			geoEvs := w.TriggerGeoAnomaly(GeoAnomalySpec{
+				ID:             "wev_" + spec.ID,
+				Name:           spec.Name,
+				OriginRegionID: regID,
+				FlowKind:       flowKind,
+				Intensity:      intensity,
+				DurationTicks:  dur,
+			})
+			for gi := range geoEvs {
+				if geoEvs[gi].Payload == nil {
+					geoEvs[gi].Payload = map[string]any{}
+				}
+				geoEvs[gi].Payload["root_event_id"] = triggerID
+				geoEvs[gi].Payload["world_event_instance_id"] = instanceID
+			}
+			events = append(events, geoEvs...)
+		}
 	}
-	w.NextID++
-	active.RootEventID = ev.ID
-	w.ActiveWorldEvents = append(w.ActiveWorldEvents, active)
-
-	witnesses := w.distributeWorldEventObservations(ev, active)
-	ev.Payload["witnesses"] = witnesses
 	events = append([]Event{ev}, events...)
 	return events
 }
@@ -334,7 +372,7 @@ func (w *World) distributeWorldEventObservations(ev Event, active ActiveWorldEve
 	var witnessIDs []string
 	for i := range w.Actors {
 		a := &w.Actors[i]
-		if a.Dead || w.Tick < a.JailedUntil {
+		if a.Dead || a.InTransit() || w.Tick < a.JailedUntil {
 			continue
 		}
 		if a.Task != nil && (a.Task.Action.Kind == "sleep" || a.Task.Dormant) {
@@ -415,15 +453,19 @@ func (w *World) applyClaimWorldEvent(a *Actor, x Action) []Event {
 		return fail("insufficient energy to claim world event discovery")
 	}
 	var targetIdx = -1
+	known := map[string]bool{}
+	for _, event := range w.perceivedActiveWorldEvents(*a) {
+		known[event.InstanceID] = true
+	}
 	for i := range w.ActiveWorldEvents {
 		ev := w.ActiveWorldEvents[i]
 		if w.Tick >= ev.ExpiresTick || ev.Category != "artifact_emergence" || ev.ClaimedBy != "" {
 			continue
 		}
-		if ev.DistrictID != a.Location {
+		if ev.DistrictID != a.Location || !known[ev.InstanceID] {
 			continue
 		}
-		if x.TargetID == "" || ev.InstanceID == x.TargetID || ev.SpecID == x.TargetID {
+		if x.TargetID == "" || ev.InstanceID == x.TargetID {
 			targetIdx = i
 			break
 		}
@@ -452,14 +494,9 @@ func (w *World) applyClaimWorldEvent(a *Actor, x Action) []Event {
 		Location:  a.Location,
 		Quantity:  maxInt(1, ev.RewardQty),
 	}
-	var witnesses []*Actor
-	for i := range w.Actors {
-		b := &w.Actors[i]
-		if b.ID != a.ID && !b.Dead && SamePlace(*a, *b) {
-			witnesses = append(witnesses, b)
-		}
-	}
-	claimEv := w.record(a, x, "world_event_claimed", map[string]any{
+	witnesses := w.awakeSamePlaceObservers(*a, a.ID)
+	x.TargetID = ev.InstanceID
+	claimPayload := map[string]any{
 		"text":         fmt.Sprintf("%s claimed %s at %s (+%d %s, +%d coins)", a.Name, ev.Name, a.Location, ev.RewardQty, ev.RewardItem, ev.RewardCoins),
 		"instance_id":  ev.InstanceID,
 		"event_id":     ev.SpecID,
@@ -469,35 +506,41 @@ func (w *World) applyClaimWorldEvent(a *Actor, x Action) []Event {
 		"reward_qty":   ev.RewardQty,
 		"reward_coins": ev.RewardCoins,
 		"observation":  obs,
-	}, witnesses...)
+	}
+	claimPayload["root_event_id"] = ev.RootEventID
+	claimPayload["cause_event_id"] = ev.RootEventID
+	claimEv := w.record(a, x, "world_event_claimed", claimPayload, witnesses...)
 	outEvs := []Event{claimEv}
 	if ev.RewardCoins > 0 {
-		outEvs = append(outEvs, w.settlePartyRewardSplit(a, ev.RewardCoins, "world_event_claimed")...)
+		outEvs = append(outEvs, w.settlePartyRewardSplit(a, ev.RewardCoins, claimEv)...)
 	}
 	return outEvs
 }
 
-// perceivedActiveWorldEvents returns only active world events that actor `a` is currently
-// co-located with OR has observed/heard about in their own Memories (epistemic isolation).
+// perceivedActiveWorldEvents projects witnessed or reliably reported instances.
 func (w *World) perceivedActiveWorldEvents(a Actor) []ActiveWorldEvent {
-	if len(w.ActiveWorldEvents) == 0 {
+	if len(w.ActiveWorldEvents) == 0 || a.Dead || w.Tick < a.JailedUntil ||
+		a.Task != nil && (a.Task.Action.Kind == "sleep" || a.Task.Dormant) {
 		return nil
 	}
 	known := map[string]bool{}
+	knownClaimants := map[string]string{}
 	for _, m := range a.Memories {
-		if m.Observation != nil && m.Observation.Kind == "world_event" {
+		switch {
+		case m.Observation != nil && m.Observation.Kind == "world_event":
 			known[m.Observation.SubjectID] = true
-		}
-		if m.Statement != nil && m.Statement.Topic == "world_event" {
+		case m.Observation != nil && m.Observation.Kind == "world_event_claimed":
+			knownClaimants[m.Observation.ObjectID] = m.Observation.SubjectID
+		case m.FactEventID > 0 && m.Statement != nil && m.Statement.Topic == "world_event":
 			known[m.Statement.SubjectID] = true
+		case m.FactEventID > 0 && m.Statement != nil && m.Statement.Topic == "world_event_claimed":
+			knownClaimants[m.Statement.ObjectID] = m.Statement.SubjectID
 		}
 	}
 	var out []ActiveWorldEvent
 	for _, ev := range w.ActiveWorldEvents {
-		if w.Tick >= ev.ExpiresTick {
-			continue
-		}
-		if ev.DistrictID == a.Location || known[ev.InstanceID] || known[ev.SpecID] {
+		if w.Tick < ev.ExpiresTick && (known[ev.InstanceID] || knownClaimants[ev.InstanceID] != "") {
+			ev.ClaimedBy = knownClaimants[ev.InstanceID]
 			out = append(out, ev)
 		}
 	}

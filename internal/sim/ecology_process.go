@@ -364,7 +364,7 @@ func (w *World) applyEcologyCohortExposure(c *PopulationCohort, population int, 
 	return cw, cd
 }
 
-func (w *World) applyEcologyActorExposure(a *Actor, wn, dn, denominator int64, damage int, salt, cause string) (int, int, []Event) {
+func (w *World) applyEcologyActorExposure(a *Actor, wn, dn, denominator int64, damage int, salt, cause string, source ...Event) (int, int, []Event) {
 	if a.Dead {
 		return 0, 0, nil
 	}
@@ -373,17 +373,21 @@ func (w *World) applyEcologyActorExposure(a *Actor, wn, dn, denominator int64, d
 	roll := int64(worldHash(w.ID, w.Tick, salt+":"+a.ID) % uint64(denominator))
 	if roll < dn {
 		a.Health = 0
-		return 0, 1, w.markDeadIfZero(a, nil, Action{Kind: "wait"}, cause)
+		return 0, 1, w.markDeadIfZero(a, nil, Action{Kind: "wait"}, cause, source...)
 	}
 	if roll < dn+wn {
 		// A wounded outcome is nonfatal; death has its own declared probability.
 		previousHealth := a.Health
 		a.Health = maxInt(1, a.Health-maxInt(1, damage))
-		events := []Event{w.record(a, Action{Kind: "wait"}, "actor_environment_injured", map[string]any{
-			"text":  "environmental exposure injured " + a.Name,
-			"cause": cause, "previous_health": previousHealth, "health": a.Health,
-		})}
-		return 1, 0, append(events, w.interruptTaskOnDamage(a, cause)...)
+		data := map[string]any{"text": "environmental exposure injured " + a.Name,
+			"cause": cause, "previous_health": previousHealth, "health": a.Health}
+		if len(source) > 0 {
+			data["root_event_id"] = payloadInt64(source[0].Payload, "root_event_id")
+			data["cause_event_id"] = source[0].ID
+		}
+		injury := w.record(a, Action{Kind: "wait"}, "actor_environment_injured", data)
+		return 1, 0, append([]Event{injury}, w.interruptTaskOnDamage(a, cause, injury)...)
+
 	}
 	return 0, 0, nil
 }

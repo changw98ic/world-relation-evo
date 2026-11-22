@@ -196,6 +196,17 @@ var baseInteractiveEngineActions = []string{
 	"repair_house",
 	"perform_ritual",
 	"move",
+	"propose_alliance",
+	"declare_war",
+	"make_peace",
+	"form_party",
+	"join_party",
+	"betray_party",
+	"investigate_actor",
+	"blackmail",
+	"expose_secret",
+	"claim_world_event",
+	"attempt_transition",
 }
 
 var baseEngineOutcomeKinds = []string{
@@ -224,6 +235,7 @@ var baseEngineOutcomeKinds = []string{
 	"decree_issued",
 	"speech",
 	"channel_message",
+	"channel_transmitted",
 	"bond_sworn",
 	"grudge_formed",
 	"feud_avenged",
@@ -233,6 +245,17 @@ var baseEngineOutcomeKinds = []string{
 	"threat_hunted",
 	"infra_maintained",
 	"repaired_house",
+	"alliance_formed",
+	"faction_war_declared",
+	"peace_treaty_signed",
+	"party_formed",
+	"party_betrayed",
+	"secret_discovered",
+	"blackmailed",
+	"secret_exposed",
+	"world_event_triggered",
+	"world_event_claimed",
+	"transition_succeeded",
 }
 
 // BuildWorldOntology extracts a strictly actor-anonymized structural ontology from a World.

@@ -27,10 +27,15 @@ func TestDiplomacyCoalitionWarSkirmishPeaceAndReplay(t *testing.T) {
 	leaderB.Energy = 90
 	leaderB.Money = 60
 	rs := w.ensureRelations()
+	w.Factions[0].Members = appendUnique(w.Factions[0].Members, leaderA.ID)
+	w.Factions[1].Members = appendUnique(w.Factions[1].Members, leaderB.ID)
 	rs.FactionLeader[fA] = leaderA.ID
 	rs.FactionLeader[fB] = leaderB.ID
 	rs.ControllingFaction[w.Map.Districts[0].ID] = fB
-	rs.ControllingFaction[w.Map.Districts[1].ID] = fB
+	rs.ControllingFaction[w.Map.Districts[1].ID] = fA
+	rs.ControllingFaction[w.Map.Districts[3].ID] = fB
+	leaderA.Location, leaderB.Location = w.Map.Districts[0].ID, w.Map.Districts[0].ID
+	leaderA.InsideHouse, leaderB.InsideHouse = "", ""
 	w.InitLedgerAudit()
 
 	// 1. External invasion automatically triggers emergency coalition alliance.
@@ -86,7 +91,11 @@ func TestDiplomacyCoalitionWarSkirmishPeaceAndReplay(t *testing.T) {
 	}
 	moneyABefore := leaderA.Money
 	moneyBBefore := leaderB.Money
-	peaceEvs := w.Apply(leaderA.ID, Action{Kind: "make_peace", FactionID: fA, TargetID: fB})
+	proposal := w.Apply(leaderA.ID, Action{Kind: "make_peace", FactionID: fA, TargetID: fB})
+	if len(proposal) != 1 || proposal[0].Kind != "peace_proposed" || !w.AreFactionsAtWar(fA, fB) {
+		t.Fatalf("unilateral proposal changed the war: %+v", proposal)
+	}
+	peaceEvs := w.Apply(leaderB.ID, Action{Kind: "make_peace", FactionID: fB, TargetID: fA})
 	if len(peaceEvs) == 0 || peaceEvs[0].Kind != "peace_treaty_signed" {
 		t.Fatalf("expected peace_treaty_signed, got %+v", peaceEvs)
 	}

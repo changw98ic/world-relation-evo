@@ -52,6 +52,8 @@ func main() {
 	}
 }
 
+var additionalCommands = map[string]func([]string, io.Writer, io.Writer) error{}
+
 func runArgs(args []string, stdout, stderr io.Writer) error {
 	loadDotEnv(".env")
 	if len(args) > 0 {
@@ -70,6 +72,10 @@ func runArgs(args []string, stdout, stderr io.Writer) error {
 			return runExpandRulebook(args[1:], stdout, stderr)
 		case "chronicle":
 			return runChronicle(args[1:], stdout, stderr)
+		default:
+			if command := additionalCommands[args[0]]; command != nil {
+				return command(args[1:], stdout, stderr)
+			}
 		}
 	}
 	return runSim(args, stdout, stderr)
@@ -84,11 +90,13 @@ func runSim(args []string, stdout, stderr io.Writer) (runErr error) {
 	pace := fs.Duration("pace", time.Second, "real delay per simulation tick")
 	mode := fs.String("decider", "jev", "jev (production), rules (offline baseline), playbook (per-actor compiled), or rulebook (actor-agnostic generic causal rules)")
 	playbookDir := fs.String("playbook-dir", "", "path to offline expand-options output directory (required when -decider=playbook)")
-	rulebookPath := fs.String("rulebook", "", "path to actor-agnostic rulebook.json or expand-rulebook dir (required when -decider=rulebook)")
+	rulebookPath := fs.String("rulebook", "", "path to rulebook.json/dir or 'builtin' for built-in generic base rulebook when -decider=rulebook")
+	rulebookOverlay := fs.String("rulebook-overlay", "", "optional lightweight overlay JSON merged onto -rulebook (or builtin base rulebook)")
 	seed := fs.Int64("seed", 0, "deterministic RNG seed for rulebook/stochastic selectors")
 	compact := fs.Bool("compact-events", false, "persist only high-value causal/economic/progression events")
 	quiet := fs.Bool("quiet", false, "suppress per-event stdout NDJSON and log periodic day summaries to stderr")
 	packPath := fs.String("pack", "", "path to an external WorldPack JSON file to initialize a new world")
+	stateIn := fs.String("state-in", "", "path to an existing World JSON snapshot to resume offline (requires -offline-run)")
 	checkpointEvery := fs.Int("checkpoint-every", 24, "save deterministic replay checkpoints every N ticks (0 disables periodic DB checkpoints)")
 	offlineRun := fs.Bool("offline-run", false, "run without PostgreSQL (useful with -pack or offline testing)")
 	outState := fs.String("out-state", "", "optional path to write final World JSON snapshot")
@@ -145,15 +153,10 @@ func runSim(args []string, stdout, stderr io.Writer) (runErr error) {
 		return err
 	}
 
-	d, playbookSel, rulebookSel, err := buildDecider(*mode, *playbookDir, *rulebookPath, evidence)
-	if err != nil {
-		return err
-	}
-	if rulebookSel != nil && *seed != 0 {
-		rulebookSel.Seed = *seed
-	}
-
-	var loadedPack *pack.WorldPack
+	var (
+		loadedPack *pack.WorldPack
+		err        error
+	)
 	effectiveID := *id
 	if *packPath != "" {
 		loadedPack, err = pack.LoadFile(*packPath)
@@ -173,6 +176,9 @@ func runSim(args []string, stdout, stderr io.Writer) (runErr error) {
 	dsn := os.Getenv("DATABASE_URL")
 	if !*offlineRun && dsn == "" {
 		return fmt.Errorf("DATABASE_URL is required (PostgreSQL); pass -offline-run for DB-free execution")
+	}
+	if *stateIn != "" && !*offlineRun {
+		return fmt.Errorf("-state-in requires -offline-run")
 	}
 	if !*offlineRun {
 		db, err = store.Open(ctx, dsn)
@@ -222,7 +228,16 @@ func runSim(args []string, stdout, stderr io.Writer) (runErr error) {
 			}
 		}
 	} else {
-		if loadedPack != nil {
+		if *stateIn != "" {
+			rawState, readErr := os.ReadFile(*stateIn)
+			if readErr != nil {
+				return fmt.Errorf("read -state-in %q: %w", *stateIn, readErr)
+			}
+			w, err = sim.DecodeWorldSnapshot(rawState)
+			if err != nil {
+				return fmt.Errorf("decode -state-in %q: %w", *stateIn, err)
+			}
+		} else if loadedPack != nil {
 			override := ""
 			if worldFlagSet {
 				override = effectiveID
@@ -234,6 +249,14 @@ func runSim(args []string, stdout, stderr io.Writer) (runErr error) {
 		} else {
 			w = sim.LargeWorld(effectiveID, *pop)
 		}
+	}
+
+	d, playbookSel, rulebookSel, err := buildDecider(*mode, *playbookDir, *rulebookPath, *rulebookOverlay, w, evidence)
+	if err != nil {
+		return err
+	}
+	if rulebookSel != nil && *seed != 0 {
+		rulebookSel.Seed = *seed
 	}
 
 	if err := w.Catalog.ValidatePhysicalRules(w.FlowGrid); err != nil {
@@ -417,7 +440,7 @@ func runSim(args []string, stdout, stderr io.Writer) (runErr error) {
 	return nil
 }
 
-func buildDecider(mode, playbookDir, rulebookPath string, evidence *runtrace.Writer) (sim.Decider, *agent.PlaybookSelector, *agent.RulebookSelector, error) {
+func buildDecider(mode, playbookDir, rulebookPath, rulebookOverlay string, w *sim.World, evidence *runtrace.Writer) (sim.Decider, *agent.PlaybookSelector, *agent.RulebookSelector, error) {
 	switch mode {
 	case "rules":
 		pipeline := agent.Offline()
@@ -437,10 +460,7 @@ func buildDecider(mode, playbookDir, rulebookPath string, evidence *runtrace.Wri
 			Trace:    evidence,
 		}, sel, nil, nil
 	case "rulebook":
-		if strings.TrimSpace(rulebookPath) == "" {
-			return nil, nil, nil, fmt.Errorf("rulebook mode requires -rulebook <rulebook.json-or-dir>")
-		}
-		rb, err := agent.LoadRulebook(rulebookPath)
+		rb, err := agent.LoadRulebookWithOverlay(rulebookPath, rulebookOverlay, w)
 		if err != nil {
 			return nil, nil, nil, err
 		}

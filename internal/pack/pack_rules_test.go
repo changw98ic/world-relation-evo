@@ -207,7 +207,7 @@ func TestXianxiaPackSimulatesWithGenericEnvironmentAndInstitutions(t *testing.T)
 		}
 	}
 
-	// 3. Arrest should work via enforcement_token by sect_enforcer (shen_wuyue) on outlaw (xue_sha).
+	// 3. An enforcement token supports detention once the authority opens a case.
 	for i := range w.Actors {
 		if w.Actors[i].ID == "shen_wuyue" {
 			w.Actors[i].Location = "valley_bazaar"
@@ -220,6 +220,22 @@ func TestXianxiaPackSimulatesWithGenericEnvironmentAndInstitutions(t *testing.T)
 			w.Actors[i].VenueID = ""
 			w.Actors[i].InsideHouse = ""
 		}
+	}
+	if evs := w.Apply("shen_wuyue", sim.Action{Kind: "arrest", TargetID: "xue_sha"}); !hasEvent(evs, "action_failed") {
+		t.Fatalf("detention without a warrant succeeded: %+v", evs)
+	}
+	// The pack's guard witnessed a specific offense at the market.
+	for i := range w.Actors {
+		if w.Actors[i].ID == "shen_wuyue" {
+			w.Actors[i].Memories = append(w.Actors[i].Memories, sim.Memory{Kind: "secret_caught_red_handed",
+				EventID: w.NextID, RootEventID: w.NextID, Observation: &sim.Observation{
+					Kind: "secret_caught_red_handed", SubjectID: "xue_sha", Item: "offense", Location: "valley_bazaar",
+				}})
+			w.NextID++
+		}
+	}
+	if evs := w.Apply("shen_wuyue", sim.Action{Kind: "open_case", TargetID: "xue_sha"}); !hasEvent(evs, "court_warrant_issued") {
+		t.Fatalf("expected a warrant for the observed offense: %+v", evs)
 	}
 	arrEvs := w.Apply("shen_wuyue", sim.Action{Kind: "arrest", TargetID: "xue_sha"})
 	if hasEvent(arrEvs, "action_failed") {
@@ -249,4 +265,3 @@ type packWaitDecider struct{}
 func (packWaitDecider) Decide(_ context.Context, _ sim.Perception) (sim.Action, error) {
 	return sim.Action{Kind: "wait"}, nil
 }
-

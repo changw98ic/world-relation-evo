@@ -97,14 +97,14 @@ type ItemSpec struct {
 // Profession is a leveled trade (Tier 1 base or Tier 2+ advanced) with attribute entry requirements,
 // optional parent profession prerequisite for career advancement, progression rank titles, and a governing guild.
 type Profession struct {
-	ID                  string         `json:"id"`
-	Name                string         `json:"name"`
-	Tier                int            `json:"tier,omitempty"`
-	Guild               string         `json:"guild"`
-	ParentProfession    string         `json:"parent_profession,omitempty"`
-	MinParentLevel      int            `json:"min_parent_level,omitempty"`
-	MinFactionLevel     int            `json:"min_faction_level,omitempty"`
-	Requirements        map[string]int `json:"requirements,omitempty"`
+	ID                     string         `json:"id"`
+	Name                   string         `json:"name"`
+	Tier                   int            `json:"tier,omitempty"`
+	Guild                  string         `json:"guild"`
+	ParentProfession       string         `json:"parent_profession,omitempty"`
+	MinParentLevel         int            `json:"min_parent_level,omitempty"`
+	MinFactionLevel        int            `json:"min_faction_level,omitempty"`
+	Requirements           map[string]int `json:"requirements,omitempty"`
 	MaxLevel               int            `json:"max_level"`
 	YieldEvery             int            `json:"yield_every,omitempty"`
 	BaseYieldBonus         int            `json:"base_yield_bonus,omitempty"`
@@ -264,6 +264,7 @@ type Catalog struct {
 	Transitions            map[string]TransitionSpec     `json:"transitions,omitempty"`
 	Currencies             map[string]CurrencySpec       `json:"currencies,omitempty"`
 	Techs                  map[string]TechSpec           `json:"techs,omitempty"`
+	GoldenFingers          []GoldenFingerSpec            `json:"golden_fingers,omitempty"`
 	DefaultWorldLaws       map[string]int                `json:"default_world_laws,omitempty"`
 	Environment            *EnvironmentProfile           `json:"environment,omitempty"`
 }
@@ -954,7 +955,7 @@ func (c Catalog) Capabilities(a Actor) map[string]bool {
 	if result["move"] {
 		result["move_venue"] = true
 	}
-	for _, execTag := range []string{"ruler", "governor", "magistrate", "sect_master", "commander", "polity_leader"} {
+	for _, execTag := range []string{"ruler", "governor", "magistrate", "commander", "polity_leader"} {
 		if ActorHasTag(idTags, execTag) {
 			result["issue_decree"] = true
 			break
@@ -1012,6 +1013,15 @@ func (c Catalog) Capabilities(a Actor) map[string]bool {
 	}
 	if len(c.Skills) > 0 {
 		result["teach_knowledge"] = true
+		result["practice_skill"] = true
+	}
+	for _, gf := range c.ActiveGoldenFingersFor(a) {
+		if len(gf.Shop) > 0 {
+			result["gf_exchange"] = true
+		}
+		if gf.Simulator != nil {
+			result["gf_simulate"] = true
+		}
 	}
 	if len(c.Techs) > 0 {
 		result["teach_knowledge"] = true
@@ -1031,6 +1041,15 @@ func (c Catalog) Capabilities(a Actor) map[string]bool {
 				break
 			}
 		}
+	}
+	if len(a.Guilds) > 0 {
+		result["challenge_leadership"] = true
+	}
+	if result["arrest"] {
+		result["hold_trial"] = true
+	}
+	if result["arrest"] || result["audit_corruption"] {
+		result["open_case"] = true
 	}
 	return result
 }
@@ -1578,6 +1597,12 @@ func CloneCatalog(c Catalog) Catalog {
 		out.Currencies = make(map[string]CurrencySpec, len(c.Currencies))
 		for k, v := range c.Currencies {
 			out.Currencies[k] = v
+		}
+	}
+	if c.GoldenFingers != nil {
+		out.GoldenFingers = make([]GoldenFingerSpec, len(c.GoldenFingers))
+		for i, gf := range c.GoldenFingers {
+			out.GoldenFingers[i] = CloneGoldenFingerSpec(gf)
 		}
 	}
 	if c.Techs != nil {

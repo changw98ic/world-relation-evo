@@ -1208,6 +1208,9 @@ func (w *World) TriggerGeoAnomaly(spec GeoAnomalySpec) []Event {
 			effInt = 1
 		}
 
+		anomalyID := w.NextID
+		w.NextID++
+		anomalyCause := Event{ID: anomalyID, Payload: map[string]any{"root_event_id": anomalyID}}
 		woundedActors := 0
 		deadActors := 0
 		var deathEvents []Event
@@ -1235,17 +1238,20 @@ func (w *World) TriggerGeoAnomaly(spec GeoAnomalySpec) []Event {
 				if dmg >= a.Health {
 					a.Health = 0
 					deadActors++
-					deathEvents = append(deathEvents, w.markDeadIfZero(a, nil, Action{Kind: "wait", Location: a.Location}, "disaster")...)
+					deathEvents = append(deathEvents, w.markDeadIfZero(a, nil, Action{Kind: "wait", Location: a.Location}, "disaster", anomalyCause)...)
 				} else {
 					a.Health -= dmg
 					woundedActors++
+					deathEvents = append(deathEvents, w.record(a, Action{Kind: "wait", Location: a.Location}, "actor_environment_injured",
+						map[string]any{"text": fmt.Sprintf("%s injured %s", spec.Name, a.Name), "damage": dmg, "district": a.Location,
+							"root_event_id": anomalyID, "cause_event_id": anomalyID}))
 					deathEvents = append(deathEvents, w.interruptTaskOnDamage(a, "disaster")...)
 				}
 			}
 		}
 
 		ev := Event{
-			ID:      w.NextID,
+			ID:      anomalyID,
 			Tick:    w.Tick,
 			ActorID: "world",
 			Kind:    "geo_anomaly_struck",
@@ -1253,6 +1259,7 @@ func (w *World) TriggerGeoAnomaly(spec GeoAnomalySpec) []Event {
 			Payload: map[string]any{
 				"text":           fmt.Sprintf("%s swept %s (intensity %d, infra mitigation %d%%, %d injured, %d perished)", spec.Name, reg.Name, effInt, maxMitigationPct, woundedActors, deadActors),
 				"anomaly_id":     spec.ID,
+				"root_event_id":  anomalyID,
 				"anomaly_name":   spec.Name,
 				"geo_region_id":  regID,
 				"district":       primaryDistrict,
@@ -1263,7 +1270,6 @@ func (w *World) TriggerGeoAnomaly(spec GeoAnomalySpec) []Event {
 				"deaths":         deadActors,
 			},
 		}
-		w.NextID++
 		witnesses := w.distributeAnomalyObservations(ev, spec.ID, spec.FlowKind, regID, primaryDistrict, effInt)
 		ev.Payload["witnesses"] = witnesses
 		events = append(events, ev)
@@ -1351,7 +1357,7 @@ func (w *World) applyMoveDistrict(a *Actor, x Action) []Event {
 	from := a.VenueID
 	traveler := w.actorWithEffectTags(*a)
 	var best *VenueRouteView
-	for _, hop := range buildVenueRouteViews(w.Map, w.Catalog, w.DistrictStates, traveler) {
+	for _, hop := range w.actorVenueRoutes(traveler) {
 		if hop.ToDistrict == x.Location && (best == nil || hop.Ticks < best.Ticks || hop.Ticks == best.Ticks && hop.ToVenue < best.ToVenue) {
 			candidate := hop
 			best = &candidate
@@ -1427,6 +1433,10 @@ func (w *World) finishMoveVenue(a *Actor, t Task) []Event {
 	if route, connected := w.Map.VenueRouteBetween(fromVenue, destVenue.ID); connected && route.Medium != "" {
 		medium = route.Medium
 	}
+	if closed, reason := w.isRouteSevered(fromDistrict, destVenue.DistrictID, medium, x.Channel); closed {
+		return []Event{w.record(a, x, "travel_interrupted", map[string]any{"text": reason})}
+	}
+	escort := w.partyEscortRiskReductionPct(*a, x.Location)
 	a.VenueID = destVenue.ID
 	if destVenue.DistrictID != "" {
 		a.Location = destVenue.DistrictID
@@ -1441,7 +1451,7 @@ func (w *World) finishMoveVenue(a *Actor, t Task) []Event {
 		"district":        a.Location,
 		"locomotion_mode": modeID,
 	})}
-	return append(events, w.checkActorTransitHazard(a, x, fromDistrict, a.Location, medium, modeID)...)
+	return append(events, w.checkActorTransitHazard(a, x, fromDistrict, a.Location, medium, modeID, escort)...)
 }
 
 func (w *World) applyIssueDecree(a *Actor, x Action) []Event {
@@ -1708,17 +1718,14 @@ func (w *World) applyTransmitMessage(a *Actor, x Action) []Event {
 		},
 	}
 	w.NextID++
-	root := e.ID
-	if x.BasisEventID != 0 {
-		for _, m := range a.Memories {
-			if m.EventID == x.BasisEventID {
-				root = m.RootEventID
-				break
-			}
-		}
+	root := citedRoot(a.Memories, x.BasisEventID)
+	if root == 0 {
+		root = e.ID
 	}
+	factID, witnessID := citedReport(a, x)
 	e.Payload["basis_event_id"] = x.BasisEventID
 	e.Payload["root_event_id"] = root
+	e.Payload["fact_event_id"], e.Payload["witness_id"] = factID, witnessID
 
 	var stmtPtr *Statement
 	if x.Statement != nil {
@@ -1738,6 +1745,8 @@ func (w *World) applyTransmitMessage(a *Actor, x Action) []Event {
 		TargetID:     x.TargetID,
 		Text:         x.Text,
 		BasisEventID: x.BasisEventID,
+		FactEventID:  factID,
+		WitnessID:    witnessID,
 		RootEventID:  root,
 		Statement:    stmtPtr,
 	}
@@ -1762,6 +1771,8 @@ func (w *World) applyTransmitMessage(a *Actor, x Action) []Event {
 			TargetID:     rcpt.ID,
 			Text:         x.Text,
 			BasisEventID: x.BasisEventID,
+			FactEventID:  factID,
+			WitnessID:    witnessID,
 			RootEventID:  root,
 			Statement:    rcptStmt,
 		}
@@ -1769,9 +1780,21 @@ func (w *World) applyTransmitMessage(a *Actor, x Action) []Event {
 		deliveredIDs = append(deliveredIDs, rcpt.ID)
 	}
 	e.Payload["delivered_count"] = len(deliveredIDs)
-	if len(deliveredIDs) > 0 {
-		e.Payload["delivered_to"] = deliveredIDs
-	}
+	e.Payload["delivered_to"] = deliveredIDs
+	e.Payload["report_source_id"] = witnessID
+	e.Payload["district"] = a.Location
 	w.ObserveContinuity(e)
-	return []Event{e}
+	return append([]Event{e}, w.deliverSecretReport(x, factID, recipients)...)
+}
+
+func (w *World) actorVenueRoutes(a Actor) []VenueRouteView {
+	effective := w.actorWithEffectTags(a)
+	routes := buildVenueRouteViews(w.Map, w.Catalog, w.DistrictStates, effective)
+	out := routes[:0]
+	for _, route := range routes {
+		if severed, _ := w.isRouteSevered(a.Location, route.ToDistrict, route.Medium, route.ModeID); !severed {
+			out = append(out, route)
+		}
+	}
+	return out
 }

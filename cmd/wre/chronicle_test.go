@@ -65,3 +65,19 @@ func TestCLIChronicleSubcommandMarkdownAndJSON(t *testing.T) {
 		t.Fatalf("unexpected chronicle json report: %+v", rep)
 	}
 }
+
+func TestCLIChronicleRejectsRunRecords(t *testing.T) {
+	for _, payload := range []string{
+		"{\"kind\":\"tick_settled\",\"tick\":8}\n",
+		"[{\"id\":1,\"kind\":\"tick_settled\"}]",
+		"[{\"id\":1}]",
+	} {
+		path := filepath.Join(t.TempDir(), "not-events.json")
+		if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadEventsFromFile(path); err == nil || !strings.Contains(err.Error(), "expected a simulation event") {
+			t.Fatalf("input %s should fail with an event validation error, got %v", payload, err)
+		}
+	}
+}

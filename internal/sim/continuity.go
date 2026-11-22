@@ -455,12 +455,6 @@ func (w *World) continuity() *ContinuityState {
 	}
 	return w.Continuity
 }
-func (w *World) ContinuityFor(id string) ContinuityView {
-	if w.Continuity == nil {
-		return ContinuityView{}
-	}
-	return w.continuityForAgreements(id, w.Continuity.Agreements)
-}
 
 func (w *World) continuityForAgreements(id string, agreements []Agreement) ContinuityView {
 	var v ContinuityView

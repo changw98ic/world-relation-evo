@@ -6,6 +6,18 @@ import (
 	"github.com/changw98ic/world-relation-evo/internal/sim"
 )
 
+func isKinOrSwornPeer(p sim.Perception, targetID string) bool {
+	if targetID == "" {
+		return false
+	}
+	for _, nb := range p.Nearby {
+		if nb.ID == targetID && !nb.Jailed {
+			return !sim.ActorHasTag(p.EligibleBondIDs, targetID)
+		}
+	}
+	return false
+}
+
 func actorActiveParty(p sim.Perception) *sim.Party {
 	for i := range p.Parties {
 		if sim.ActorHasTag(p.Parties[i].MemberIDs, p.Self.ID) {
@@ -49,6 +61,27 @@ func addPartyOptions(p sim.Perception, allowed map[string]bool, add func(string,
 				}
 			}
 		}
+		if allowed["form_party"] && a.InsideHouse == "" && a.Energy >= 3 {
+			for _, nb := range p.Nearby {
+				if nb.Jailed || nb.Sleeping || a.Trust[nb.ID] < 0 {
+					continue
+				}
+				for _, road := range p.Roads {
+					add("Escort "+nb.Name+" to "+road.To, sim.Action{Kind: "form_party", TargetID: nb.ID, Item: "escort", Location: road.To})
+				}
+				for _, route := range p.VenueRoutes {
+					if route.ToDistrict != a.Location {
+						add("Escort "+nb.Name+" to "+route.ToDistrict, sim.Action{Kind: "form_party", TargetID: nb.ID, Item: "escort", Location: route.ToDistrict})
+					}
+				}
+				for _, event := range p.ActiveWorldEvents {
+					if event.DistrictID != a.Location {
+						add("Lead an expedition with "+nb.Name+" to "+event.DistrictID, sim.Action{Kind: "form_party", TargetID: nb.ID, Item: "expedition", Location: event.DistrictID})
+					}
+				}
+				break
+			}
+		}
 		if allowed["join_party"] && a.Energy >= 2 && a.Health >= 55 {
 			for _, party := range p.Parties {
 				if len(party.MemberIDs) >= 6 || a.Trust[party.LeaderID] < -1 {
@@ -66,14 +99,17 @@ func addPartyOptions(p sim.Perception, allowed map[string]bool, add func(string,
 	}
 	if allowed["betray_party"] && a.Energy >= 6 && a.Health >= 50 {
 		traits := ExtractPersonalityTraits(a.Personality)
-		opportunistic := sim.ActorHasTag(traits, "ruthless") || sim.ActorHasTag(traits, "calculating") ||
-			sim.ActorHasTag(traits, "cunning") || sim.ActorHasTag(traits, "opportunistic") ||
+		treacherous := sim.ActorHasTag(traits, "ruthless") || sim.ActorHasTag(traits, "opportunistic") ||
 			p.Catalog.IsOutlawTags(a.IdentityTags())
 		for _, nb := range p.Nearby {
 			if nb.Jailed || !sim.ActorHasTag(myParty.MemberIDs, nb.ID) {
 				continue
 			}
-			if a.Trust[nb.ID] <= 0 || opportunistic {
+			// Never betray sworn kin, family, or trusted allies.
+			if a.Trust[nb.ID] >= 1 || isKinOrSwornPeer(p, nb.ID) {
+				continue
+			}
+			if a.Trust[nb.ID] <= -1 || (a.Trust[nb.ID] <= 0 && treacherous) {
 				add(fmt.Sprintf("Betray party and ambush %s (-6 energy)", nb.Name),
 					sim.Action{Kind: "betray_party", TargetID: nb.ID})
 			}
@@ -130,8 +166,22 @@ func planPartyAction(p sim.Perception, consider func(sim.Action) bool) bool {
 
 	// Follow party target district for coordinated expedition/escort.
 	if myParty.TargetDistrict != "" && myParty.TargetDistrict != a.Location && a.Energy >= 30 {
+		if !p.PartyReady {
+			return consider(sim.Action{Kind: "wait"})
+		}
 		if step, ok := stepTowardDistrict(p, myParty.TargetDistrict, 0); ok && consider(step) {
 			return true
+		}
+	}
+	if myParty.Purpose == "relic_hunt" {
+		for _, event := range p.ActiveWorldEvents {
+			if event.Category != "artifact_emergence" || event.ClaimedBy != "" || event.DistrictID != a.Location {
+				continue
+			}
+			if p.PartyReady && myParty.LeaderID == a.ID && consider(sim.Action{Kind: "claim_world_event", TargetID: event.InstanceID}) {
+				return true
+			}
+			return consider(sim.Action{Kind: "wait"})
 		}
 	}
 	return false

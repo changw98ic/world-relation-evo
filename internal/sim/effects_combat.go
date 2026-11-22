@@ -685,20 +685,25 @@ func (w *World) addActorStateSlot(a *Actor, slotID string, delta int) {
 	setActorSlotValue(a, slotID, next)
 }
 
-func (w *World) interruptTaskOnDamage(b *Actor, cause string) []Event {
+func (w *World) interruptTaskOnDamage(b *Actor, cause string, source ...Event) []Event {
 	if b == nil || b.Task == nil {
 		return nil
 	}
 	if b.Task.Dormant {
 		act := b.Task.Action
 		b.Task = nil
-		return []Event{w.record(b, act, "dormant_interrupted", map[string]any{
+		data := map[string]any{
 			"text":        fmt.Sprintf("%s's dormant %s was interrupted by %s", b.Name, act.Kind, cause),
 			"action_spec": act.Kind,
 			"cause":       cause,
-		})}
+		}
+		if len(source) > 0 {
+			data["cause_event_id"] = source[0].ID
+			data["root_event_id"] = payloadInt64(source[0].Payload, "root_event_id")
+		}
+		return []Event{w.record(b, act, "dormant_interrupted", data)}
 	}
-	if cause == "combat" && b.Task.Action.Kind == "sleep" {
+	if b.Task.Action.Kind == "sleep" {
 		b.Task = nil
 	}
 	return nil
@@ -1085,8 +1090,13 @@ func (w *World) finishDeclarativeAction(a *Actor, t Task, spec ActionSpec) []Eve
 				for _, poolID := range poolIDs {
 					delta := spec.DistrictResourceGains[poolID]
 					if delta != 0 {
-						ds.Resources[poolID] = maxInt64(0, ds.Resources[poolID]+delta)
-						w.recordEcologicalChange(a.Location, poolID, delta)
+						before := ds.Resources[poolID]
+						after := maxInt64(0, before+delta)
+						actualDelta := after - before
+						ds.Resources[poolID] = after
+						if actualDelta != 0 {
+							w.recordEcologicalChange(a.Location, poolID, actualDelta)
+						}
 					}
 				}
 			}
@@ -1399,4 +1409,40 @@ func (w *World) applyUnequip(a *Actor, x Action) []Event {
 		"item":       itemID,
 		"equip_slot": slot,
 	})}
+}
+
+// applyMeleeHit resolves a physical strike through the same defenses as a
+// typed attack. A zero base uses the attacker's declared attack profile.
+func (w *World) applyMeleeHit(attacker, defender *Actor, x Action, base int) (damage, absorbed int, immune bool, effects []Event) {
+	var override *AttackSpec
+	support := 0
+	if party := w.ActorParty(attacker.ID); party != nil && !ActorHasTag(party.MemberIDs, defender.ID) {
+		support = w.partyCombatSupportBonus(*attacker)
+	}
+	if base > 0 {
+		override = &AttackSpec{DamageByType: map[string]int{"physical": base + support/2}}
+	} else if support > 0 {
+		_, types, _, _ := w.Catalog.ActorCombatProfile(*attacker)
+		types = cloneIntMap(types)
+		if len(types) == 0 {
+			types = map[string]int{"physical": maxInt(10, 8+(CombatPowerWithCatalog(w.Catalog, *attacker)-10)/2)}
+		}
+		first := sortedProductionKeys(types)[0]
+		types[first] += support / 2
+		override = &AttackSpec{DamageByType: types}
+	}
+	damage, absorbed, immune, effects = w.resolveMultiDimCombatHit(*attacker, defender, override, x)
+	damage = minInt(defender.Health, damage)
+	defender.Health -= damage
+	return
+}
+
+func (w *World) finishMeleeHit(attacker, defender *Actor, x Action, damage int, cause string, event Event) []Event {
+	if damage == 0 {
+		return nil
+	}
+	if defender.Health == 0 {
+		return w.markDeadIfZero(defender, attacker, x, cause, event)
+	}
+	return w.interruptTaskOnDamage(defender, cause, event)
 }

@@ -108,11 +108,6 @@ func (w *World) growthCaretaker(g GrowthBatch) GrowthBatch {
 	return g
 }
 
-// Representation changes transfer existing rights and duties only.
-func (w *World) rebindGrowthCare(actorID string, target PopulationCohort) {
-	w.transferGrowingAssets("actor", actorID, "cohort", target.ID)
-}
-
 func (w *World) growthStock(g GrowthBatch, item string) int64 {
 	if g.Cohort {
 		return w.findCohort(g.OwnerID).ItemPool[item]

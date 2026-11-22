@@ -202,22 +202,6 @@ func (e EnvironmentProfile) PrimaryOutlawTag() string {
 	return "outlaw"
 }
 
-// PrimaryEnforcementTag returns the canonical enforcement tag configured for this environment.
-func (e EnvironmentProfile) PrimaryEnforcementTag() string {
-	if len(e.EnforcementTags) > 0 && e.EnforcementTags[0] != "" {
-		return e.EnforcementTags[0]
-	}
-	return "law"
-}
-
-// PrimaryOversightTag returns the canonical oversight tag configured for this environment.
-func (e EnvironmentProfile) PrimaryOversightTag() string {
-	if len(e.OversightTags) > 0 && e.OversightTags[0] != "" {
-		return e.OversightTags[0]
-	}
-	return "censor"
-}
-
 // IsOutlawTags reports whether any tag in tags marks an outlaw/hostile-violator role
 // under this catalog's environment configuration.
 func (c Catalog) IsOutlawTags(tags []string) bool {

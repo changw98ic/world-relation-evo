@@ -663,6 +663,19 @@ func (s *PlaybookSelector) Select(ctx context.Context, p sim.Perception, options
 	return RuleSelector{trace: s.Trace}.Select(ctx, p, options)
 }
 
+func hasCoLocatedHostileEnemy(p sim.Perception) bool {
+	a := p.Self
+	for _, nb := range p.Nearby {
+		if nb.Jailed || nb.Sleeping {
+			continue
+		}
+		if nb.FactionRelation == "at_war" || a.Trust[nb.ID] <= -3 {
+			return true
+		}
+	}
+	return false
+}
+
 func needsSurvivalOverride(p sim.Perception) bool {
 	a := p.Self
 	if a.Thirst >= 2 {
@@ -674,16 +687,19 @@ func needsSurvivalOverride(p sim.Perception) bool {
 	if a.Waste >= 3 {
 		return true
 	}
-	if a.Health < 65 || a.DiseaseID != "" {
+	if a.DiseaseID != "" {
+		return true
+	}
+	if a.Health < 25 || (a.Health < 45 && !hasCoLocatedHostileEnemy(p)) {
 		return true
 	}
 	if a.Resting && a.Energy < sim.MaxEnergy {
 		return true
 	}
-	if a.Energy < 20 {
+	if a.Energy < 16 {
 		return true
 	}
-	if (p.Clock.IsNight || sim.SleepWindowAligned(a.SleepTrait, p.Clock.Hour)) && a.Energy < 75 {
+	if (p.Clock.IsNight || sim.SleepWindowAligned(a.SleepTrait, p.Clock.Hour)) && a.Energy < 70 && !hasCoLocatedHostileEnemy(p) {
 		return true
 	}
 	return false

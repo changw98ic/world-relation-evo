@@ -83,6 +83,18 @@ func (p Pipeline) Decide(ctx context.Context, view sim.Perception) (action sim.A
 	if selected == nil {
 		return sim.Action{}, fmt.Errorf("selector returned unavailable option %q", id)
 	}
+	if selected.BasisEventID == 0 {
+		if annot, ok := selector.(interface{ LastTriggerEventID(string) int64 }); ok {
+			if basisID := annot.LastTriggerEventID(view.Self.ID); basisID > 0 {
+				for _, m := range view.Self.Memories {
+					if m.EventID == basisID {
+						selected.BasisEventID = basisID
+						break
+					}
+				}
+			}
+		}
+	}
 	stage = "selected"
 	if err = p.Trace.Record("decision_selected", view.Tick, view.Self.ID, map[string]any{"option_id": id, "action": *selected}); err != nil {
 		return sim.Action{}, err
@@ -384,21 +396,11 @@ func Options(p sim.Perception) []Option {
 		}
 
 		if a.Energy >= 10 && a.Health >= 50 && p.Tick >= a.RestUntil {
-			bestThreatID := ""
-			bestThreatName := ""
-			bestThreatAct := 5
-			bestBounty := 0
-			for _, enc := range p.Catalog.Encounters {
-				if act := p.DistrictState.ThreatActivity[enc.ID]; act > bestThreatAct {
-					bestThreatAct = act
-					bestThreatID = enc.ID
-					bestThreatName = enc.Name
-					bestBounty = enc.BountyCoins
+			for _, threat := range p.Catalog.Encounters {
+				if act := p.DistrictState.ThreatActivity[threat.ID]; act > 5 {
+					add(fmt.Sprintf("Hunt %s in %s (45m, -10 energy, threat %d, bounty up to %d coins)", threat.Name, a.Location, act, threat.BountyCoins),
+						sim.Action{Kind: "hunt_threat", TargetID: threat.ID})
 				}
-			}
-			if bestThreatID != "" {
-				add(fmt.Sprintf("Hunt %s in %s (45m, -10 energy, threat %d, bounty %d+ coins)", bestThreatName, a.Location, bestThreatAct, bestBounty),
-					sim.Action{Kind: "hunt_threat", TargetID: bestThreatID})
 			}
 		}
 
@@ -534,6 +536,12 @@ func Options(p sim.Perception) []Option {
 		add("Claim district sovereignty for "+a.Guilds[0], sim.Action{Kind: "claim_turf", FactionID: a.Guilds[0], Location: a.Location})
 	}
 
+	if report, ok := informationAction(p); ok && report.Kind == "speak" && ruleOptionID(report, options) == "" {
+		add(report.Text, report)
+	}
+	for _, action := range p.CaseActions {
+		add(fmt.Sprintf("%s: %s", action.Kind, action.TargetID), action)
+	}
 	medItem := cheapestMedicinalItem(p.Catalog, a, itemKeys)
 	for _, b := range p.Nearby {
 		if b.Health < sim.MaxHealth && medItem != "" {
@@ -542,7 +550,9 @@ func Options(p sim.Perception) []Option {
 		if b.Jailed {
 			continue
 		}
-		add(fmt.Sprintf("Talk to %s (%s, %s, level %d)", b.Name, b.ID, b.Role, b.Level), sim.Action{Kind: "speak", TargetID: b.ID})
+		if !b.Sleeping {
+			add(fmt.Sprintf("Talk to %s (%s, %s, level %d)", b.Name, b.ID, b.Role, b.Level), sim.Action{Kind: "speak", TargetID: b.ID})
+		}
 		for _, cand := range offerItems {
 			spec := cand.spec
 			if spec.BuyerRequiredTag != "" && !sim.ActorHasTag(b.Tags, spec.BuyerRequiredTag) {
@@ -585,7 +595,7 @@ func Options(p sim.Perception) []Option {
 		if a.Health >= 45 && a.Energy >= 5 && p.Tick >= a.RestUntil && !bIsOutlaw {
 			add("Steal from "+b.Name+" (-5 energy)", sim.Action{Kind: "steal", TargetID: b.ID})
 		}
-		if env.Institutions.RacketeeringEnabled() && a.Health >= 50 && a.Energy >= 6 && p.Tick >= a.RestUntil && !bIsOutlaw {
+		if env.Institutions.RacketeeringEnabled() && a.Health >= 50 && a.Energy >= 6 && p.Tick >= a.RestUntil && sim.ActorHasTag(p.ExtortionTargets, b.ID) && b.FactionRelation != "allied" {
 			add("Extort coercion fee from "+b.Name+" (-6 energy)", sim.Action{Kind: "extort", TargetID: b.ID})
 		}
 		if a.Health >= 55 && b.Health > 20 && a.Energy >= 8 && p.Tick >= a.RestUntil && !bIsOutlaw {
@@ -593,16 +603,6 @@ func Options(p sim.Perception) []Option {
 		}
 		if a.Money >= 4 && a.Energy >= 3 && bIsEnforcer {
 			add(fmt.Sprintf("Offer hush bribe to %s %s (-3 energy)", env.AuthorityName, b.Name), sim.Action{Kind: "bribe", TargetID: b.ID})
-		}
-		if env.Institutions.OversightEnabled() {
-			if basisID, hasEv := sim.ActorCorruptionEvidence(a, b.ID); a.IllicitGain == 0 && hasEv && a.Energy >= 6 {
-				add(fmt.Sprintf("Audit and expose corrupt %s %s (-6 energy)", env.AuthorityName, b.Name), sim.Action{
-					Kind: "audit_corruption", TargetID: b.ID, BasisEventID: basisID,
-				})
-			}
-		}
-		if env.Institutions.EnforcementEnabled() && a.Health >= 45 && b.Health > 0 && a.Energy >= 7 && p.Tick >= a.RestUntil && (bIsOutlaw || a.Trust[b.ID] < 0) {
-			add(fmt.Sprintf("Detain violator %s for %s bounty (-7 energy)", b.Name, env.AuthorityName), sim.Action{Kind: "arrest", TargetID: b.ID})
 		}
 		if p.CurrentHouse != nil && p.CurrentHouse.OwnerID == a.ID {
 			add(fmt.Sprintf("Transfer ownership deed of %s to %s (permanent property transfer)", p.CurrentHouse.Name, b.Name), sim.Action{
@@ -615,7 +615,7 @@ func Options(p sim.Perception) []Option {
 				Kind: "marry", TargetID: b.ID,
 			})
 		}
-		if a.Energy >= 2 && a.Trust[b.ID] >= 3 {
+		if a.Energy >= 2 && a.Trust[b.ID] >= 3 && sim.ActorHasTag(p.EligibleBondIDs, b.ID) {
 			add(fmt.Sprintf("Swear kinship/patronage bond with %s", b.Name), sim.Action{
 				Kind: "swear_bond", TargetID: b.ID,
 			})
@@ -850,6 +850,102 @@ func Options(p sim.Perception) []Option {
 			}
 		}
 	}
+	// Dual-use currency refinement & state-slot absorption.
+	if allowed["refine_currency_item"] || allowed["absorb_item_slot"] {
+		slotKeys := make([]string, 0, len(p.Catalog.StateSlots))
+		for sid := range p.Catalog.StateSlots {
+			slotKeys = append(slotKeys, sid)
+		}
+		sort.Strings(slotKeys)
+		for _, itemID := range sortedItemIDs(p.Catalog.Items) {
+			if a.Items[itemID] <= 0 {
+				continue
+			}
+			spec := p.Catalog.Items[itemID]
+			if allowed["refine_currency_item"] && spec.DualUseCurrency != "" && spec.DualUseRate > 0 {
+				add(fmt.Sprintf("Refine 1 %s into %d %s", itemID, spec.DualUseRate, spec.DualUseCurrency),
+					sim.Action{Kind: "refine_currency_item", Item: itemID, Quantity: 1})
+			}
+			if allowed["absorb_item_slot"] && (spec.DualUseCurrency != "" || spec.DualUseRate > 0) {
+				if len(slotKeys) == 0 {
+					add(fmt.Sprintf("Absorb 1 %s to replenish qi", itemID),
+						sim.Action{Kind: "absorb_item_slot", Item: itemID, Quantity: 1, TargetID: "qi"})
+				} else {
+					for _, sid := range slotKeys {
+						slotSpec := p.Catalog.StateSlots[sid]
+						if slotSpec.Max <= 0 || a.StateSlots[sid] < slotSpec.Max {
+							add(fmt.Sprintf("Absorb 1 %s to replenish %s", itemID, sid),
+								sim.Action{Kind: "absorb_item_slot", Item: itemID, Quantity: 1, TargetID: sid})
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Flow-grid edge repair and sabotage.
+	if len(p.FlowEdges) > 0 && (allowed["repair_flow_edge"] || allowed["sever_flow_edge"]) {
+		for _, edge := range p.FlowEdges {
+			if edge.ID == "" {
+				continue
+			}
+			if edge.Severed && allowed["repair_flow_edge"] {
+				add(fmt.Sprintf("Repair severed flow edge %s (%s -> %s)", edge.ID, edge.FromNodeID, edge.ToNodeID),
+					sim.Action{Kind: "repair_flow_edge", TargetID: edge.ID})
+			} else if !edge.Severed && allowed["sever_flow_edge"] {
+				add(fmt.Sprintf("Sever flow edge %s (%s -> %s)", edge.ID, edge.FromNodeID, edge.ToNodeID),
+					sim.Action{Kind: "sever_flow_edge", TargetID: edge.ID})
+			}
+		}
+	}
+
+	// Fundamental world-law rewriting (explicitly gated by Catalog.TagActions["..."]["rewrite_world_law"]).
+	if allowed["rewrite_world_law"] {
+		authorizedLaw := false
+		for _, tag := range selfEffTags {
+			if sim.ActorHasTag(p.Catalog.TagActions[tag], "rewrite_world_law") {
+				authorizedLaw = true
+				break
+			}
+		}
+		if authorizedLaw {
+			lawKeys := []string{"firearms_disabled"}
+			for k := range p.WorldLaws {
+				if !sim.ActorHasTag(lawKeys, k) {
+					lawKeys = append(lawKeys, k)
+				}
+			}
+			sort.Strings(lawKeys)
+			for _, law := range lawKeys {
+				nextVal := 1
+				if p.WorldLaws[law] > 0 {
+					nextVal = 0
+				}
+				add(fmt.Sprintf("Rewrite world law %s to %d", law, nextVal),
+					sim.Action{Kind: "rewrite_world_law", Item: law, Quantity: nextVal})
+			}
+		}
+	}
+
+	// Independent skill practice (proficiency grinding) when actor has a known skill below max level.
+	if len(p.Catalog.Skills) > 0 && allowed["practice_skill"] && a.Energy >= 4 {
+		skillKeys := make([]string, 0, len(a.Skills))
+		for sid, lv := range a.Skills {
+			if lv >= 1 {
+				skillKeys = append(skillKeys, sid)
+			}
+		}
+		sort.Strings(skillKeys)
+		for _, sid := range skillKeys {
+			sk, ok := p.Catalog.Skills[sid]
+			if !ok || a.Skills[sid] >= sk.EffectiveMaxLevel() {
+				continue
+			}
+			add(fmt.Sprintf("Practice %s (Lv.%d/%d, -4 energy)", sk.Name, a.Skills[sid], sk.EffectiveMaxLevel()),
+				sim.Action{Kind: "practice_skill", SkillID: sid})
+		}
+	}
+
 	// Independent skill mentorship (teacher level >= 2 and strictly higher than nearby student).
 	if len(p.Catalog.Skills) > 0 && allowed["teach_knowledge"] && a.Energy >= 4 {
 		skillKeys := make([]string, 0, len(a.Skills))
@@ -908,6 +1004,7 @@ func Options(p sim.Perception) []Option {
 	}
 
 	addDeclarativeActionOptions(p, allowed, add)
+	addGoldenFingerOptions(p, allowed, add)
 	for _, itemID := range itemKeys {
 		if ok, _ := sim.CanEquipItem(p.Catalog, a, itemID); ok {
 			slot := p.Catalog.Items[itemID].EquipSlot
@@ -1164,18 +1261,6 @@ func totalEdibleItems(cat sim.Catalog, a sim.Actor) int {
 	return int(cat.AvailableNutrition(a))
 }
 
-func defaultEdibleItem(cat sim.Catalog) string {
-	if spec, ok := cat.Items["food"]; ok && spec.Edible {
-		return "food"
-	}
-	for _, id := range sortedItemIDs(cat.Items) {
-		if cat.Items[id].Edible {
-			return id
-		}
-	}
-	return "food"
-}
-
 // RuleSelector is explicitly the offline baseline, never a Jev substitute.
 type RuleSelector struct{ trace *runtrace.Writer }
 
@@ -1204,6 +1289,9 @@ func ruleOptionID(desired sim.Action, options []Option) string {
 	for _, o := range options {
 		a := o.Action
 		if a.Kind == desired.Kind &&
+			((desired.Kind != "speak" && desired.Kind != "transmit_message" && desired.Kind != "channel_message") ||
+				desired.Statement == nil && desired.BasisEventID == 0 ||
+				a.BasisEventID == desired.BasisEventID && sameStatement(a.Statement, desired.Statement)) &&
 			(desired.Channel == "" || a.Channel == desired.Channel) &&
 			a.Location == desired.Location &&
 			a.HouseID == desired.HouseID &&
@@ -1217,7 +1305,8 @@ func ruleOptionID(desired sim.Action, options []Option) string {
 			a.OfferID == desired.OfferID &&
 			a.AgreementID == desired.AgreementID &&
 			(desired.Kind != "mediate_feud" || a.Text == desired.Text && a.Price == desired.Price) &&
-			((desired.Kind != "propose_agreement" && desired.Kind != "offer") || (a.Price == desired.Price && a.Quantity == desired.Quantity)) &&
+			((desired.Kind != "gf_exchange" && desired.Kind != "gf_simulate") || desired.Text == "" || a.Text == desired.Text) &&
+			((desired.Kind != "propose_agreement" && desired.Kind != "offer" && desired.Kind != "rewrite_world_law") || (a.Price == desired.Price && a.Quantity == desired.Quantity)) &&
 			(desired.Care == nil || a.Care != nil && *a.Care == *desired.Care) &&
 			(desired.Item == "" || a.Item == desired.Item) &&
 			(a.TargetID == desired.TargetID || a.OfferID != 0) {
@@ -1225,6 +1314,13 @@ func ruleOptionID(desired sim.Action, options []Option) string {
 		}
 	}
 	return ""
+}
+
+func sameStatement(a, b *sim.Statement) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 type speechDraft struct {
@@ -1265,7 +1361,7 @@ func buildCommunicationAction(p sim.Perception, a sim.Action) sim.Action {
 		if p.Tick-m.Tick > sim.TicksPerDay || alreadyToldTarget(m.RootEventID) {
 			continue
 		}
-		if draft, ok := reportFromMemory(m, p.Self, a.TargetID); ok {
+		if draft, ok := reportFromMemory(m, p.Self, a.TargetID); ok && secretReportAllowed(p, m.RootEventID, draft.Statement) {
 			a.Text = draft.Text
 			a.Statement = draft.Statement
 			a.BasisEventID = draft.BasisEventID
@@ -1277,6 +1373,25 @@ func buildCommunicationAction(p sim.Perception, a sim.Action) sim.Action {
 }
 
 // reportFromMemory gives planning and speech the same account of one memory.
+func secretReportAllowed(p sim.Perception, root int64, stmt *sim.Statement) bool {
+	switch stmt.Topic {
+	case "secret_caught_red_handed", "secret_discovered", "secret_exposed":
+		for _, secret := range p.KnownSecrets {
+			if secret.ID == stmt.ObjectID {
+				return secret.Exposed || secret.HolderStances[p.Self.ID] == "confront"
+			}
+		}
+		return false
+	case "corruption", "wrongful_conviction":
+		for _, secret := range p.KnownSecrets {
+			if secret.RootEventID == root && secret.OwnerID == stmt.SubjectID {
+				return secret.Exposed || secret.HolderStances[p.Self.ID] == "confront"
+			}
+		}
+	}
+	return true
+}
+
 func reportFromMemory(m sim.Memory, self sim.Actor, listenerID string) (speechDraft, bool) {
 	if m.Observation != nil {
 		switch m.Observation.Kind {
@@ -1305,8 +1420,16 @@ func reportFromMemory(m sim.Memory, self sim.Actor, listenerID string) (speechDr
 					Item:      m.Observation.Item,
 					Location:  m.Observation.Location,
 					Quantity:  m.Observation.Quantity,
+					Proceeds:  m.Observation.Proceeds,
 				},
 			}, true
+		case "unlawful_attack":
+			o := m.Observation
+			if o.SubjectID == self.ID || o.SubjectID == listenerID {
+				return speechDraft{}, false
+			}
+			return speechDraft{Text: fmt.Sprintf("I saw %s attack %s at %s.", o.SubjectID, o.ObjectID, o.Location), BasisEventID: m.EventID,
+				Statement: &sim.Statement{Topic: o.Kind, SubjectID: o.SubjectID, ObjectID: o.ObjectID, Location: o.Location, Quantity: o.Quantity}}, true
 		case "corruption":
 			if m.Observation.SubjectID == "" || m.Observation.SubjectID == self.ID || m.Observation.SubjectID == listenerID || self.IllicitGain > 0 {
 				return speechDraft{}, false
@@ -1318,9 +1441,10 @@ func reportFromMemory(m sim.Memory, self sim.Actor, listenerID string) (speechDr
 					Topic:     "corruption",
 					SubjectID: m.Observation.SubjectID,
 					ObjectID:  m.Observation.ObjectID,
-					Item:      "coins",
+					Item:      m.Observation.Item,
 					Location:  m.Observation.Location,
 					Quantity:  m.Observation.Quantity,
+					Proceeds:  m.Observation.Proceeds,
 				},
 			}, true
 		case "wrongful_conviction":
@@ -1353,6 +1477,7 @@ func reportFromMemory(m sim.Memory, self sim.Actor, listenerID string) (speechDr
 					Item:      m.Observation.Item,
 					Location:  m.Observation.Location,
 					Quantity:  m.Observation.Quantity,
+					Proceeds:  m.Observation.Proceeds,
 				},
 			}, true
 		case "facility_adopted":
@@ -1376,15 +1501,21 @@ func reportFromMemory(m sim.Memory, self sim.Actor, listenerID string) (speechDr
 			if m.Observation.SubjectID != "" && m.Observation.SubjectID == listenerID {
 				return speechDraft{}, false
 			}
-			text := fmt.Sprintf("I witnessed %s die from %s at %s.", m.Observation.ObjectID, m.Observation.Item, m.Observation.Location)
+			mod := m.Observation.Modality
+			prefix := "I witnessed"
+			if mod != "" && mod != "eyewitness" {
+				prefix = "I perceived via " + mod + " that"
+			}
+			text := fmt.Sprintf("%s %s die from %s at %s.", prefix, m.Observation.ObjectID, m.Observation.Item, m.Observation.Location)
 			if m.Observation.SubjectID != "" {
-				text = fmt.Sprintf("I witnessed %s killed by %s (%s) at %s.", m.Observation.ObjectID, m.Observation.SubjectID, m.Observation.Item, m.Observation.Location)
+				text = fmt.Sprintf("%s %s was killed by %s (%s) at %s.", prefix, m.Observation.ObjectID, m.Observation.SubjectID, m.Observation.Item, m.Observation.Location)
 			}
 			return speechDraft{
 				Text:         text,
 				BasisEventID: m.EventID,
 				Statement: &sim.Statement{
 					Topic:     "actor_died",
+					Modality:  mod,
 					SubjectID: m.Observation.SubjectID,
 					ObjectID:  m.Observation.ObjectID,
 					Item:      m.Observation.Item,
@@ -1407,6 +1538,7 @@ func reportFromMemory(m sim.Memory, self sim.Actor, listenerID string) (speechDr
 					Item:      m.Observation.Item,
 					Location:  m.Observation.Location,
 					Quantity:  m.Observation.Quantity,
+					Proceeds:  m.Observation.Proceeds,
 				},
 			}, true
 		case "world_event_claimed":
@@ -1423,6 +1555,24 @@ func reportFromMemory(m sim.Memory, self sim.Actor, listenerID string) (speechDr
 					Item:      m.Observation.Item,
 					Location:  m.Observation.Location,
 					Quantity:  m.Observation.Quantity,
+					Proceeds:  m.Observation.Proceeds,
+				},
+			}, true
+		case "secret_caught_red_handed", "secret_exposed", "secret_discovered":
+			if m.Observation.SubjectID == listenerID {
+				return speechDraft{}, false
+			}
+			return speechDraft{
+				Text:         fmt.Sprintf("I witnessed %s's secret (%s) at %s.", m.Observation.SubjectID, m.Observation.Item, m.Observation.Location),
+				BasisEventID: m.EventID,
+				Statement: &sim.Statement{
+					Topic:     m.Observation.Kind,
+					SubjectID: m.Observation.SubjectID,
+					ObjectID:  m.Observation.ObjectID,
+					Item:      m.Observation.Item,
+					Location:  m.Observation.Location,
+					Quantity:  m.Observation.Quantity,
+					Proceeds:  m.Observation.Proceeds,
 				},
 			}, true
 		}
@@ -1432,10 +1582,14 @@ func reportFromMemory(m sim.Memory, self sim.Actor, listenerID string) (speechDr
 		if v.SubjectID != "" && v.SubjectID == listenerID {
 			return speechDraft{}, false
 		}
-		// Retell the speaker's words, including any price, uncertainty and
-		// attribution. A topic alone does not describe what was said.
-		text := fmt.Sprintf("%s said: %s", m.Source, m.Text)
-		if m.Text == "" {
+		// Retell the speaker's core words with a single clean attribution prefix
+		// (avoiding infinite "A said: B said: C said: ..." chains).
+		core := m.Text
+		if idx := strings.LastIndex(core, " said: "); idx >= 0 {
+			core = core[idx+len(" said: "):]
+		}
+		text := fmt.Sprintf("%s said: %s", m.Source, core)
+		if core == "" {
 			text = fmt.Sprintf("%s reported %s: %d %s at %s.", m.Source, v.Topic, v.Quantity, v.Item, v.Location)
 		}
 		return speechDraft{Text: text, BasisEventID: m.EventID, Statement: &v}, true

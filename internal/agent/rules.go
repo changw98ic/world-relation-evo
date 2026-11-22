@@ -225,7 +225,7 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 			return
 		}
 	}
-	if a.Health < 60 || (p.Tick < a.RestUntil && a.Health < 85) {
+	if (a.Health < 35 || (p.Tick < a.RestUntil && a.Health < 55)) && !(hasCoLocatedHostileEnemy(p) && a.Health >= 25) {
 		if consider(planSleep(p)) {
 			return
 		}
@@ -270,6 +270,9 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 
 	// 3b. Active rare artifact/relic world events take priority over routine plans when healthy and capable.
 	if a.Health >= 65 && a.Energy >= 16 && len(p.ActiveWorldEvents) > 0 {
+		if planPartyAction(p, consider) {
+			return
+		}
 		for _, we := range p.ActiveWorldEvents {
 			if we.Category != "artifact_emergence" || we.ClaimedBy != "" {
 				continue
@@ -292,6 +295,13 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 		}
 	}
 
+	for _, event := range p.ActiveWorldEvents {
+		if event.Category == "external_invasion" && event.DistrictID == a.Location && event.InvasionThreatID != "" &&
+			consider(sim.Action{Kind: "hunt_threat", TargetID: event.InvasionThreatID}) {
+			return
+		}
+	}
+
 	// Continuing intentions yield to physiological needs, not to unrelated daily work.
 	if action, ok := chooseContinuity(p); ok && consider(action) {
 		return
@@ -301,6 +311,11 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 	if p.Capabilities()["heal"] {
 		if medItem := cheapestMedicinalItem(p.Catalog, a, itemKeys); medItem != "" {
 			for _, b := range p.Nearby {
+				if b.FactionRelation == "allied" && b.Health < sim.MaxHealth && consider(sim.Action{Kind: "heal", TargetID: b.ID, Item: medItem}) {
+					return
+				}
+			}
+			for _, b := range p.Nearby {
 				if b.Health < sim.MaxHealth && consider(sim.Action{Kind: "heal", TargetID: b.ID, Item: medItem}) {
 					return
 				}
@@ -309,7 +324,10 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 	}
 
 	// 4b. Attempt upward form/realm breakthrough when healthy and all requirements are met.
-	if a.Health >= 75 && a.Energy >= 35 && len(p.Catalog.Transitions) > 0 {
+	if planGoldenFingerAction(p, consider) {
+		return
+	}
+	if a.Health >= 55 && a.Energy >= 25 && len(p.Catalog.Transitions) > 0 {
 		selfTier := p.Catalog.ActorPowerTier(a)
 		for _, opt := range policy.options {
 			if opt.Action.Kind != "attempt_transition" || opt.Action.TransitionID == "" {
@@ -322,6 +340,71 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 			targetTier := p.Catalog.Forms[trans.SuccessFormID].PowerTier
 			if targetTier >= selfTier && consider(opt.Action) {
 				return
+			}
+		}
+	}
+
+	// 4c. Train skills or run custom craft/progression ActionSpecs that advance toward upward transitions.
+	if a.Health >= 55 && a.Energy >= 30 && !hasCoLocatedHostileEnemy(p) {
+		neededSkills := map[string]int{}
+		neededItems := map[string]int{}
+		neededSlots := map[string]int{}
+		selfTier := p.Catalog.ActorPowerTier(a)
+		for _, tr := range p.Catalog.Transitions {
+			if tr.RequiredFormID != "" && tr.RequiredFormID != a.FormID {
+				continue
+			}
+			if toForm, ok := p.Catalog.Forms[tr.SuccessFormID]; ok && toForm.PowerTier > selfTier {
+				for sid, reqLv := range tr.RequiredSkills {
+					if a.Skills[sid] < reqLv && reqLv > neededSkills[sid] {
+						neededSkills[sid] = reqLv
+					}
+				}
+				for itemID, qty := range tr.ItemCosts {
+					if a.Items[itemID] < qty && qty > neededItems[itemID] {
+						neededItems[itemID] = qty
+					}
+				}
+				for slotID, reqVal := range tr.RequiredSlots {
+					if a.StateSlots[slotID] < reqVal && reqVal > neededSlots[slotID] {
+						neededSlots[slotID] = reqVal
+					}
+				}
+			}
+		}
+		if len(neededSkills) > 0 {
+			for _, opt := range policy.options {
+				if opt.Action.Kind == "practice_skill" && neededSkills[opt.Action.SkillID] > a.Skills[opt.Action.SkillID] {
+					if consider(opt.Action) {
+						return
+					}
+				}
+			}
+		}
+		if len(p.Catalog.ActionSpecs) > 0 && (len(neededItems) > 0 || len(neededSlots) > 0) {
+			for _, opt := range policy.options {
+				spec, ok := p.Catalog.ActionSpecs[opt.Action.Kind]
+				if !ok || (spec.TargetKind != "" && spec.TargetKind != "self") {
+					continue
+				}
+				useful := false
+				for itemID, gain := range spec.ItemGains {
+					if gain > 0 && neededItems[itemID] > a.Items[itemID] {
+						useful = true
+						break
+					}
+				}
+				if !useful {
+					for slotID, gain := range spec.SlotGains {
+						if gain > 0 && neededSlots[slotID] > a.StateSlots[slotID] {
+							useful = true
+							break
+						}
+					}
+				}
+				if useful && consider(opt.Action) {
+					return
+				}
 			}
 		}
 	}
@@ -357,14 +440,48 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 	if planDiplomacyAction(p, consider) {
 		return
 	}
-	if planPartyAction(p, consider) {
-		return
-	}
 	if planAmbitionAction(p, consider) {
 		return
 	}
 	if act, ok := planEcologyRitualAndInfra(p); ok && consider(act) {
 		return
+	}
+	// Repair any severed flow-grid edges before routine work.
+	for _, edge := range p.FlowEdges {
+		if edge.Severed && edge.ID != "" {
+			if consider(sim.Action{Kind: "repair_flow_edge", TargetID: edge.ID}) {
+				return
+			}
+		}
+	}
+	// Replenish low state slots or refine surplus dual-use currency items when beneficial.
+	slotKeys := make([]string, 0, len(p.Catalog.StateSlots))
+	for sid := range p.Catalog.StateSlots {
+		slotKeys = append(slotKeys, sid)
+	}
+	sort.Strings(slotKeys)
+	for _, itemID := range sortedItemIDs(p.Catalog.Items) {
+		qty := a.Items[itemID]
+		if qty < 2 {
+			continue
+		}
+		spec := p.Catalog.Items[itemID]
+		if spec.DualUseCurrency == "" && spec.DualUseRate <= 0 {
+			continue
+		}
+		for _, sid := range slotKeys {
+			slotSpec := p.Catalog.StateSlots[sid]
+			if slotSpec.Max > 0 && a.StateSlots[sid]*2 < slotSpec.Max {
+				if consider(sim.Action{Kind: "absorb_item_slot", Item: itemID, Quantity: 1, TargetID: sid}) {
+					return
+				}
+			}
+		}
+		if qty >= 3 && spec.DualUseCurrency != "" && spec.DualUseRate > 0 && a.Currencies[spec.DualUseCurrency] < int64(spec.DualUseRate) {
+			if consider(sim.Action{Kind: "refine_currency_item", Item: itemID, Quantity: 1}) {
+				return
+			}
+		}
 	}
 
 	// 9. Generic profession recipe planning (inputs -> bonus inputs -> facility/district -> craft).
@@ -910,7 +1027,17 @@ func planCreditAndRelations(p sim.Perception) (sim.Action, bool) {
 		return sim.Action{Kind: "repay_loan"}, true
 	}
 	if allowed["mediate_feud"] && a.Energy >= 12 && a.Health >= 50 && !recentlyConflictActed(a, p.Tick, 24) {
+		nearbyRel := map[string]string{}
+		for _, nb := range p.Nearby {
+			nearbyRel[nb.ID] = nb.FactionRelation
+		}
 		for _, action := range p.MediationActions {
+			if rel := nearbyRel[action.TargetID]; rel == "at_war" || rel == "hostile" {
+				continue
+			}
+			if a.Trust[action.TargetID] <= -3 {
+				continue
+			}
 			if action.TargetID != a.ID || freeMoney >= action.Price {
 				return action, true
 			}
@@ -927,11 +1054,9 @@ func planConflictAndLaw(p sim.Perception) (sim.Action, bool) {
 	allowed := p.Capabilities()
 
 	// 0. Upright censors and honest law officers audit & purge co-located officers when backed by epistemic evidence.
-	if allowed["audit_corruption"] && a.IllicitGain == 0 && a.Energy >= 12 {
-		for _, b := range p.Nearby {
-			if basisID, hasEv := sim.ActorCorruptionEvidence(a, b.ID); !b.Jailed && hasEv {
-				return sim.Action{Kind: "audit_corruption", TargetID: b.ID, BasisEventID: basisID}, true
-			}
+	for _, action := range p.CaseActions {
+		if allowed[action.Kind] {
+			return action, true
 		}
 	}
 
@@ -968,16 +1093,6 @@ func planConflictAndLaw(p sim.Perception) (sim.Action, bool) {
 	env := p.Catalog.EffectiveEnvironment()
 
 	// 1. Enforcement personnel detain co-located violators (unless bribed to look the other way!).
-	if env.Institutions.EnforcementEnabled() && allowed["arrest"] && a.Energy >= 12 {
-		for _, b := range p.Nearby {
-			if a.IllicitGain > 0 && a.Trust[b.ID] >= 3 {
-				continue
-			}
-			if !b.Jailed && b.Health > 0 && p.Catalog.IsOutlawTags(b.Tags) {
-				return sim.Action{Kind: "arrest", TargetID: b.ID}, true
-			}
-		}
-	}
 
 	// 1b. Solvent outlaws bribe nearby enforcers to buy protection from detention.
 	if allowed["bribe"] && availableMoneyAfterAgreements(p) >= 14 && a.Energy >= 10 {
@@ -1288,7 +1403,7 @@ func informationAction(p sim.Perception) (sim.Action, bool) {
 			continue
 		}
 		report, ok := reportFromMemory(m, a, "")
-		if !ok {
+		if !ok || !secretReportAllowed(p, m.RootEventID, report.Statement) {
 			continue
 		}
 		claim := report.Statement
@@ -1336,11 +1451,18 @@ func informationAction(p sim.Perception) (sim.Action, bool) {
 			if b.ID == m.Source || b.ID == claim.SubjectID || b.Sleeping || b.Jailed {
 				continue
 			}
+			// Skip retelling stale hearsay beyond 8 hours (first-hand observations still carry 1 day).
+			if m.Observation == nil && p.Tick-m.Tick > 32 {
+				continue
+			}
 			told := false
 			for _, past := range a.Memories {
-				if past.Kind == "speech" && past.Source == a.ID && past.TargetID == b.ID && past.RootEventID == m.RootEventID {
-					told = true
-					break
+				if past.RootEventID == m.RootEventID && (past.Kind == "speech" || past.Kind == "channel_message") {
+					// Already told b, OR b already told us about this exact root event!
+					if (past.Source == a.ID && past.TargetID == b.ID) || (past.Source == b.ID && past.TargetID == a.ID) {
+						told = true
+						break
+					}
 				}
 			}
 			if told {

@@ -1,0 +1,136 @@
+[
+  {
+    "id": 15143,
+    "tick": 2880,
+    "actor_id": "scion_ye",
+    "kind": "actor_entered_world",
+    "action": {
+      "kind": "wait",
+      "location": "tianshu_city"
+    },
+    "payload": {
+      "actor_id": "scion_ye",
+      "district": "tianshu_city",
+      "label": "part_2_asylum_and_red_sea",
+      "name": "叶玄(世家魁首)",
+      "role": "noble_duelist",
+      "text": "叶玄(世家魁首) (noble_duelist) entered the stage at tianshu_city"
+    }
+  },
+  {
+    "id": 15144,
+    "tick": 2880,
+    "actor_id": "veteran_qin",
+    "kind": "actor_entered_world",
+    "action": {
+      "kind": "wait",
+      "location": "red_sea_rift"
+    },
+    "payload": {
+      "actor_id": "veteran_qin",
+      "district": "red_sea_rift",
+      "label": "part_2_asylum_and_red_sea",
+      "name": "秦烈(红海断臂老将)",
+      "role": "frontline_veteran",
+      "text": "秦烈(红海断臂老将) (frontline_veteran) entered the stage at red_sea_rift"
+    }
+  },
+  {
+    "id": 15145,
+    "tick": 2880,
+    "actor_id": "world",
+    "kind": "world_event_triggered",
+    "action": {
+      "kind": "wait",
+      "location": "tianshu_city"
+    },
+    "payload": {
+      "category": "artifact_emergence",
+      "deaths": 0,
+      "district": "tianshu_city",
+      "event_id": "asylum_44_trial",
+      "event_name": "第44号颠倒疯人院争霸·理智天平现世",
+      "instance_id": "asylum_44_trial@2880:15145",
+      "intensity": 85,
+      "invasion_threat_id": "",
+      "reward_coins": 150,
+      "reward_item": "sanity_scale",
+      "reward_qty": 1,
+      "root_event_id": 15145,
+      "severed_medium": "",
+      "text": "Major world event [第44号颠倒疯人院争霸·理智天平现世] (artifact_emergence) erupted at tianshu_city (intensity 85)",
+      "witnesses": [
+        "zhou_jin",
+        "bai_ya",
+        "captain_lei",
+        "old_zhang",
+        "scholar_su",
+        "pawn_keeper",
+        "director_lin",
+        "assassin_yin",
+        "councilor_shen",
+        "colonel_lu",
+        "scion_ye",
+        "veteran_qin"
+      ],
+      "wounded": 0
+    }
+  },
+  {
+    "id": 15146,
+    "tick": 2880,
+    "actor_id": "world",
+    "kind": "world_event_triggered",
+    "action": {
+      "kind": "wait",
+      "location": "red_sea_rift"
+    },
+    "payload": {
+      "category": "external_invasion",
+      "deaths": 0,
+      "district": "red_sea_rift",
+      "event_id": "red_sea_six_star_tide",
+      "event_name": "红海裂隙六星眷族血潮",
+      "instance_id": "red_sea_six_star_tide@2880:15146",
+      "intensity": 90,
+      "invasion_threat_id": "",
+      "reward_coins": 0,
+      "reward_item": "",
+      "reward_qty": 0,
+      "root_event_id": 15146,
+      "severed_medium": "",
+      "text": "Major world event [红海裂隙六星眷族血潮] (external_invasion) erupted at red_sea_rift (intensity 90)",
+      "witnesses": [
+        "zhou_jin",
+        "bai_ya",
+        "captain_lei",
+        "old_zhang",
+        "scholar_su",
+        "pawn_keeper",
+        "director_lin",
+        "assassin_yin",
+        "councilor_shen",
+        "colonel_lu",
+        "scion_ye",
+        "veteran_qin"
+      ],
+      "wounded": 0
+    }
+  },
+  {
+    "id": 15148,
+    "tick": 2880,
+    "actor_id": "zhou_jin",
+    "kind": "ambition_adopted",
+    "action": {
+      "kind": "set_ambition",
+      "item": "ascend_tier"
+    },
+    "payload": {
+      "ambition_id": "amb_patch_2880_zhou_jin_ascend_tier",
+      "kind": "ascend_tier",
+      "target_id": "",
+      "text": "周烬(刻刀/白面) adopted ambition ascend_tier (target=)"
+    }
+  }
+]

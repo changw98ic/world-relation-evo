@@ -20,22 +20,28 @@ type Observation struct {
 	Item      string `json:"item"`
 	Location  string `json:"location"`
 	Quantity  int    `json:"quantity"`
+	Proceeds  int    `json:"proceeds,omitempty"`
 }
 
 // Statement is a speaker's structured assertion inside speech (never an objective world fact).
 type Statement struct {
 	Topic     string `json:"topic"`
+	Modality  string `json:"modality,omitempty"`
 	SubjectID string `json:"subject_id,omitempty"`
 	ObjectID  string `json:"object_id,omitempty"`
 	CaseID    int64  `json:"case_id,omitempty"`
 	Item      string `json:"item"`
 	Location  string `json:"location"`
 	Quantity  int    `json:"quantity"`
+	Proceeds  int    `json:"proceeds,omitempty"`
 }
 
 type Memory struct {
 	search       *memorySearchCache
 	BasisEventID int64        `json:"basis_event_id,omitempty"`
+	FactEventID  int64        `json:"fact_event_id,omitempty"`
+	CauseEventID int64        `json:"cause_event_id,omitempty"`
+	WitnessID    string       `json:"witness_id,omitempty"`
 	RootEventID  int64        `json:"root_event_id"`
 	Observation  *Observation `json:"observation,omitempty"`
 	Statement    *Statement   `json:"statement,omitempty"`
@@ -111,6 +117,9 @@ type Actor struct {
 	Dead             bool              `json:"dead,omitempty"`
 	DeathCause       string            `json:"death_cause,omitempty"`
 	DeathTick        int64             `json:"death_tick,omitempty"`
+	DeathEventID     int64             `json:"death_event_id,omitempty"`
+	EstateSettled    bool              `json:"estate_settled,omitempty"`
+	KnownHomicides   []int64           `json:"known_homicides,omitempty"`
 	WoundedTracked   bool              `json:"wounded_tracked,omitempty"`
 	JailedUntil      int64             `json:"jailed_until,omitempty"`
 	RestUntil        int64             `json:"rest_until,omitempty"`
@@ -161,40 +170,42 @@ func SamePlace(a, b Actor) bool {
 }
 
 type World struct {
-	Production       ProductionState          `json:"production"`
-	Growth           []GrowthBatch            `json:"growth,omitempty"`
-	Shipments        []Shipment               `json:"shipments,omitempty"`
-	FreightUsage     *FreightCapacityUsage    `json:"freight_usage,omitempty"`
-	Continuity       *ContinuityState         `json:"continuity,omitempty"`
-	Polities         *PolityNetwork           `json:"polities,omitempty"`
-	ID               string                   `json:"id"`
-	Tick             int64                    `json:"tick"`
-	NextID           int64                    `json:"next_id"`
-	Map              WorldMap                 `json:"map"`
-	Catalog          Catalog                  `json:"catalog"`
-	Factions         []Faction                `json:"factions"`
-	Houses           []House                  `json:"houses"`
-	Actors           []Actor                  `json:"actors"`
-	Offers           []Offer                  `json:"offers,omitempty"`
-	Cohorts          []PopulationCohort       `json:"cohorts,omitempty"`
-	DistrictStates   map[string]DistrictState `json:"district_states,omitempty"`
-	DeathsByCause    map[string]int64         `json:"deaths_by_cause,omitempty"`
-	TotalBirthsCount int64                    `json:"total_births_count,omitempty"`
-	PublicTreasury   int64                    `json:"public_treasury,omitempty"`
-	TreasuryLedger   TreasuryLedger           `json:"treasury_ledger,omitempty"`
-	MarketCredit     *MarketCreditState       `json:"market_credit,omitempty"`
-	Relations        *RelationEvoState        `json:"relations,omitempty"`
-	JusticeRevolt    *JusticeRevoltState      `json:"justice_revolt,omitempty"`
-	SpotlightRumor    *SpotlightRumorState     `json:"spotlight_rumor,omitempty"`
-	ActiveEffects     []ActiveEffect           `json:"active_effects,omitempty"`
-	ActiveWorldEvents []ActiveWorldEvent       `json:"active_world_events,omitempty"`
-	Parties           []Party                  `json:"parties,omitempty"`
-	Diplomacy         *DiplomacyState          `json:"diplomacy,omitempty"`
-	Secrets           []ActorSecret            `json:"secrets,omitempty"`
-	FlowGrid          *FlowGridState           `json:"flow_grid,omitempty"`
-	LedgerAudit      *LedgerAuditState        `json:"ledger_audit,omitempty"`
-	Knowledge        *KnowledgeBook           `json:"knowledge,omitempty"`
-	WorldLaws        map[string]int           `json:"world_laws,omitempty"`
+	Production          ProductionState          `json:"production"`
+	Growth              []GrowthBatch            `json:"growth,omitempty"`
+	Shipments           []Shipment               `json:"shipments,omitempty"`
+	FreightUsage        *FreightCapacityUsage    `json:"freight_usage,omitempty"`
+	Continuity          *ContinuityState         `json:"continuity,omitempty"`
+	Polities            *PolityNetwork           `json:"polities,omitempty"`
+	ID                  string                   `json:"id"`
+	Tick                int64                    `json:"tick"`
+	NextID              int64                    `json:"next_id"`
+	Map                 WorldMap                 `json:"map"`
+	Catalog             Catalog                  `json:"catalog"`
+	Factions            []Faction                `json:"factions"`
+	Houses              []House                  `json:"houses"`
+	Actors              []Actor                  `json:"actors"`
+	Offers              []Offer                  `json:"offers,omitempty"`
+	Cohorts             []PopulationCohort       `json:"cohorts,omitempty"`
+	DistrictStates      map[string]DistrictState `json:"district_states,omitempty"`
+	DeathsByCause       map[string]int64         `json:"deaths_by_cause,omitempty"`
+	TotalBirthsCount    int64                    `json:"total_births_count,omitempty"`
+	PublicTreasury      int64                    `json:"public_treasury,omitempty"`
+	TreasuryLedger      TreasuryLedger           `json:"treasury_ledger,omitempty"`
+	MarketCredit        *MarketCreditState       `json:"market_credit,omitempty"`
+	Relations           *RelationEvoState        `json:"relations,omitempty"`
+	JusticeRevolt       *JusticeRevoltState      `json:"justice_revolt,omitempty"`
+	SpotlightRumor      *SpotlightRumorState     `json:"spotlight_rumor,omitempty"`
+	ActiveEffects       []ActiveEffect           `json:"active_effects,omitempty"`
+	ActiveWorldEvents   []ActiveWorldEvent       `json:"active_world_events,omitempty"`
+	WorldEventLastEnded map[string]int64         `json:"world_event_last_ended,omitempty"`
+	Parties             []Party                  `json:"parties,omitempty"`
+	Diplomacy           *DiplomacyState          `json:"diplomacy,omitempty"`
+	Secrets             []ActorSecret            `json:"secrets,omitempty"`
+	FlowGrid            *FlowGridState           `json:"flow_grid,omitempty"`
+	LedgerAudit         *LedgerAuditState        `json:"ledger_audit,omitempty"`
+	Knowledge           *KnowledgeBook           `json:"knowledge,omitempty"`
+	GoldenFinger        *GoldenFingerState       `json:"golden_finger,omitempty"`
+	WorldLaws           map[string]int           `json:"world_laws,omitempty"`
 }
 
 type Action struct {
@@ -233,20 +244,22 @@ type Event struct {
 }
 
 type Neighbor struct {
-	ID          string         `json:"id"`
-	Name        string         `json:"name"`
-	Role        string         `json:"role"`
-	FormID      string         `json:"form_id,omitempty"`
-	PowerTier   int            `json:"power_tier,omitempty"`
-	CombatPower int            `json:"combat_power,omitempty"`
-	Skills      map[string]int `json:"skills,omitempty"`
-	Tags        []string       `json:"tags"`
-	Personality string         `json:"personality,omitempty"`
-	Hobbies     []string       `json:"hobbies,omitempty"`
-	Level       int            `json:"level"`
-	Health      int            `json:"health"`
-	Sleeping    bool           `json:"sleeping,omitempty"`
-	Jailed      bool           `json:"jailed,omitempty"`
+	ID              string         `json:"id"`
+	Name            string         `json:"name"`
+	Role            string         `json:"role"`
+	FormID          string         `json:"form_id,omitempty"`
+	PowerTier       int            `json:"power_tier,omitempty"`
+	CombatPower     int            `json:"combat_power,omitempty"`
+	Guilds          []string       `json:"guilds,omitempty"`
+	Skills          map[string]int `json:"skills,omitempty"`
+	Tags            []string       `json:"tags"`
+	Personality     string         `json:"personality,omitempty"`
+	Hobbies         []string       `json:"hobbies,omitempty"`
+	Level           int            `json:"level"`
+	Health          int            `json:"health"`
+	Sleeping        bool           `json:"sleeping,omitempty"`
+	Jailed          bool           `json:"jailed,omitempty"`
+	FactionRelation string         `json:"faction_relation,omitempty"`
 }
 
 type RoadView struct {
@@ -303,7 +316,13 @@ type Perception struct {
 	ActiveEffects          []ActiveEffect        `json:"active_effects,omitempty"`
 	ActiveWorldEvents      []ActiveWorldEvent    `json:"active_world_events,omitempty"`
 	Parties                []Party               `json:"parties,omitempty"`
+	LedFactions            []string              `json:"led_factions,omitempty"`
 	FactionDiplomacy       []FactionDiplomacy    `json:"faction_diplomacy,omitempty"`
+	CaseActions            []Action              `json:"case_actions,omitempty"`
+	PartyReady             bool                  `json:"party_ready,omitempty"`
+	ExtortionTargets       []string              `json:"extortion_targets,omitempty"`
+	LeadershipChallenges   []string              `json:"leadership_challenges,omitempty"`
+	BlackmailActions       []Action              `json:"blackmail_actions,omitempty"`
 	KnownSecrets           []ActorSecret         `json:"known_secrets,omitempty"`
 	Offers                 []Offer               `json:"offers,omitempty"`
 	Interactions           []InteractionView     `json:"interactions,omitempty"`
@@ -314,7 +333,9 @@ type Perception struct {
 	OverdueHouseID         string                `json:"overdue_house_id,omitempty"`
 	Married                bool                  `json:"married,omitempty"`
 	EligibleSpouseIDs      []string              `json:"eligible_spouse_ids,omitempty"`
+	EligibleBondIDs        []string              `json:"eligible_bond_ids,omitempty"`
 	ActiveGrudgeTargets    []string              `json:"active_grudge_targets,omitempty"`
+	ActiveGoldenFingers    []GoldenFingerView    `json:"active_golden_fingers,omitempty"`
 	MediationActions       []Action              `json:"mediation_actions,omitempty"`
 	GrowthCareActions      []Action              `json:"growth_care_actions,omitempty"`
 	ExpectedCraftYield     map[string]int        `json:"expected_craft_yield,omitempty"`
@@ -326,6 +347,7 @@ type Perception struct {
 	DistrictGrievance      int                   `json:"district_grievance,omitempty"`
 	KnownTechs             []string              `json:"known_techs,omitempty"`
 	WorldLaws              map[string]int        `json:"world_laws,omitempty"`
+	FlowEdges              []FlowEdge            `json:"flow_edges,omitempty"`
 	Map                    WorldMap              `json:"-"`
 	Catalog                Catalog               `json:"-"`
 }
@@ -419,6 +441,7 @@ func CombatPowerWithCatalog(cat Catalog, a Actor) int {
 			}
 		}
 	}
+	power += cat.GoldenFingerCombatBonus(a)
 	return power
 }
 
@@ -869,6 +892,11 @@ func appendUnique(list []string, value string) []string {
 }
 
 func (w *World) View(id string) Perception {
+	for i := range w.Actors {
+		if w.Actors[i].ID == id {
+			return w.viewIndexed(i, w.buildStepIndex())
+		}
+	}
 	a := CloneActor(*w.actor(id))
 	if a.Items == nil {
 		a.Items = map[string]int{}
@@ -953,6 +981,9 @@ func (w *World) View(id string) Perception {
 
 	if a.InsideHouse == "" {
 		for _, r := range w.Map.NeighborsOf(a.Location) {
+			if closed, _ := w.isRouteSevered(a.Location, r.To, r.Medium, ""); closed {
+				continue
+			}
 			effTicks, effEnergy := w.effectiveRoadCost(r)
 			p.Roads = append(p.Roads, RoadView{
 				To:          r.To,
@@ -964,7 +995,7 @@ func (w *World) View(id string) Perception {
 		if len(w.Map.Venues) > 0 {
 			p.Roads = nil
 		}
-		p.VenueRoutes = buildVenueRouteViews(p.Map, p.Catalog, w.DistrictStates, w.actorWithEffectTags(a))
+		p.VenueRoutes = w.actorVenueRoutes(a)
 	}
 
 	for _, b := range w.Actors {
@@ -974,15 +1005,16 @@ func (w *World) View(id string) Perception {
 				Name:        b.Name,
 				Role:        b.Role,
 				FormID:      b.FormID,
-				PowerTier:   w.Catalog.ActorPowerTier(b),
-				CombatPower: CombatPowerWithCatalog(w.Catalog, b),
+				PowerTier:   w.Catalog.PerceivedPowerTier(b),
+				CombatPower: w.Catalog.PerceivedCombatPower(b),
 				Skills:      cloneIntMap(b.Skills),
+				Guilds:      append([]string(nil), b.Guilds...),
 				Tags:        append([]string(nil), w.neighborEffectiveTags(b)...),
 				Personality: b.Personality,
 				Hobbies:     append([]string(nil), b.Hobbies...),
 				Level:       b.Level,
 				Health:      b.Health,
-				Sleeping:    b.Task != nil && b.Task.Action.Kind == "sleep",
+				Sleeping:    b.Task != nil && (b.Task.Action.Kind == "sleep" || b.Task.Dormant),
 				Jailed:      b.JailedUntil > w.Tick,
 			})
 		}
@@ -1001,6 +1033,7 @@ func (w *World) View(id string) Perception {
 			p.Offers = append(p.Offers, o)
 		}
 	}
+	p.ActiveGoldenFingers = w.goldenFingerViewsFor(p.Self)
 	w.applyPerceptionEvoHints(&p)
 	recallPerceptionMemories(&p)
 	return p
@@ -1148,23 +1181,65 @@ func (w *World) applyPerceptionEvoHintsWithAgreements(p *Perception, agreements 
 				p.EligibleSpouseIDs = append(p.EligibleSpouseIDs, nb.ID)
 			}
 		}
+		for _, nb := range p.Nearby {
+			if nb.Jailed {
+				continue
+			}
+			if kA != nil && (kA.SpouseID == nb.ID || ActorHasTag(kA.ParentIDs, nb.ID) || ActorHasTag(kA.ChildIDs, nb.ID) || ActorHasTag(kA.SwornIDs, nb.ID)) {
+				continue
+			}
+			if kB := w.Relations.Kinship[nb.ID]; kB != nil && ActorHasTag(kB.SwornIDs, a.ID) {
+				continue
+			}
+			p.EligibleBondIDs = append(p.EligibleBondIDs, nb.ID)
+		}
 		p.MediationActions = w.mediationActions(a)
 		for _, g := range w.Relations.Grudges {
 			if g.Resolved {
 				continue
 			}
-			if g.AggrievedID == a.ID && g.OffenderID != "" {
+			if g.OffenderID != "" && w.Relations.matchesAggrieved(&a, g) && actorKnowsAboutGrudge(a, g) {
 				p.ActiveGrudgeTargets = appendUnique(p.ActiveGrudgeTargets, g.OffenderID)
 			}
 		}
+	} else {
+		for _, nb := range p.Nearby {
+			if !nb.Jailed {
+				p.EligibleBondIDs = append(p.EligibleBondIDs, nb.ID)
+			}
+		}
 	}
+	p.LedFactions = w.diplomacyLeaderFactions(a)
+	p.PartyReady = w.partyReadyToDepart(a)
+	if w.FlowGrid != nil && len(w.FlowGrid.Edges) > 0 {
+		p.FlowEdges = append([]FlowEdge(nil), w.FlowGrid.Edges...)
+	}
+	if w.Relations != nil {
+		for _, id := range a.Guilds {
+			if w.canChallengeLeadership(a, id) {
+				p.LeadershipChallenges = append(p.LeadershipChallenges, id)
+			}
+		}
+	}
+	canExtort := w.ActorCapabilities(a)["extort"]
+	for i := range p.Nearby {
+		if peer := w.actor(p.Nearby[i].ID); peer != nil {
+			p.Nearby[i].FactionRelation = w.actorFactionRelation(a, *peer)
+			if canExtort && peer.Money >= 2 && !w.Catalog.IsOutlawTags(peer.IdentityTags()) &&
+				w.previewOffenseAssessment(*peer, a, "extort", 15, w.extortionDemand(a, *peer), peer.Money, 0, "firm").Outcome != "breaking_point" {
+				p.ExtortionTargets = append(p.ExtortionTargets, peer.ID)
+			}
+		}
+	}
+	p.CaseActions = w.perceivedCaseActions(a, p.Nearby)
+	p.BlackmailActions = w.perceivedBlackmailActions(a, p.KnownSecrets, p.Nearby)
 	if w.JusticeRevolt != nil {
 		p.DistrictGrievance = w.JusticeRevolt.Grievance(a.Location)
 		leads := ActorKnownWrongfulLeads(a)
 		if len(leads) > 0 {
 			for i := len(w.JusticeRevolt.CourtCases) - 1; i >= 0; i-- {
 				cc := w.JusticeRevolt.CourtCases[i]
-				if cc.Status != "convicted" || !cc.Wrongful || cc.District != a.Location {
+				if (cc.Status != "convicted" && cc.Status != "served") || !cc.Wrongful || cc.District != a.Location {
 					continue
 				}
 				if lead, ok := matchKnownLeadToCourtCase(leads, cc); ok {
@@ -1198,99 +1273,53 @@ func actorKnowsAboutGrudge(self Actor, g GrudgeRecord) bool {
 			(g.RootEventID != 0 && (m.EventID == g.RootEventID || m.RootEventID == g.RootEventID)) {
 			return true
 		}
-		if (m.Source == g.OffenderID && m.TargetID == g.AggrievedID) || (m.Source == g.AggrievedID && m.TargetID == g.OffenderID) {
-			return true
-		}
+	}
+	return false
+}
+
+func criminalSecretKind(kind string) bool {
+	switch kind {
+	case "covert_bribe", "illicit_gain", "covert_complicity", "offense":
+		return true
 	}
 	return false
 }
 
 func memoryImplicatesCorruption(m Memory, selfID, suspectID string) bool {
-	if suspectID == "" || m.Kind == "action_failed" {
+	if suspectID == "" || suspectID == selfID {
 		return false
 	}
-	if m.Observation != nil && (m.Observation.Kind == "corruption" || m.Observation.Kind == "wrongful_conviction") && m.Observation.SubjectID == suspectID {
-		return true
+	if o := m.Observation; o != nil && o.SubjectID == suspectID {
+		return o.Kind == "unlawful_attack" || o.Kind == "corruption" || o.Kind == "wrongful_conviction" ||
+			secretReportTopic(o.Kind) && criminalSecretKind(o.Item)
 	}
-	if m.Kind == "bribed" && m.TargetID == suspectID {
-		return true
-	}
-	if m.Kind == "wrongful_conviction" && m.Source == suspectID {
-		return true
-	}
-	if m.Kind == "speech" && m.Source != selfID && m.Statement != nil {
-		switch m.Statement.Topic {
-		case "corruption", "bribe", "scandal", "wrongful_conviction":
-			if m.Statement.SubjectID == suspectID {
-				return true
-			}
-		}
+	if (m.Kind == "speech" || m.Kind == "channel_message") && m.Source != selfID && m.FactEventID > 0 && m.Statement != nil {
+		report := m.Statement
+		return report.SubjectID == suspectID && (report.Topic == "unlawful_attack" || report.Topic == "corruption" || report.Topic == "wrongful_conviction" ||
+			secretReportTopic(report.Topic) && criminalSecretKind(report.Item))
 	}
 	return false
 }
 
-func isAuditRefutingMemory(m Memory, suspectID string) bool {
-	if m.TargetID != suspectID {
-		return false
-	}
-	if m.Kind == "corruption_purged" || m.Kind == "audit_cleared" {
-		return true
-	}
-	return m.Kind == "action_failed" && strings.Contains(m.Text, "no illicit gain")
-}
-
-// ActorCorruptionEvidence reports whether self possesses witnessed or spoken epistemic evidence
-// implicating suspectID in corruption/framing that has not already been audited since that memory.
-func ActorCorruptionEvidence(self Actor, suspectID string) (int64, bool) {
-	if suspectID == "" || suspectID == self.ID {
-		return 0, false
-	}
-	latestResolvedTick := int64(-1)
-	for i := len(self.Memories) - 1; i >= 0; i-- {
-		m := self.Memories[i]
-		if isAuditRefutingMemory(m, suspectID) {
-			if m.Tick > latestResolvedTick {
-				latestResolvedTick = m.Tick
-			}
-		}
-	}
-	for i := len(self.Memories) - 1; i >= 0; i-- {
-		m := self.Memories[i]
-		if latestResolvedTick >= 0 && m.Tick < latestResolvedTick {
-			continue
-		}
-		if latestResolvedTick >= 0 && m.Tick == latestResolvedTick {
-			laterResolved := false
-			for j := i + 1; j < len(self.Memories); j++ {
-				if isAuditRefutingMemory(self.Memories[j], suspectID) {
-					laterResolved = true
-					break
-				}
-			}
-			if laterResolved {
-				continue
-			}
-		}
-		if memoryImplicatesCorruption(m, self.ID, suspectID) {
-			return m.EventID, true
-		}
-	}
-	return 0, false
-}
-
-// ActorCorruptionEvidenceWithBasis verifies that basisEventID in self.Memories implicates suspectID.
 func ActorCorruptionEvidenceWithBasis(self Actor, suspectID string, basisEventID int64) bool {
-	if basisEventID == 0 {
-		_, ok := ActorCorruptionEvidence(self, suspectID)
-		return ok
+	_, ok := corruptionEvidence(self, suspectID, basisEventID)
+	return ok
+}
+
+func corruptionEvidence(self Actor, suspectID string, basisID int64) (Memory, bool) {
+	settled := map[int64]bool{}
+	for _, m := range self.Memories {
+		if m.Kind == "corruption_purged" && m.TargetID == suspectID {
+			settled[m.RootEventID] = true
+		}
 	}
 	for i := len(self.Memories) - 1; i >= 0; i-- {
 		m := self.Memories[i]
-		if m.EventID == basisEventID {
-			return memoryImplicatesCorruption(m, self.ID, suspectID)
+		if !settled[m.RootEventID] && (basisID == 0 || m.EventID == basisID) && memoryImplicatesCorruption(m, self.ID, suspectID) {
+			return m, true
 		}
 	}
-	return false
+	return Memory{}, false
 }
 
 // ActorKnownWrongfulLeads extracts wrongful-conviction leads personally witnessed or heard via speech by self.
@@ -1321,7 +1350,7 @@ func ActorKnownWrongfulLeads(self Actor) []KnownWrongfulLead {
 				SuspectID:    m.TargetID,
 			}
 			valid = true
-		} else if m.Kind == "speech" && m.Source != self.ID && m.Statement != nil && m.Statement.Topic == "wrongful_conviction" {
+		} else if (m.Kind == "speech" || m.Kind == "channel_message") && m.Source != self.ID && m.FactEventID > 0 && m.Statement != nil && m.Statement.Topic == "wrongful_conviction" {
 			lead = KnownWrongfulLead{
 				BasisEventID: m.EventID,
 				CaseID:       m.Statement.CaseID,
@@ -1337,7 +1366,8 @@ func ActorKnownWrongfulLeads(self Actor) []KnownWrongfulLead {
 		resolvedLater := false
 		for j := i + 1; j < len(self.Memories); j++ {
 			mj := self.Memories[j]
-			if mj.Kind == "conviction_overturned" && (lead.SuspectID != "" && mj.TargetID == lead.SuspectID) {
+			if mj.Kind == "conviction_overturned" && ((lead.CaseID > 0 && mj.Observation != nil && mj.Observation.CaseID == lead.CaseID) ||
+				lead.CaseID == 0 && lead.SuspectID != "" && mj.TargetID == lead.SuspectID) {
 				resolvedLater = true
 				break
 			}
@@ -1352,13 +1382,13 @@ func ActorKnownWrongfulLeads(self Actor) []KnownWrongfulLead {
 		if lead.CaseID > 0 && seenCase[lead.CaseID] {
 			continue
 		}
-		if lead.SuspectID != "" && seenSuspect[lead.SuspectID] {
+		if lead.CaseID == 0 && lead.SuspectID != "" && seenSuspect[lead.SuspectID] {
 			continue
 		}
 		if lead.CaseID > 0 {
 			seenCase[lead.CaseID] = true
 		}
-		if lead.SuspectID != "" {
+		if lead.CaseID == 0 && lead.SuspectID != "" {
 			seenSuspect[lead.SuspectID] = true
 		}
 		out = append(out, lead)
@@ -1368,8 +1398,11 @@ func ActorKnownWrongfulLeads(self Actor) []KnownWrongfulLead {
 
 func matchKnownLeadToCourtCase(leads []KnownWrongfulLead, cc CourtCase) (KnownWrongfulLead, bool) {
 	for _, lead := range leads {
-		if lead.CaseID > 0 && lead.CaseID == cc.ID {
-			return lead, true
+		if lead.CaseID > 0 {
+			if lead.CaseID == cc.ID {
+				return lead, true
+			}
+			continue
 		}
 		if lead.SuspectID != "" && lead.SuspectID == cc.SuspectID && (lead.District == "" || lead.District == cc.District) {
 			return lead, true
@@ -1509,15 +1542,15 @@ func (w *World) Step(ctx context.Context, d Decider) ([]Event, error) {
 	events = append(events, w.stepAdoptedFacilities()...)
 	events = append(events, w.stepStateSlotsAndForms()...)
 	events = append(events, w.stepActorPhysiologyAndLifecycle()...)
-	// Release prisoners who have completed their Yamen jail sentence.
+	// Release prisoners who have completed their case sentence.
 	for i := range w.Actors {
 		a := &w.Actors[i]
 		if !a.Dead && a.JailedUntil > 0 && w.Tick >= a.JailedUntil {
 			a.JailedUntil = 0
 			a.RestUntil = w.Tick + 48
-			a.Tags = removeString(a.Tags, "outlaw")
+			w.settleReleasedCases(a.ID)
 			events = append(events, w.record(a, Action{Kind: "wait"}, "released_from_jail", map[string]any{
-				"text": fmt.Sprintf("%s served their Yamen jail sentence and was released", a.Name),
+				"text": fmt.Sprintf("%s served their sentence and was released", a.Name),
 			}))
 		}
 	}
@@ -1540,6 +1573,7 @@ func (w *World) Step(ctx context.Context, d Decider) ([]Event, error) {
 	events = append(events, w.stepParties()...)
 	events = append(events, w.stepDiplomacy(events)...)
 	events = append(events, w.stepAmbitionsAndSecrets(events)...)
+	events = append(events, w.stepGoldenFingers(events)...)
 
 	for i := range w.Actors {
 		w.refreshActor(&w.Actors[i])
@@ -1587,17 +1621,27 @@ func (w *World) Step(ctx context.Context, d Decider) ([]Event, error) {
 func (w *World) record(a *Actor, x Action, kind string, data map[string]any, observers ...*Actor) Event {
 	e := Event{ID: w.NextID, Tick: w.Tick, ActorID: a.ID, TargetID: x.TargetID, Kind: kind, Action: x, Payload: data}
 	w.NextID++
-	root := e.ID
-	if x.BasisEventID != 0 {
-		for _, m := range a.Memories {
-			if m.EventID == x.BasisEventID {
-				root = m.RootEventID
-				break
-			}
-		}
+	root := payloadInt64(data, "root_event_id")
+	if root == 0 {
+		root = citedRoot(a.Memories, x.BasisEventID)
+	}
+	if root == 0 {
+		root = e.ID
 	}
 	data["basis_event_id"] = x.BasisEventID
 	data["root_event_id"] = root
+	switch kind {
+	case "bribed", "stolen", "raided", "steal_foiled", "wrongful_conviction", "extorted", "party_betrayed", "blackmailed":
+		if _, exists := data["witnesses"]; !exists {
+			viewers := w.awakeSamePlaceObservers(*a, a.ID)
+			witnesses := make([]string, 0, len(viewers))
+			for _, actor := range viewers {
+				witnesses = append(witnesses, actor.ID)
+			}
+			data["witnesses"] = witnesses
+			data["district"] = a.Location
+		}
+	}
 	m := Memory{
 		Kind:         kind,
 		Tick:         w.Tick,
@@ -1608,12 +1652,17 @@ func (w *World) record(a *Actor, x Action, kind string, data map[string]any, obs
 		TargetID:     x.TargetID,
 		Text:         fmt.Sprint(data["text"]),
 		BasisEventID: x.BasisEventID,
+		CauseEventID: payloadInt64(data, "cause_event_id"),
 		RootEventID:  root,
 	}
 	if kind == "speech" && x.Statement != nil {
 		v := *x.Statement
 		m.Statement = &v
 		data["statement"] = v
+		m.FactEventID, m.WitnessID = citedReport(a, x)
+		data["report_source_id"] = m.WitnessID
+		data["district"] = a.Location
+		data["fact_event_id"], data["witness_id"] = m.FactEventID, m.WitnessID
 	}
 	if obs, ok := data["observation"].(Observation); ok {
 		v := obs
@@ -1639,6 +1688,9 @@ func (w *World) grantSkillXP(a *Actor, x Action, skillID string, xp int) []Event
 	spec, ok := w.Catalog.Skills[skillID]
 	if !ok {
 		return nil
+	}
+	if mult := w.Catalog.GoldenFingerSkillXPMultiplier(*a); mult > 100 {
+		xp = maxInt(1, (xp*mult+50)/100)
 	}
 	if a.Skills == nil {
 		a.Skills = map[string]int{}
@@ -1786,12 +1838,22 @@ func canonicalDeathCause(cause string) string {
 	}
 }
 
-func (w *World) markDeadIfZero(target *Actor, killer *Actor, x Action, cause string) []Event {
+func (w *World) markDeadIfZero(target *Actor, killer *Actor, x Action, cause string, direct ...Event) []Event {
 	if target == nil || target.Dead || target.Health > 0 {
 		return nil
 	}
+	deathData := map[string]any{}
+	if len(direct) > 0 {
+		deathData["cause_event_id"] = direct[0].ID
+		root := payloadInt64(direct[0].Payload, "root_event_id")
+		if root == 0 {
+			root = direct[0].ID
+		}
+		deathData["root_event_id"] = root
+	}
 	wasSick := target.DiseaseID != ""
 	wasJailed := target.JailedUntil > w.Tick
+	targetSnapshot := *target
 	if c := w.storedActorCohort(target.ID); c != nil && c.Population == 1 {
 		w.transferLastCohortAssets(c, target)
 	}
@@ -1828,8 +1890,6 @@ func (w *World) markDeadIfZero(target *Actor, killer *Actor, x Action, cause str
 	if killer != nil && killer.ID != target.ID {
 		observers = append(observers, killer)
 	}
-	targetSnapshot := *target
-	targetSnapshot.Dead = false
 	for i := range w.Actors {
 		o := &w.Actors[i]
 		if o.ID == target.ID || o.Dead || w.Tick < o.JailedUntil {
@@ -1854,7 +1914,8 @@ func (w *World) markDeadIfZero(target *Actor, killer *Actor, x Action, cause str
 		Location:  target.Location,
 		Quantity:  1,
 	}
-	ev := w.record(target, x, "actor_died", map[string]any{
+	x.TargetID = killerID
+	for key, value := range map[string]any{
 		"text":        fmt.Sprintf("%s died from %s (%s)", target.Name, cause, killerName),
 		"killer_id":   killerID,
 		"cause":       canon,
@@ -1864,7 +1925,11 @@ func (w *World) markDeadIfZero(target *Actor, killer *Actor, x Action, cause str
 		"was_jailed":  wasJailed,
 		"witnesses":   witnessIDs,
 		"observation": obs,
-	}, observers...)
+	} {
+		deathData[key] = value
+	}
+	ev := w.record(target, x, "actor_died", deathData, observers...)
+	target.DeathEventID = ev.ID
 	// Also notify qualifying remote sensory observers (e.g. divine_sense / orbital_sensor) respecting shielding.
 	if len(w.Catalog.SensoryModes) > 0 {
 		for i := range w.Actors {
@@ -1879,21 +1944,20 @@ func (w *World) markDeadIfZero(target *Actor, killer *Actor, x Action, cause str
 				sObs := obs
 				sObs.Modality = mod
 				mem := Memory{
-					Kind:        "actor_died",
-					Tick:        w.Tick,
-					EventID:     ev.ID,
-					RootEventID: ev.ID,
-					Source:      target.ID,
-					SourceRole:  target.Role,
-					TargetID:    killerID,
-					Text:        fmt.Sprintf("Perceived via %s: %s died from %s (%s)", mod, target.Name, cause, killerName),
-					Observation: &sObs,
+					Kind:         "actor_died",
+					Tick:         w.Tick,
+					EventID:      ev.ID,
+					RootEventID:  payloadInt64(ev.Payload, "root_event_id"),
+					CauseEventID: payloadInt64(ev.Payload, "cause_event_id"),
+					Source:       target.ID,
+					SourceRole:   target.Role,
+					TargetID:     killerID,
+					Text:         fmt.Sprintf("Perceived via %s: %s died from %s (%s)", mod, target.Name, cause, killerName),
+					Observation:  &sObs,
 				}
 				o.Memories = appendMemory(o.Memories, mem)
-				witnessIDs = append(witnessIDs, o.ID)
 			}
 		}
-		ev.Payload["witnesses"] = witnessIDs
 	}
 	// Settle inheritance before deciding where any heirless estate goes. Observe
 	// marks this death event, so the end-of-step observer cannot settle it twice.
@@ -1917,8 +1981,10 @@ func (w *World) applySleepTick(a *Actor, carryTenths int) (newCarry int, factors
 	}
 	if a.Health < MaxHealth && !a.Dead && a.Hunger <= 2 {
 		if h != nil {
-			a.Health++
-		} else if w.Tick%2 == 0 {
+			if w.Tick%4 == 0 {
+				a.Health++
+			}
+		} else if w.Tick%8 == 0 {
 			a.Health++
 		}
 		if a.Health > MaxHealth {
@@ -2005,6 +2071,10 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 		if road, ok := w.Map.RoadBetween(fromDistrict, x.Location); ok && road.Medium != "" {
 			medium = road.Medium
 		}
+		if closed, reason := w.isRouteSevered(fromDistrict, x.Location, medium, ""); closed {
+			return []Event{w.record(a, x, "travel_interrupted", map[string]any{"text": reason})}
+		}
+		escort := w.partyEscortRiskReductionPct(*a, x.Location)
 		a.Location = x.Location
 		if a.VenueID != "" {
 			if v, ok := w.Map.VenueByID(a.VenueID); !ok || (v.DistrictID != "" && v.DistrictID != x.Location) {
@@ -2014,7 +2084,7 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 		events := []Event{w.record(a, x, "moved", map[string]any{
 			"text": a.Name + " walked along the road to " + x.Location,
 		})}
-		return append(events, w.checkActorTransitHazard(a, x, fromDistrict, a.Location, medium, "")...)
+		return append(events, w.checkActorTransitHazard(a, x, fromDistrict, a.Location, medium, "", escort)...)
 	case "move_venue":
 		return w.finishMoveVenue(a, t)
 	case "craft":
@@ -2129,32 +2199,24 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 		if enc == nil {
 			return nil
 		}
-		suppressed := 8 + (CombatPowerWithCatalog(w.Catalog, *a)+w.partyCombatSupportBonus(*a))/4
 		curAct := ds.ThreatActivity[enc.ID]
-		if suppressed > curAct {
-			suppressed = curAct
+		if curAct <= 0 {
+			return []Event{w.record(a, x, "action_failed", map[string]any{"text": "the tracked threat has already been suppressed"})}
 		}
-		dropQty := w.drawEncounterLoot(a.Location, *enc, int64(minInt(1, suppressed)), "act_hunt:"+a.ID)
+		suppressed := minInt(curAct, 8+(CombatPowerWithCatalog(w.Catalog, *a)+w.partyCombatSupportBonus(*a))/4)
+		dropQty := w.drawEncounterLoot(a.Location, *enc, 1, "act_hunt:"+a.ID)
 		ds = w.DistrictStates[a.Location]
 		ds.ThreatActivity[enc.ID] = curAct - suppressed
-		bounty := enc.BountyCoins
-		if ds.BountyPool > 0 {
-			claim := ds.BountyPool
-			if claim > enc.BountyCoins {
-				claim = enc.BountyCoins
-			}
-			ds.BountyPool -= claim
-			bounty += claim
+		base := enc.BountyCoins
+		bonus := minInt(ds.BountyPool, base)
+		bounty := base + bonus
+		funded := w.hasActiveCohorts()
+		if funded {
+			bounty = int(w.debitTreasury(int64(bounty), "bounty"))
 		}
-		if len(w.Cohorts) > 0 {
-			paid := int(w.debitTreasury(int64(bounty), "bounty"))
-			if ds.BountyPool > 0 && paid < bounty {
-				ds.BountyPool += (bounty - paid)
-			}
-			bounty = paid
-		}
+		ds.BountyPool -= maxInt(0, bounty-base)
 		w.DistrictStates[a.Location] = ds
-		w.adjustActorCurrency(a, "coins", int64(bounty), len(w.Cohorts) == 0)
+		w.adjustActorCurrency(a, "coins", int64(bounty), !funded)
 		if dropQty > 0 {
 			w.adjustActorItem(a, enc.RareDropItem, int(dropQty), true)
 		}
@@ -2162,7 +2224,7 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 			a.Health -= 4
 		}
 		a.RestUntil = w.Tick + 24
-		events := []Event{w.record(a, x, "threat_hunted", map[string]any{
+		data := map[string]any{
 			"text":         fmt.Sprintf("%s hunted %s in %s (-%d threat, +%d bounty coins, +%d %s)", a.Name, enc.Name, a.Location, suppressed, bounty, dropQty, enc.RareDropItem),
 			"district":     a.Location,
 			"threat_id":    enc.ID,
@@ -2171,8 +2233,16 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 			"bounty_coins": bounty,
 			"drop_item":    enc.RareDropItem,
 			"drop_qty":     dropQty,
-		})}
-		events = append(events, w.settlePartyRewardSplit(a, bounty, "threat_hunted")...)
+		}
+		for i := len(w.ActiveWorldEvents) - 1; i >= 0; i-- {
+			incident := w.ActiveWorldEvents[i]
+			if incident.DistrictID == a.Location && incident.InvasionThreatID == enc.ID && w.Tick < incident.ExpiresTick {
+				data["cause_event_id"], data["root_event_id"] = incident.RootEventID, incident.RootEventID
+				break
+			}
+		}
+		events := []Event{w.record(a, x, "threat_hunted", data)}
+		events = append(events, w.settlePartyRewardSplit(a, bounty, events[0])...)
 		return append(events, w.grantCombatXP(a, x, 8, 3)...)
 	case "perform_ritual":
 		var rit *RitualSpec
@@ -2286,6 +2356,14 @@ func (w *World) finishTask(a *Actor, t Task) []Event {
 }
 
 func (w *World) Apply(id string, x Action) []Event {
+	events := w.apply(id, x)
+	for _, event := range events {
+		events = append(events, w.captureActionSecrets(event)...)
+	}
+	return events
+}
+
+func (w *World) apply(id string, x Action) []Event {
 	a := w.actor(id)
 	if a == nil {
 		return nil
@@ -2312,7 +2390,7 @@ func (w *World) Apply(id string, x Action) []Event {
 		return fail("actor is dead")
 	}
 	if w.Tick < a.JailedUntil {
-		return fail("actor is imprisoned in the Yamen jail")
+		return fail("actor is in custody")
 	}
 	if a.Task != nil {
 		return fail("actor is already busy with " + a.Task.Action.Kind)
@@ -2384,6 +2462,20 @@ func (w *World) Apply(id string, x Action) []Event {
 		}
 		if ok, reason := a.Attributes.Meets(f.Requirements); !ok {
 			return fail("guild charter unmet: " + reason)
+		}
+		for _, gID := range a.Guilds {
+			if gID == f.ID {
+				continue
+			}
+			if w.AreFactionsAtWar(gID, f.ID) {
+				return fail("cannot join a faction at war with " + gID)
+			}
+			if w.Diplomacy != nil {
+				key, _, _ := diplomacyKey(gID, f.ID)
+				if rel := w.Diplomacy.Relations[key]; rel != nil && (rel.Stance == "hostile" || rel.RelationScore <= -30) {
+					return fail("cannot join hostile faction " + f.Name)
+				}
+			}
 		}
 		f.Members = append(f.Members, id)
 		a.Guilds = appendUnique(a.Guilds, f.ID)
@@ -2498,6 +2590,18 @@ func (w *World) Apply(id string, x Action) []Event {
 	case "set_ambition":
 		return w.applySetAmbition(a, x)
 
+	case "practice_skill":
+		spec, ok := w.Catalog.Skills[x.SkillID]
+		if !ok || a.Skills[x.SkillID] == 0 || a.Skills[x.SkillID] >= spec.EffectiveMaxLevel() || a.Energy < 4 {
+			return fail("practice requires a known skill below its maximum level and four energy")
+		}
+		a.Energy -= 4
+		events := emit("skill_practiced", fmt.Sprintf("%s practised %s", a.Name, spec.Name))
+		return append(events, w.grantSkillXP(a, x, x.SkillID, 4)...)
+
+	case "challenge_leadership":
+		return w.applyLeadershipChallenge(a, x)
+
 	case "investigate_actor":
 		return w.applyInvestigateActor(a, x)
 
@@ -2506,6 +2610,12 @@ func (w *World) Apply(id string, x Action) []Event {
 
 	case "expose_secret":
 		return w.applyExposeSecret(a, x)
+
+	case "gf_exchange":
+		return w.applyGFExchange(a, x)
+
+	case "gf_simulate":
+		return w.applyGFSimulate(a, x)
 
 	case "move":
 		if a.InsideHouse != "" {
@@ -2617,12 +2727,7 @@ func (w *World) Apply(id string, x Action) []Event {
 
 		itemID := x.Item
 		if itemID == "" {
-			for k, spec := range w.Catalog.Items {
-				if spec.Potable && a.Items[k] > 0 {
-					itemID = k
-					break
-				}
-			}
+			itemID = w.firstCarriedPotableItem(*a)
 			x.Item = itemID
 		}
 		spec, ok := w.Catalog.Items[itemID]
@@ -2681,7 +2786,8 @@ func (w *World) Apply(id string, x Action) []Event {
 		itemID := x.Item
 		if itemID == "" {
 			bestScore := 0
-			for k, spec := range w.Catalog.Items {
+			for _, k := range sortedProductionKeys(w.Catalog.Items) {
+				spec := w.Catalog.Items[k]
 				score := spec.MedicinalHeal + spec.DiseaseCure*15
 				if score > bestScore && a.Items[k] >= 1 {
 					bestScore = score
@@ -3039,69 +3145,47 @@ func (w *World) Apply(id string, x Action) []Event {
 		if b.Trust == nil {
 			b.Trust = map[string]int{}
 		}
-		if len(w.Catalog.CombatProfiles) > 0 || len(w.ActiveEffects) > 0 {
-			dmg, absorbed, immune, broken := w.resolveMultiDimCombatHit(*a, b, nil, x)
-			if dmg > b.Health {
-				dmg = b.Health
-			}
-			b.Health -= dmg
-			var interruptEvs []Event
-			if dmg > 0 && b.Health > 0 {
-				interruptEvs = w.interruptTaskOnDamage(b, "combat")
-			}
-			a.RestUntil = w.Tick + 32
-			b.Trust[a.ID] -= 2
-			ev := w.record(a, x, "attacked", map[string]any{
-				"text":           fmt.Sprintf("%s attacked %s (%d damage, %d absorbed, immune=%v)", a.Name, b.Name, dmg, absorbed, immune),
-				"damage":         dmg,
-				"absorbed":       absorbed,
-				"immune_blocked": immune,
-			}, append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)...)
-			events := append(broken, ev)
-			events = append(events, interruptEvs...)
-			events = append(events, w.grantCombatXP(a, x, 4, 1)...)
-			events = append(events, w.markDeadIfZero(b, a, x, "combat attack")...)
-			return events
-		}
 		atkPower := CombatPowerWithCatalog(w.Catalog, *a)
 		defPower := CombatPowerWithCatalog(w.Catalog, *b)
-		damage := 10 + (atkPower-defPower)/2
-		if damage < 3 {
-			damage = 3
-		}
-		if damage > 28 {
-			damage = 28
-		}
-		if damage > b.Health {
-			damage = b.Health
-		}
-		b.Health -= damage
-		recoil := 0
-		if defPower >= atkPower+20 && b.Health > 0 && a.Health > 1 {
-			recoil = minInt(14, (defPower-atkPower)/5)
-			if recoil >= a.Health {
-				recoil = a.Health - 1
+		stance := w.actorFactionRelation(*a, *b)
+		hasGrudge := w.Relations != nil && w.Relations.hasUnresolvedGrudge(a.ID, b.ID)
+		base := 0
+		profiles := len(w.Catalog.CombatProfiles) > 0 || len(w.ActiveEffects) > 0
+		if !profiles {
+			if (stance == "at_war" || hasGrudge) && atkPower >= defPower-10 {
+				base = maxInt(14, minInt(65, 22+(atkPower-defPower)))
+			} else {
+				base = maxInt(3, minInt(28, 10+(atkPower-defPower)/2))
 			}
+		}
+		damage, absorbed, immune, effects := w.applyMeleeHit(a, b, x, base)
+		recoil := 0
+		if !profiles && damage > 0 && defPower >= atkPower+20 && b.Health > 0 && a.Health > 1 {
+			recoil = minInt(a.Health-1, minInt(14, (defPower-atkPower)/5))
 			a.Health -= recoil
 		}
-		var interruptEvs []Event
-		if damage > 0 && b.Health > 0 {
-			interruptEvs = w.interruptTaskOnDamage(b, "combat")
+		if a.Health < 65 {
+			a.RestUntil = w.Tick + 4
 		}
-		a.RestUntil = w.Tick + 32
-		b.Trust[a.ID] -= 2
-		ev := w.record(a, x, "attacked", map[string]any{
-			"text":           fmt.Sprintf("%s attacked %s for %d damage", a.Name, b.Name, damage),
-			"damage":         damage,
-			"attacker_power": atkPower,
-			"defender_power": defPower,
-			"recoil":         recoil,
-		}, append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)...)
-		events := []Event{ev}
-		events = append(events, interruptEvs...)
-		events = append(events, w.grantCombatXP(a, x, 4, 1)...)
-		events = append(events, w.markDeadIfZero(b, a, x, "combat attack")...)
-		return events
+		if stance == "allied" {
+			b.Trust[a.ID] -= 4
+		} else {
+			b.Trust[a.ID] -= 2
+		}
+		data := map[string]any{
+			"text":   fmt.Sprintf("%s attacked %s (%d damage, %d absorbed, immune=%v)", a.Name, b.Name, damage, absorbed, immune),
+			"damage": damage, "attacker_power": atkPower, "defender_power": defPower,
+			"recoil": recoil, "absorbed": absorbed, "immune_blocked": immune,
+			"district": a.Location, "faction_relation": stance,
+		}
+		if stance != "at_war" {
+			data["observation"] = Observation{Kind: "unlawful_attack", Modality: "eyewitness",
+				SubjectID: a.ID, ObjectID: b.ID, Location: a.Location, Quantity: damage}
+		}
+		ev := w.record(a, x, "attacked", data, append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)...)
+		events := append(effects, ev)
+		events = append(events, w.finishMeleeHit(a, b, x, damage, "combat attack", ev)...)
+		return append(events, w.grantCombatXP(a, x, 4, 1)...)
 
 	case "spar":
 		if b == nil || b.ID == id || !SamePlace(*a, *b) || w.Tick < b.JailedUntil {
@@ -3152,6 +3236,9 @@ func (w *World) Apply(id string, x Action) []Event {
 			return fail("thief is injured or laying low to recuperate")
 		}
 		a.Energy -= 5
+		if b.Trust == nil {
+			b.Trust = map[string]int{}
+		}
 		env := w.Catalog.EffectiveEnvironment()
 		outlawTag := env.PrimaryOutlawTag()
 		stealth, maxCoins := w.Catalog.StealthBonus(*a)
@@ -3163,13 +3250,22 @@ func (w *World) Apply(id string, x Action) []Event {
 			vigilance += 8
 		}
 		stealProf := w.Catalog.BestProfessionForCapability(*a, "steal")
-		if stealth >= vigilance && (b.Money > 0 || len(b.Items) > 0) {
-			stolenCoins := b.Money
-			if stolenCoins > maxCoins {
-				stolenCoins = maxCoins
-			}
+		stolenCoins := minInt(b.Money, maxCoins)
+		couldSteal := stealth >= vigilance && (b.Money > 0 || len(b.Items) > 0)
+		victimAwake := w.partyMateAvailable(b)
+		if couldSteal && victimAwake {
+			preview := w.previewOffenseAssessment(*b, *a, "steal", 14, stolenCoins, b.Money, 0, "firm")
+			couldSteal = preview.Outcome != "breaking_point"
+		}
+		demand := stolenCoins
+		if !couldSteal && !victimAwake {
+			demand = 0
+		}
+		offense := w.AssessAndRecordOffense(*b, *a, "steal", 14, demand, b.Money, 0, "firm")
+		if couldSteal {
 			b.Money -= stolenCoins
 			a.Money += stolenCoins
+			a.IllicitGain += stolenCoins
 
 			stolenItem := w.Catalog.SelectLootItem(*b)
 			stolenQty := 0
@@ -3181,12 +3277,17 @@ func (w *World) Apply(id string, x Action) []Event {
 			a.Tags = appendUnique(a.Tags, outlawTag)
 			a.RestUntil = w.Tick + 32
 			b.Trust[a.ID] -= 2
+			var victimObservers []*Actor
+			if w.partyMateAvailable(b) {
+				victimObservers = append(victimObservers, b)
+			}
 			ev := w.record(a, x, "stolen", map[string]any{
 				"text":     fmt.Sprintf("%s stole %d coins and %d %s from %s", a.Name, stolenCoins, stolenQty, stolenItem, b.Name),
 				"coins":    stolenCoins,
 				"item":     stolenItem,
 				"quantity": stolenQty,
-			}, b)
+				"offense":  offense,
+			}, victimObservers...)
 			events := []Event{ev}
 			for _, sid := range sortedProductionKeys(a.Skills) {
 				if a.Skills[sid] > 0 {
@@ -3211,8 +3312,9 @@ func (w *World) Apply(id string, x Action) []Event {
 		a.RestUntil = w.Tick + 64
 		b.Trust[a.ID] -= 3
 		ev := w.record(a, x, "steal_foiled", map[string]any{
-			"text":   fmt.Sprintf("%s was caught trying to steal from %s (-%d health)", a.Name, b.Name, dmg),
-			"damage": dmg,
+			"text":    fmt.Sprintf("%s was caught trying to steal from %s (-%d health)", a.Name, b.Name, dmg),
+			"damage":  dmg,
+			"offense": offense,
 		}, append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)...)
 		if stealProf != "" {
 			return append([]Event{ev}, w.grantProfessionXP(a, x, stealProf, 2, 1)...)
@@ -3230,6 +3332,9 @@ func (w *World) Apply(id string, x Action) []Event {
 			return fail("raider is injured or recuperating after recent raid")
 		}
 		a.Energy -= 8
+		if b.Trust == nil {
+			b.Trust = map[string]int{}
+		}
 		env := w.Catalog.EffectiveEnvironment()
 		outlawTag := env.PrimaryOutlawTag()
 		atkPower := CombatPowerWithCatalog(w.Catalog, *a)
@@ -3260,8 +3365,10 @@ func (w *World) Apply(id string, x Action) []Event {
 			if lootCoins > maxCoins {
 				lootCoins = maxCoins
 			}
+			offense := w.AssessAndRecordOffense(*b, *a, "raid", 25+dmg, lootCoins, b.Money, 0, "hostile")
 			b.Money -= lootCoins
 			a.Money += lootCoins
+			a.IllicitGain += lootCoins
 
 			lootItem := w.Catalog.SelectLootItem(*b)
 			lootQty := 0
@@ -3276,15 +3383,17 @@ func (w *World) Apply(id string, x Action) []Event {
 				"coins":    lootCoins,
 				"item":     lootItem,
 				"quantity": lootQty,
+				"offense":  offense,
 				"damage":   dmg,
 			}, append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)...)
 			events := []Event{ev}
 			if profID != "" {
 				events = append(events, w.grantProfessionXP(a, x, profID, 8, 3)...)
 			}
-			events = append(events, w.markDeadIfZero(b, a, x, "armed raid")...)
+			events = append(events, w.markDeadIfZero(b, a, x, "armed raid", ev)...)
 			return events
 		}
+		w.AssessAndRecordOffense(*b, *a, "raid", 25, 0, b.Money, 0, "hostile")
 		dmg := 16 + (defPower-atkPower)/2
 		if dmg > 40 {
 			dmg = 40
@@ -3301,7 +3410,7 @@ func (w *World) Apply(id string, x Action) []Event {
 		}, append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)...)
 		events := []Event{ev}
 		events = append(events, w.grantCombatXP(b, x, 6, 2)...)
-		events = append(events, w.markDeadIfZero(a, b, x, "repelled raid clash")...)
+		events = append(events, w.markDeadIfZero(a, b, x, "repelled raid clash", ev)...)
 		return events
 
 	case "extort":
@@ -3322,25 +3431,26 @@ func (w *World) Apply(id string, x Action) []Event {
 			return fail("enforcer is injured or resting")
 		}
 		a.Energy -= 6
+		if b.Trust == nil {
+			b.Trust = map[string]int{}
+		}
 		a.Tags = appendUnique(a.Tags, env.PrimaryOutlawTag())
 		atkPower := CombatPowerWithCatalog(w.Catalog, *a) + 2
 		defPower := CombatPowerWithCatalog(w.Catalog, *b)
-		if atkPower >= defPower && b.Money >= 2 {
-			fee := w.Catalog.ExtortionFee(*a)
-			if fee > b.Money/3+1 {
-				fee = b.Money/3 + 1
-			}
-			if fee > b.Money {
-				fee = b.Money
-			}
+		fee := w.extortionDemand(*a, *b)
+		offense := w.AssessAndRecordOffense(*b, *a, "extort", 15, fee, b.Money, 0, "firm")
+		if atkPower >= defPower && b.Money >= 2 && offense.Outcome != "breaking_point" {
 			b.Money -= fee
 			a.Money += fee
+			a.IllicitGain += fee
 			b.Trust[a.ID] -= 2
 			a.RestUntil = w.Tick + 32
 			w.addDistrictCorruption(a.Location, 1)
 			ev := w.record(a, x, "extorted", map[string]any{
 				"text":             fmt.Sprintf("%s collected %d coercion-fee coins from %s in %s", a.Name, fee, b.Name, a.Location),
 				"protection_coins": fee,
+				"coins":            fee,
+				"offense":          offense,
 				"district":         a.Location,
 			}, append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)...)
 			events := []Event{ev}
@@ -3357,8 +3467,9 @@ func (w *World) Apply(id string, x Action) []Event {
 		a.RestUntil = w.Tick + 48
 		b.Trust[a.ID] -= 2
 		ev := w.record(a, x, "extort_resisted", map[string]any{
-			"text":   fmt.Sprintf("%s refused extortion from %s (-%d health to attacker)", b.Name, a.Name, dmg),
-			"damage": dmg,
+			"text":    fmt.Sprintf("%s refused extortion from %s (-%d health to attacker)", b.Name, a.Name, dmg),
+			"damage":  dmg,
+			"offense": offense,
 		}, append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)...)
 		return []Event{ev}
 
@@ -3366,8 +3477,20 @@ func (w *World) Apply(id string, x Action) []Event {
 		if b == nil || b.ID == id || !SamePlace(*a, *b) || w.Tick < b.JailedUntil {
 			return fail("official is not nearby")
 		}
-		if !w.Catalog.Capabilities(*b)["arrest"] {
-			return fail("target does not hold enforcement authority")
+		var hushSecret *ActorSecret
+		for i := range w.Secrets {
+			secret := &w.Secrets[i]
+			if secret.OwnerID == a.ID && !secret.Exposed && ActorHasTag(secret.WitnessedBy, b.ID) &&
+				(x.Item == "" || x.Item == secret.ID) {
+				hushSecret = secret
+				break
+			}
+		}
+		if hushSecret == nil && !w.ActorCapabilities(*b)["arrest"] {
+			return fail("recipient is neither an official nor a witness to the secret")
+		}
+		if !w.partyMateAvailable(b) {
+			return fail("recipient cannot accept the bribe")
 		}
 		if a.Energy < 3 {
 			return fail("insufficient energy")
@@ -3406,69 +3529,20 @@ func (w *World) Apply(id string, x Action) []Event {
 				Item:      "coins",
 				Location:  a.Location,
 				Quantity:  bribeCoins,
+				Proceeds:  bribeCoins,
 			},
 		}, observers...)
+		if hushSecret != nil {
+			hushSecret.HolderStances[b.ID] = "paid_silence"
+			ev.Payload["silenced_secret_id"] = hushSecret.ID
+		}
 		return []Event{ev}
 
-	case "audit_corruption":
-		if !w.Catalog.EffectiveEnvironment().Institutions.OversightEnabled() {
-			return fail("oversight audits are disabled in this world environment")
-		}
-		if b == nil || b.ID == id || !SamePlace(*a, *b) || w.Tick < b.JailedUntil {
-			return fail("suspect is not nearby")
-		}
-		if a.IllicitGain > 0 {
-			return fail("corrupt officer cannot conduct anti-corruption audit")
-		}
-		if a.Energy < 6 {
-			return fail("insufficient energy to conduct audit")
-		}
-		basisID, hasEv := ActorCorruptionEvidence(*a, b.ID)
-		if !hasEv {
-			return fail("no witnessed or reported corruption evidence against target")
-		}
-		if x.BasisEventID != 0 && !ActorCorruptionEvidenceWithBasis(*a, b.ID, x.BasisEventID) {
-			return fail("basis event does not implicate target in corruption")
-		}
-		if x.BasisEventID == 0 {
-			x.BasisEventID = basisID
-		}
-		if b.IllicitGain <= 0 {
-			return fail("target holds no illicit corrupt gains")
-		}
-		a.Energy -= 6
-		seized := minInt(b.IllicitGain, b.Money)
-		b.Money -= seized
-		b.IllicitGain = 0
-		reward := maxInt(1, seized/5)
-		if reward > seized {
-			reward = seized
-		}
-		toTreasury := seized - reward
-		a.Money += reward
-		if toTreasury > 0 {
-			w.creditTreasury(int64(toTreasury), "confiscated")
-		}
-		w.addDistrictCorruption(a.Location, -8)
-		jailedUntil := int64(0)
-		if seized >= 4 && b.Health > 0 {
-			b.Task = nil
-			b.InsideHouse = ""
-			b.JailedUntil = w.Tick + 144
-			jailedUntil = b.JailedUntil
-		}
-		observers := append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)
-		ev := w.record(a, x, "corruption_purged", map[string]any{
-			"text":              fmt.Sprintf("%s audited and exposed %s for corruption, confiscating %d illicit coins (%d to treasury, %d audit reward)", a.Name, b.Name, seized, toTreasury, reward),
-			"confiscated_coins": toTreasury,
-			"reward_coins":      reward,
-			"jailed_until":      jailedUntil,
-		}, observers...)
-		events := []Event{ev}
-		if auditProf := w.Catalog.BestProfessionForCapability(*a, "audit_corruption"); auditProf != "" {
-			events = append(events, w.grantProfessionXP(a, x, auditProf, 8, 3)...)
-		}
-		return events
+	case "open_case":
+		return w.openPersonalCase(a, b, x)
+
+	case "audit_corruption", "hold_trial":
+		return w.tryPersonalCase(a, b, x)
 
 	case "arrest":
 		env := w.Catalog.EffectiveEnvironment()
@@ -3478,10 +3552,11 @@ func (w *World) Apply(id string, x Action) []Event {
 		if b == nil || b.ID == id || !SamePlace(*a, *b) || w.Tick < b.JailedUntil {
 			return fail("target is not nearby")
 		}
-		bTags := b.IdentityTags()
-		if !w.Catalog.IsOutlawTags(bTags) && a.Trust[b.ID] >= 0 {
-			return fail("target is a law-abiding resident")
+		cc := w.personalCase(a.Location, b.ID, "wanted")
+		if cc == nil {
+			return fail("no open warrant in this district")
 		}
+		x.BasisEventID = cc.BasisEventID
 		if a.Energy < 7 {
 			return fail("insufficient energy to detain suspect")
 		}
@@ -3498,37 +3573,25 @@ func (w *World) Apply(id string, x Action) []Event {
 		outlawPower := CombatPowerWithCatalog(w.Catalog, *b)
 		lawProf := w.Catalog.BestProfessionForCapability(*a, "arrest")
 		if lawPower >= outlawPower {
-			dmg := 12
-			if b.Health <= dmg && outlawPower < 18 {
-				dmg = b.Health - 1
-			}
-			if dmg > b.Health {
-				dmg = b.Health
-			}
-			if dmg > 0 {
-				b.Health -= dmg
-			}
+			dmg := maxInt(0, minInt(12, b.Health-1))
+			b.Health -= dmg
 			b.Task = nil
 			b.InsideHouse = ""
 			a.RestUntil = w.Tick + 16
-			confiscated := b.Money / 2
-			if confiscated > 8 {
-				confiscated = 8
-			}
-			w.adjustActorCurrency(b, "coins", -int64(confiscated), false)
 			baseOfficial := 4
 			if usedWrit {
 				baseOfficial += 3
 				w.adjustActorItem(a, env.EnforcementItem, -1, true)
 			}
-			if len(w.Cohorts) > 0 {
+			if w.hasActiveCohorts() {
 				baseOfficial = int(w.debitTreasury(int64(baseOfficial), "bounty"))
 			}
-			w.adjustActorCurrency(a, "coins", int64(baseOfficial), len(w.Cohorts) == 0)
-			w.adjustActorCurrency(a, "coins", int64(confiscated), false)
-			bounty := baseOfficial + confiscated
+			w.adjustActorCurrency(a, "coins", int64(baseOfficial), !w.hasActiveCohorts())
 			if b.Health > 0 {
-				b.JailedUntil = w.Tick + 192
+				b.JailedUntil = w.Tick + w.effectiveJusticeSpec(w.JusticeRevolt).TrialSentenceTicks
+				cc.Status = "arrested"
+				cc.ArrestEventID = w.NextID
+				cc.JailedUntilTick = b.JailedUntil
 				filtered := w.Offers[:0]
 				for _, o := range w.Offers {
 					if o.Seller != b.ID && o.Buyer != b.ID {
@@ -3541,17 +3604,19 @@ func (w *World) Apply(id string, x Action) []Event {
 				}
 			}
 			ev := w.record(a, x, "arrested", map[string]any{
-				"text":         fmt.Sprintf("%s detained %s, confining until tick %d, confiscating %d coins and claiming %d bounty (%d damage)", a.Name, b.Name, b.JailedUntil, confiscated, bounty, dmg),
-				"coins":        bounty,
-				"confiscated":  confiscated,
-				"damage":       dmg,
-				"jailed_until": b.JailedUntil,
+				"text":           fmt.Sprintf("%s detained %s, confining until tick %d and claiming %d bounty (%d damage)", a.Name, b.Name, b.JailedUntil, baseOfficial, dmg),
+				"coins":          baseOfficial,
+				"case_id":        cc.ID,
+				"root_event_id":  cc.RootEventID,
+				"cause_event_id": cc.WarrantEventID,
+				"damage":         dmg,
+				"jailed_until":   b.JailedUntil,
 			}, append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)...)
 			events := []Event{ev}
 			if lawProf != "" {
 				events = append(events, w.grantProfessionXP(a, x, lawProf, 8, 3)...)
 			}
-			events = append(events, w.markDeadIfZero(b, a, x, "violent arrest resistance")...)
+			events = append(events, w.markDeadIfZero(b, a, x, "violent arrest resistance", ev)...)
 			return events
 		}
 		dmg := 14
@@ -3566,7 +3631,7 @@ func (w *World) Apply(id string, x Action) []Event {
 		}, append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)...)
 		events := []Event{ev}
 		events = append(events, w.grantProfessionXP(a, x, lawProf, 3, 1)...)
-		events = append(events, w.markDeadIfZero(a, b, x, "resisting outlaw counterattack")...)
+		events = append(events, w.markDeadIfZero(a, b, x, "resisting outlaw counterattack", ev)...)
 		return events
 
 	case "heal":
@@ -3578,7 +3643,8 @@ func (w *World) Apply(id string, x Action) []Event {
 		}
 		itemID := x.Item
 		if itemID == "" {
-			for k, spec := range w.Catalog.Items {
+			for _, k := range sortedProductionKeys(w.Catalog.Items) {
+				spec := w.Catalog.Items[k]
 				if (spec.MedicinalHeal > 0 || spec.DiseaseCure > 0) && a.Items[k] >= 1 {
 					if itemID == "" || spec.MedicinalHeal < w.Catalog.Items[itemID].MedicinalHeal {
 						itemID = k
@@ -3614,6 +3680,9 @@ func (w *World) Apply(id string, x Action) []Event {
 		w.adjustActorItem(a, itemID, -1, true)
 		a.Trust[b.ID]++
 		b.Trust[a.ID] += 2
+		if w.actorFactionRelation(*a, *b) == "allied" {
+			b.Trust[a.ID]++
+		}
 		ev := w.record(a, x, "healed", map[string]any{
 			"text":          fmt.Sprintf("%s healed %s for %d health", a.Name, b.Name, amount),
 			"healed":        amount,
@@ -3642,7 +3711,11 @@ func (w *World) Apply(id string, x Action) []Event {
 		if x.Text == "" {
 			return fail("empty speech")
 		}
-		return emit("speech", x.Text, b)
+		if b.Task != nil && (b.Task.Action.Kind == "sleep" || b.Task.Dormant) {
+			return fail("listener cannot hear speech")
+		}
+		ev := w.record(a, x, "speech", map[string]any{"text": x.Text, "delivered_to": []string{b.ID}}, b)
+		return append([]Event{ev}, w.deliverSecretReport(x, payloadInt64(ev.Payload, "fact_event_id"), []*Actor{b})...)
 
 	case "offer":
 		if x.OfferID != 0 {
@@ -3752,6 +3825,10 @@ func (w *World) Apply(id string, x Action) []Event {
 				w.Offers = nil
 			}
 			x.Item, x.Quantity, x.Price, x.Currency = o.Item, o.Quantity, o.Price, o.Currency
+			if w.actorFactionRelation(*buyer, *seller) == "allied" {
+				buyer.Trust[seller.ID]++
+				seller.Trust[buyer.ID]++
+			}
 			events := []Event{w.record(a, x, "trade_completed", map[string]any{
 				"text":       fmt.Sprintf("%s bought %d %s from %s for %d %s", buyer.Name, o.Quantity, o.Item, seller.Name, o.Price, cur),
 				"item":       o.Item,

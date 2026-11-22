@@ -7,16 +7,19 @@ import (
 
 // FactionDiplomacy tracks the bilateral diplomatic stance and war score between two factions.
 type FactionDiplomacy struct {
-	FactionA        string `json:"faction_a"`
-	FactionB        string `json:"faction_b"`
-	Stance          string `json:"stance"` // "allied" | "friendly" | "neutral" | "hostile" | "at_war"
-	RelationScore   int    `json:"relation_score"`
-	TreatyUntilTick int64  `json:"treaty_until_tick,omitempty"`
-	WarStartedTick  int64  `json:"war_started_tick,omitempty"`
-	WarScoreA       int    `json:"war_score_a,omitempty"`
-	WarScoreB       int    `json:"war_score_b,omitempty"`
-	Reason          string `json:"reason,omitempty"`
-	RootEventID     int64  `json:"root_event_id,omitempty"`
+	AllianceProposer  string `json:"alliance_proposer,omitempty"`
+	PeaceProposer     string `json:"peace_proposer,omitempty"`
+	ContestedDistrict string `json:"contested_district,omitempty"`
+	FactionA          string `json:"faction_a"`
+	FactionB          string `json:"faction_b"`
+	Stance            string `json:"stance"` // "allied" | "friendly" | "neutral" | "hostile" | "at_war"
+	RelationScore     int    `json:"relation_score"`
+	TreatyUntilTick   int64  `json:"treaty_until_tick,omitempty"`
+	WarStartedTick    int64  `json:"war_started_tick,omitempty"`
+	WarScoreA         int    `json:"war_score_a,omitempty"`
+	WarScoreB         int    `json:"war_score_b,omitempty"`
+	Reason            string `json:"reason,omitempty"`
+	RootEventID       int64  `json:"root_event_id,omitempty"`
 }
 
 // DiplomacyState stores all bilateral faction diplomacy records on World.
@@ -85,7 +88,7 @@ func (w *World) AreFactionsAllied(f1, f2 string) bool {
 	}
 	key, _, _ := diplomacyKey(f1, f2)
 	rel := w.Diplomacy.Relations[key]
-	return rel != nil && rel.Stance == "allied"
+	return rel != nil && rel.Stance == "allied" && (rel.TreatyUntilTick == 0 || w.Tick < rel.TreatyUntilTick)
 }
 
 // AreFactionsAtWar reports whether two factions are currently in a declared state of war.
@@ -99,40 +102,44 @@ func (w *World) AreFactionsAtWar(f1, f2 string) bool {
 }
 
 func (w *World) actorCanLeadDiplomacy(a Actor, factionID string) bool {
-	if factionID == "" || !ActorHasTag(a.Guilds, factionID) {
-		return false
-	}
-	if w.Relations != nil && w.Relations.FactionLeader[factionID] == a.ID {
-		return true
-	}
-	if ActorHasTag(a.Tags, "ruler") || ActorHasTag(a.Tags, "elder_oversight") ||
-		ActorHasTag(a.Tags, "commander") || ActorHasTag(a.Tags, "enforcer") {
-		return true
-	}
-	return a.GuildLevels[factionID] >= 2
+	faction := w.faction(factionID)
+	return faction != nil && !a.Dead && faction.HasMember(a.ID) &&
+		w.Relations != nil && w.Relations.FactionLeader[factionID] == a.ID
 }
 
-func (w *World) hasActiveInvasionWorldEvent() bool {
-	for _, ev := range w.ActiveWorldEvents {
-		if w.Tick < ev.ExpiresTick && ev.Category == "external_invasion" {
-			return true
+func (w *World) diplomacyLeaderFactions(a Actor) []string {
+	var ids []string
+	for _, faction := range w.Factions {
+		if w.actorCanLeadDiplomacy(a, faction.ID) {
+			ids = append(ids, faction.ID)
 		}
 	}
-	return false
+	return ids
 }
 
 func (w *World) factionObservers(f1, f2, excludeID string) []*Actor {
 	var out []*Actor
+	fa, fb := w.faction(f1), w.faction(f2)
 	for i := range w.Actors {
 		b := &w.Actors[i]
 		if b.Dead || b.ID == excludeID {
 			continue
 		}
-		if ActorHasTag(b.Guilds, f1) || ActorHasTag(b.Guilds, f2) {
+		if ActorHasTag(b.Guilds, f1) || ActorHasTag(b.Guilds, f2) ||
+			fa != nil && fa.HasMember(b.ID) || fb != nil && fb.HasMember(b.ID) {
 			out = append(out, b)
 		}
 	}
 	return out
+}
+
+func (w *World) announceDiplomacy(ev Event, f1, f2 string) {
+	notice := Statement{Topic: ev.Kind, SubjectID: f1, ObjectID: f2, Location: ev.Action.Location}
+	for _, actor := range w.factionObservers(f1, f2, ev.ActorID) {
+		actor.Memories = appendMemory(actor.Memories, Memory{Kind: ev.Kind, Source: ev.ActorID,
+			TargetID: ev.TargetID, Tick: ev.Tick, EventID: ev.ID, RootEventID: payloadInt64(ev.Payload, "root_event_id"),
+			Statement: &notice, Text: relPayloadString(ev.Payload, "text")})
+	}
 }
 
 func (w *World) applyProposeAlliance(a *Actor, x Action) []Event {
@@ -143,8 +150,8 @@ func (w *World) applyProposeAlliance(a *Actor, x Action) []Event {
 		return fail("insufficient energy to propose faction alliance")
 	}
 	myFac := x.FactionID
-	if myFac == "" && len(a.Guilds) > 0 {
-		myFac = a.Guilds[0]
+	if led := w.diplomacyLeaderFactions(*a); myFac == "" && len(led) > 0 {
+		myFac = led[0]
 	}
 	if !w.actorCanLeadDiplomacy(*a, myFac) {
 		return fail("actor lacks diplomatic authority for faction")
@@ -157,23 +164,33 @@ func (w *World) applyProposeAlliance(a *Actor, x Action) []Event {
 	if rel.Stance == "at_war" {
 		return fail("cannot ally while at war; sign peace first")
 	}
-	if rel.Stance == "allied" && w.Tick < rel.TreatyUntilTick {
+	if w.AreFactionsAllied(myFac, targetFac) {
 		return fail("factions are already allied")
 	}
 	minScore := -40
-	if w.hasActiveInvasionWorldEvent() {
+	if w.affectedByKnownInvasion(*a, myFac, targetFac) {
 		minScore = -80
 	}
 	if rel.RelationScore < minScore {
 		return fail("bilateral hostility too severe for alliance")
 	}
+	if rel.AllianceProposer == myFac {
+		return fail("alliance proposal is awaiting the other faction's consent")
+	}
 	a.Energy -= 5
+	if rel.AllianceProposer == "" {
+		rel.AllianceProposer = myFac
+		ev := w.record(a, x, "alliance_proposed", map[string]any{"text": fmt.Sprintf("%s proposed an alliance to %s", myFac, targetFac)})
+		w.announceDiplomacy(ev, myFac, targetFac)
+		return []Event{ev}
+	}
+	rel.AllianceProposer = ""
 	rel.Stance = "allied"
 	rel.RelationScore = minInt(100, maxInt(rel.RelationScore+25, 45))
 	rel.TreatyUntilTick = w.Tick + 7*TicksPerDay
 	reason := x.Text
 	if reason == "" {
-		if w.hasActiveInvasionWorldEvent() {
+		if w.affectedByKnownInvasion(*a, myFac, targetFac) {
 			reason = "external_invasion_coalition"
 		} else {
 			reason = "mutual_defense_pact"
@@ -202,7 +219,6 @@ func (w *World) applyProposeAlliance(a *Actor, x Action) []Event {
 		Location:  a.Location,
 		Quantity:  rel.RelationScore,
 	}
-	observers := w.factionObservers(myFac, targetFac, a.ID)
 	ev := w.record(a, x, "alliance_formed", map[string]any{
 		"text":           fmt.Sprintf("%s forged an alliance between %s and %s (%s)", a.Name, myFac, targetFac, reason),
 		"faction_a":      rel.FactionA,
@@ -212,7 +228,8 @@ func (w *World) applyProposeAlliance(a *Actor, x Action) []Event {
 		"reason":         reason,
 		"treaty_until":   rel.TreatyUntilTick,
 		"observation":    obs,
-	}, observers...)
+	})
+	w.announceDiplomacy(ev, myFac, targetFac)
 	rel.RootEventID = ev.ID
 	return []Event{ev}
 }
@@ -225,8 +242,8 @@ func (w *World) applyDeclareWar(a *Actor, x Action) []Event {
 		return fail("insufficient energy to declare faction war")
 	}
 	myFac := x.FactionID
-	if myFac == "" && len(a.Guilds) > 0 {
-		myFac = a.Guilds[0]
+	if led := w.diplomacyLeaderFactions(*a); myFac == "" && len(led) > 0 {
+		myFac = led[0]
 	}
 	if !w.actorCanLeadDiplomacy(*a, myFac) {
 		return fail("actor lacks authority to declare war")
@@ -239,7 +256,7 @@ func (w *World) applyDeclareWar(a *Actor, x Action) []Event {
 	if rel.Stance == "at_war" {
 		return fail("factions are already at war")
 	}
-	if w.Tick < rel.TreatyUntilTick && rel.Stance != "hostile" {
+	if w.Tick < rel.TreatyUntilTick {
 		return fail("cannot declare war during active treaty or truce")
 	}
 	a.Energy -= 6
@@ -247,6 +264,7 @@ func (w *World) applyDeclareWar(a *Actor, x Action) []Event {
 	rel.WarStartedTick = w.Tick
 	rel.WarScoreA = 0
 	rel.WarScoreB = 0
+	rel.AllianceProposer, rel.PeaceProposer, rel.ContestedDistrict = "", "", ""
 	rel.RelationScore = maxInt(-100, minInt(rel.RelationScore-35, -60))
 	reason := x.Text
 	if reason == "" {
@@ -262,7 +280,6 @@ func (w *World) applyDeclareWar(a *Actor, x Action) []Event {
 		Location:  a.Location,
 		Quantity:  -rel.RelationScore,
 	}
-	observers := w.factionObservers(myFac, targetFac, a.ID)
 	ev := w.record(a, x, "faction_war_declared", map[string]any{
 		"text":           fmt.Sprintf("%s declared faction war: %s vs %s (%s)", a.Name, myFac, targetFac, reason),
 		"faction_a":      rel.FactionA,
@@ -273,7 +290,8 @@ func (w *World) applyDeclareWar(a *Actor, x Action) []Event {
 		"relation_score": rel.RelationScore,
 		"reason":         reason,
 		"observation":    obs,
-	}, observers...)
+	})
+	w.announceDiplomacy(ev, myFac, targetFac)
 	rel.RootEventID = ev.ID
 	return []Event{ev}
 }
@@ -347,30 +365,73 @@ func (w *World) factionTransferReparations(loserFac, winnerFac string, maxCoins 
 	return paid
 }
 
-func (w *World) cedeContestedDistrict(loserFac, winnerFac string) string {
-	if w.Relations == nil || loserFac == "" || winnerFac == "" || loserFac == winnerFac {
-		return ""
-	}
-	var controlled []string
-	for dID, owner := range w.Relations.ControllingFaction {
-		if owner == loserFac {
-			controlled = append(controlled, dID)
+func (w *World) districtFaction(district string) string {
+	if w.Relations != nil {
+		if controller := w.Relations.DistrictController(district); w.faction(controller) != nil {
+			return controller
 		}
 	}
-	if len(controlled) <= 1 {
+	if polity := w.EffectiveGoverningPolity(district, ""); polity != nil && w.faction(polity.ID) != nil {
+		return polity.ID
+	}
+	for _, f := range w.Factions {
+		if f.District == district {
+			return f.ID
+		}
+	}
+	return ""
+}
+
+func (w *World) neighboringDistricts(a, b string) bool {
+	if _, ok := w.Map.RoadBetween(a, b); ok {
+		return true
+	}
+	for _, route := range w.Map.VenueRoutes {
+		from, _ := w.Map.VenueByID(route.FromVenue)
+		to, _ := w.Map.VenueByID(route.ToVenue)
+		if from.DistrictID == a && to.DistrictID == b || from.DistrictID == b && to.DistrictID == a {
+			return true
+		}
+	}
+	return false
+}
+
+func (w *World) cedeContestedDistrict(loserFac, winnerFac string) string {
+	if loserFac == winnerFac || w.faction(loserFac) == nil || w.faction(winnerFac) == nil {
 		return ""
 	}
-	sort.Strings(controlled)
-	ceded := controlled[len(controlled)-1]
-	w.Relations.ControllingFaction[ceded] = winnerFac
-	if sov, ok := w.Relations.DistrictSovereignty[ceded]; ok {
-		sov.ControllingFaction = winnerFac
-		sov.ControlSinceTick = w.Tick
-		sov.LastShiftTick = w.Tick
-		sov.ControllerScore = maxInt(45, sov.ControllerScore)
-		w.Relations.DistrictSovereignty[ceded] = sov
+	var contested string
+	if w.Diplomacy != nil {
+		key, _, _ := diplomacyKey(loserFac, winnerFac)
+		if rel := w.Diplomacy.Relations[key]; rel != nil {
+			contested = rel.ContestedDistrict
+		}
 	}
-	return ceded
+	best, bestScore := "", 0
+	for _, d := range w.Map.Districts {
+		if w.districtFaction(d.ID) != loserFac {
+			continue
+		}
+		score := 1
+		if d.ID == contested {
+			score = 3
+		} else {
+			for _, other := range w.Map.Districts {
+				if w.districtFaction(other.ID) == winnerFac && w.neighboringDistricts(d.ID, other.ID) {
+					score = 2
+					break
+				}
+			}
+		}
+		if score > bestScore || score == bestScore && d.ID < best {
+			best, bestScore = d.ID, score
+		}
+	}
+	if best != "" {
+		rs := w.ensureRelations()
+		w.setDistrictControl(rs, best, winnerFac, maxInt(45, rs.DistrictSovereignty[best].ControllerScore))
+	}
+	return best
 }
 
 func (w *World) applyMakePeace(a *Actor, x Action) []Event {
@@ -381,8 +442,8 @@ func (w *World) applyMakePeace(a *Actor, x Action) []Event {
 		return fail("insufficient energy to negotiate peace")
 	}
 	myFac := x.FactionID
-	if myFac == "" && len(a.Guilds) > 0 {
-		myFac = a.Guilds[0]
+	if led := w.diplomacyLeaderFactions(*a); myFac == "" && len(led) > 0 {
+		myFac = led[0]
 	}
 	if !w.actorCanLeadDiplomacy(*a, myFac) {
 		return fail("actor lacks diplomatic authority to sign peace")
@@ -395,7 +456,18 @@ func (w *World) applyMakePeace(a *Actor, x Action) []Event {
 	if rel.Stance != "at_war" {
 		return fail("factions are not currently at war")
 	}
+	if rel.PeaceProposer == myFac {
+		return fail("peace proposal is awaiting the other faction's consent")
+	}
 	a.Energy -= 4
+	if rel.PeaceProposer == "" {
+		rel.PeaceProposer = myFac
+		ev := w.record(a, x, "peace_proposed", map[string]any{"text": fmt.Sprintf("%s proposed peace to %s", myFac, targetFac),
+			"root_event_id": rel.RootEventID})
+		w.announceDiplomacy(ev, myFac, targetFac)
+		return []Event{ev}
+	}
+	rel.PeaceProposer = ""
 
 	victor, loser := "", ""
 	scoreDelta := rel.WarScoreA - rel.WarScoreB
@@ -430,7 +502,6 @@ func (w *World) applyMakePeace(a *Actor, x Action) []Event {
 		Location:  a.Location,
 		Quantity:  reparations,
 	}
-	observers := w.factionObservers(rel.FactionA, rel.FactionB, a.ID)
 	ev := w.record(a, x, "peace_treaty_signed", map[string]any{
 		"text":           fmt.Sprintf("%s signed peace between %s and %s (victor=%s, reparations=%d coins, ceded=%s)", a.Name, rel.FactionA, rel.FactionB, victor, reparations, cededDistrict),
 		"faction_a":      rel.FactionA,
@@ -441,175 +512,198 @@ func (w *World) applyMakePeace(a *Actor, x Action) []Event {
 		"ceded_district": cededDistrict,
 		"treaty_until":   rel.TreatyUntilTick,
 		"observation":    obs,
-	}, observers...)
-	return []Event{ev}
+		"root_event_id":  rel.RootEventID,
+	})
+	w.announceDiplomacy(ev, myFac, targetFac)
+	events := []Event{ev}
+	if cededDistrict != "" {
+		events = append(events, w.record(a, Action{Kind: "claim_turf", FactionID: victor, Location: cededDistrict},
+			"district_control_shifted", map[string]any{"text": fmt.Sprintf("Peace treaty ceded %s from %s to %s", cededDistrict, loser, victor),
+				"district": cededDistrict, "previous_faction": loser, "new_faction": victor,
+				"root_event_id": payloadInt64(ev.Payload, "root_event_id"), "cause_event_id": ev.ID, "reason": "peace_treaty"}))
+	}
+	return events
 }
 
-func (w *World) factionStrength(factionID string) int {
-	strength := 10
-	for i := range w.Actors {
-		a := w.Actors[i]
-		if !a.Dead && ActorHasTag(a.Guilds, factionID) {
-			strength += CombatPowerWithCatalog(w.Catalog, a)
+func (w *World) factionOfEntity(id string) string {
+	if c := w.findCohortByID(id); c != nil {
+		return c.FactionID
+	}
+	if a := w.actor(id); a != nil && len(a.Guilds) > 0 {
+		return a.Guilds[0]
+	}
+	if w.faction(id) != nil {
+		return id
+	}
+	return ""
+}
+
+func (w *World) actorFactionRelation(a, b Actor) string {
+	allied := false
+	for _, f1 := range a.Guilds {
+		for _, f2 := range b.Guilds {
+			if w.AreFactionsAtWar(f1, f2) {
+				return "at_war"
+			}
+			allied = allied || w.AreFactionsAllied(f1, f2)
 		}
 	}
-	for i := range w.Cohorts {
-		c := w.Cohorts[i]
-		if c.FactionID == factionID && c.Population > 0 {
-			strength += c.Population / 10
+	if allied {
+		return "allied"
+	}
+	return ""
+}
+
+func (w *World) affectedByKnownInvasion(a Actor, myFac, peerFac string) bool {
+	for _, event := range w.perceivedActiveWorldEvents(a) {
+		if event.Category == "external_invasion" && w.factionsAffectedByInvasion(event.DistrictID, myFac, peerFac) {
+			return true
 		}
 	}
-	return strength
+	return false
+}
+
+func (w *World) factionsAffectedByInvasion(district, f1, f2 string) bool {
+	owner := w.districtFaction(district)
+	if owner != f1 && owner != f2 {
+		return false
+	}
+	other := f1
+	if owner == f1 {
+		other = f2
+	}
+	for _, d := range w.Map.Districts {
+		if w.districtFaction(d.ID) == other && w.neighboringDistricts(d.ID, district) {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *World) stepDiplomacy(settled []Event) []Event {
-	if w == nil || len(w.Factions) < 2 {
+	if len(w.Factions) < 2 {
 		return nil
 	}
 	var events []Event
-	ds := w.ensureDiplomacy()
-
-	// 1. React to settled conflict and external invasion events.
 	for _, ev := range settled {
-		switch ev.Kind {
-		case "turf_war", "vendetta_clash", "grudge_formed":
-			a1 := w.actor(ev.ActorID)
-			a2 := w.actor(ev.TargetID)
-			if a1 == nil || a2 == nil || len(a1.Guilds) == 0 || len(a2.Guilds) == 0 {
-				continue
-			}
-			f1, f2 := a1.Guilds[0], a2.Guilds[0]
-			if f1 == f2 {
-				continue
-			}
-			rel := w.ensureFactionDiplomacy(f1, f2)
-			drop := 8
-			if ev.Kind == "turf_war" {
-				drop = 15
-			}
-			rel.RelationScore = maxInt(-100, rel.RelationScore-drop)
-			if rel.Stance != "at_war" && rel.RelationScore <= -35 {
-				rel.Stance = "hostile"
-			}
-			if rel.Stance == "hostile" && rel.RelationScore <= -75 && w.Tick >= rel.TreatyUntilTick {
-				rel.Stance = "at_war"
-				rel.WarStartedTick = w.Tick
-				rel.WarScoreA = 0
-				rel.WarScoreB = 0
-				rel.Reason = ev.Kind
-				rel.RootEventID = ev.ID
-				warEv := Event{
-					ID:      w.NextID,
-					Tick:    w.Tick,
-					ActorID: "world",
-					Kind:    "faction_war_declared",
-					Action:  Action{Kind: "declare_war", FactionID: rel.FactionA, TargetID: rel.FactionB, BasisEventID: ev.ID},
-					Payload: map[string]any{
-						"text":           fmt.Sprintf("Escalating %s triggered open war between %s and %s", ev.Kind, rel.FactionA, rel.FactionB),
-						"faction_a":      rel.FactionA,
-						"faction_b":      rel.FactionB,
-						"stance":         "at_war",
-						"relation_score": rel.RelationScore,
-						"reason":         ev.Kind,
-						"root_event_id":  ev.ID,
-					},
-				}
-				w.NextID++
-				events = append(events, warEv)
-			}
-		case "world_event_triggered":
-			if cat, _ := ev.Payload["category"].(string); cat == "external_invasion" {
-				// Form one deterministic emergency coalition between two non-war factions.
-				facIDs := make([]string, 0, len(w.Factions))
-				for _, f := range w.Factions {
-					facIDs = append(facIDs, f.ID)
-				}
-				sort.Strings(facIDs)
-				formed := false
-				for i := 0; i < len(facIDs) && !formed; i++ {
-					for j := i + 1; j < len(facIDs) && !formed; j++ {
-						rel := w.ensureFactionDiplomacy(facIDs[i], facIDs[j])
-						if rel.Stance == "at_war" || rel.Stance == "allied" {
-							continue
-						}
-						rel.Stance = "allied"
-						rel.RelationScore = minInt(100, maxInt(rel.RelationScore+25, 45))
-						rel.TreatyUntilTick = w.Tick + 7*TicksPerDay
-						rel.Reason = "external_invasion_coalition"
-						rel.RootEventID = ev.ID
-						coalEv := Event{
-							ID:      w.NextID,
-							Tick:    w.Tick,
-							ActorID: "world",
-							Kind:    "alliance_formed",
-							Action:  Action{Kind: "propose_alliance", FactionID: rel.FactionA, TargetID: rel.FactionB, BasisEventID: ev.ID},
-							Payload: map[string]any{
-								"text":           fmt.Sprintf("%s and %s formed an emergency defense coalition against external invasion", rel.FactionA, rel.FactionB),
-								"faction_a":      rel.FactionA,
-								"faction_b":      rel.FactionB,
-								"stance":         "allied",
-								"relation_score": rel.RelationScore,
-								"reason":         "external_invasion_coalition",
-								"treaty_until":   rel.TreatyUntilTick,
-								"root_event_id":  ev.ID,
-							},
-						}
-						w.NextID++
-						events = append(events, coalEv)
-						formed = true
+		if ev.Kind == "world_event_triggered" && relPayloadString(ev.Payload, "category") == "external_invasion" {
+			district := relPayloadString(ev.Payload, "district")
+			witnesses, _ := extractStringSlicePayload(ev.Payload, "witnesses")
+			known := map[string]bool{}
+			for _, id := range witnesses {
+				if witness := w.actor(id); witness != nil {
+					for _, faction := range witness.Guilds {
+						known[faction] = true
 					}
 				}
 			}
-		}
-	}
-
-	// 2. Daily noon diplomacy maintenance & bounded war skirmishes.
-	clock := ClockAt(w.Tick)
-	if clock.Hour != 12 || clock.Minute != 0 || len(ds.Relations) == 0 {
-		return events
-	}
-	keys := make([]string, 0, len(ds.Relations))
-	for k := range ds.Relations {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		rel := ds.Relations[k]
-		if rel == nil {
+			owner := w.districtFaction(district)
+			if !known[owner] {
+				continue
+			}
+			for _, other := range sortedProductionKeys(known) {
+				if other == owner || !w.factionsAffectedByInvasion(district, owner, other) ||
+					w.AreFactionsAtWar(owner, other) || w.AreFactionsAllied(owner, other) {
+					continue
+				}
+				rel := w.ensureFactionDiplomacy(owner, other)
+				rel.Stance, rel.Reason, rel.AllianceProposer = "allied", "external_invasion_coalition", ""
+				rel.RelationScore = maxInt(45, rel.RelationScore)
+				rel.TreatyUntilTick, rel.RootEventID = w.Tick+7*TicksPerDay, ev.ID
+				alliance := Event{ID: w.NextID, Tick: w.Tick, ActorID: "world", TargetID: other, Kind: "alliance_formed",
+					Action: Action{Kind: "propose_alliance", FactionID: owner, TargetID: other, Location: district},
+					Payload: map[string]any{"text": fmt.Sprintf("%s and %s formed an emergency coalition around %s", owner, other, district),
+						"faction_a": rel.FactionA, "faction_b": rel.FactionB, "district": district,
+						"root_event_id": ev.ID, "cause_event_id": ev.ID, "treaty_until": rel.TreatyUntilTick}}
+				w.NextID++
+				w.announceDiplomacy(alliance, owner, other)
+				events = append(events, alliance)
+			}
 			continue
 		}
-		if rel.Stance == "allied" && rel.TreatyUntilTick > 0 && w.Tick >= rel.TreatyUntilTick {
-			rel.Stance = "friendly"
-			rel.TreatyUntilTick = 0
+
+		f1, f2 := "", ""
+		score, counter := 0, 0
+		switch ev.Kind {
+		case "attacked", "feud_avenged", "raided", "raid_repelled", "party_betrayed", "cohort_raided",
+			"cohort_raid_repelled", "cohort_turf_war", "vendetta_clash", "faction_battle":
+			f1, f2 = w.factionOfEntity(ev.ActorID), w.factionOfEntity(ev.TargetID)
+			score = int(payloadInt64(ev.Payload, "damage") + payloadInt64(ev.Payload, "wounded") + 3*payloadInt64(ev.Payload, "deaths"))
+			score += int(payloadInt64(ev.Payload, "coins") + payloadInt64(ev.Payload, "defender_wounded") + 3*payloadInt64(ev.Payload, "defender_deaths"))
+			counter = int(payloadInt64(ev.Payload, "recoil") + payloadInt64(ev.Payload, "attacker_wounded") + 3*payloadInt64(ev.Payload, "attacker_deaths"))
+			if ev.Kind == "vendetta_clash" {
+				score = int(payloadInt64(ev.Payload, "defender_wounded") + 3*payloadInt64(ev.Payload, "defender_deaths"))
+			}
+			if ev.Kind == "raid_repelled" {
+				score, counter = 0, score
+			}
+		case "district_control_shifted":
+			if relPayloadString(ev.Payload, "reason") == "peace_treaty" {
+				continue
+			}
+			f1, f2 = relPayloadString(ev.Payload, "new_faction"), relPayloadString(ev.Payload, "previous_faction")
+			score = 12
+		default:
+			continue
 		}
-		if rel.Stance == "at_war" {
-			strA := w.factionStrength(rel.FactionA) + int(worldHash(w.ID, w.Tick, "warA:"+k)%20)
-			strB := w.factionStrength(rel.FactionB) + int(worldHash(w.ID, w.Tick, "warB:"+k)%20)
-			winner := rel.FactionA
-			gain := 8
-			if strB > strA {
-				winner = rel.FactionB
-				rel.WarScoreB += gain
-			} else {
-				rel.WarScoreA += gain
-			}
-			skEv := Event{
-				ID:      w.NextID,
-				Tick:    w.Tick,
-				ActorID: "world",
-				Kind:    "faction_war_skirmish",
-				Action:  Action{Kind: "wait", FactionID: winner},
-				Payload: map[string]any{
-					"text":        fmt.Sprintf("War skirmish between %s and %s: %s gained advantage (score %d:%d)", rel.FactionA, rel.FactionB, winner, rel.WarScoreA, rel.WarScoreB),
-					"faction_a":   rel.FactionA,
-					"faction_b":   rel.FactionB,
-					"winner":      winner,
-					"war_score_a": rel.WarScoreA,
-					"war_score_b": rel.WarScoreB,
-				},
-			}
+		if f1 == "" || f2 == "" || f1 == f2 || score+counter == 0 {
+			continue
+		}
+		rel := w.ensureFactionDiplomacy(f1, f2)
+		rel.RelationScore = maxInt(-100, rel.RelationScore-maxInt(1, (score+counter)/3))
+		if w.AreFactionsAllied(f1, f2) && rel.RelationScore <= -30 {
+			rel.Stance = "hostile"
+			rel.TreatyUntilTick = 0
+			rel.Reason = "alliance_shattered_by_hostilities"
+			rel.RootEventID = ev.ID
+			broke := Event{ID: w.NextID, Tick: w.Tick, ActorID: "world", TargetID: f2, Kind: "alliance_broken",
+				Action: Action{Kind: "declare_war", FactionID: f1, TargetID: f2},
+				Payload: map[string]any{"text": fmt.Sprintf("Alliance between %s and %s collapsed after repeated bloodshed (score=%d)", rel.FactionA, rel.FactionB, rel.RelationScore),
+					"faction_a": rel.FactionA, "faction_b": rel.FactionB, "relation_score": rel.RelationScore,
+					"root_event_id": ev.ID, "cause_event_id": ev.ID}}
 			w.NextID++
-			events = append(events, skEv)
+			w.announceDiplomacy(broke, f1, f2)
+			events = append(events, broke)
+		} else if !w.AreFactionsAtWar(f1, f2) && !w.AreFactionsAllied(f1, f2) && rel.RelationScore <= -35 {
+			rel.Stance = "hostile"
+		}
+		if rel.Stance == "hostile" && rel.RelationScore <= -75 && w.Tick >= rel.TreatyUntilTick {
+			rel.Stance, rel.Reason, rel.WarStartedTick = "at_war", ev.Kind, w.Tick
+			rel.RootEventID = ev.ID
+			war := Event{ID: w.NextID, Tick: w.Tick, ActorID: "world", TargetID: f2, Kind: "faction_war_declared",
+				Action: Action{Kind: "declare_war", FactionID: f1, TargetID: f2},
+				Payload: map[string]any{"text": fmt.Sprintf("Open war followed a clash between %s and %s", f1, f2),
+					"faction_a": rel.FactionA, "faction_b": rel.FactionB, "root_event_id": ev.ID, "cause_event_id": ev.ID}}
+			w.NextID++
+			w.announceDiplomacy(war, f1, f2)
+			events = append(events, war)
+		}
+		if !w.AreFactionsAtWar(f1, f2) {
+			continue
+		}
+		if f1 == rel.FactionA {
+			rel.WarScoreA += score
+			rel.WarScoreB += counter
+		} else {
+			rel.WarScoreB += score
+			rel.WarScoreA += counter
+		}
+		if district := srEventDistrict(w, ev); district != "" {
+			rel.ContestedDistrict = district
+		}
+		skirmish := Event{ID: w.NextID, Tick: w.Tick, ActorID: ev.ActorID, TargetID: ev.TargetID, Kind: "faction_war_skirmish",
+			Action: Action{Kind: "wait", FactionID: f1, Location: rel.ContestedDistrict},
+			Payload: map[string]any{"text": fmt.Sprintf("%s and %s clashed (war score %d:%d)", f1, f2, rel.WarScoreA, rel.WarScoreB),
+				"faction_a": rel.FactionA, "faction_b": rel.FactionB, "war_score_a": rel.WarScoreA, "war_score_b": rel.WarScoreB,
+				"root_event_id": rel.RootEventID, "cause_event_id": ev.ID}}
+		w.NextID++
+		events = append(events, skirmish)
+	}
+	if w.Diplomacy != nil {
+		for _, rel := range w.Diplomacy.Relations {
+			if rel != nil && rel.Stance == "allied" && rel.TreatyUntilTick > 0 && w.Tick >= rel.TreatyUntilTick {
+				rel.Stance, rel.TreatyUntilTick = "friendly", 0
+			}
 		}
 	}
 	return events
@@ -630,9 +724,25 @@ func (w *World) perceivedFactionDiplomacy(a Actor) []FactionDiplomacy {
 		if rel == nil {
 			continue
 		}
-		if ActorHasTag(a.Guilds, rel.FactionA) || ActorHasTag(a.Guilds, rel.FactionB) || rel.Stance == "at_war" || rel.Stance == "allied" {
+		if ActorHasTag(a.Guilds, rel.FactionA) || ActorHasTag(a.Guilds, rel.FactionB) {
 			out = append(out, *rel)
 		}
 	}
 	return out
+}
+
+func (w *World) setFactionLeader(factionID, leaderID string) {
+	rs := w.ensureRelations()
+	previous := rs.FactionLeader[factionID]
+	rs.FactionLeader[factionID] = leaderID
+	if w.Polities == nil {
+		return
+	}
+	for i := range w.Polities.Nodes {
+		node := &w.Polities.Nodes[i]
+		if node.ID == factionID || node.DeFactoControllerID == factionID ||
+			node.LeaderActorID == previous && previous != "" && (node.DeJureParentID == factionID || rs.DistrictController(node.SeatDistrictID) == factionID) {
+			node.LeaderActorID = leaderID
+		}
+	}
 }

@@ -706,14 +706,6 @@ func (w *World) InitEcology(scalePop int) {
 	}
 }
 
-func (w *World) districtState(districtID string) (DistrictState, bool) {
-	if w.DistrictStates == nil {
-		return DistrictState{}, false
-	}
-	ds, ok := w.DistrictStates[districtID]
-	return ds, ok
-}
-
 // EcologicalYieldMultiplierPct computes the combined season, weather, and disaster
 // yield multiplier (100 = 1.0x) for recipe r in districtID.
 // Paid resource-pool draws deliver their declared conversion whenever stock covers ResourceDraw.
@@ -1658,7 +1650,7 @@ func (w *World) checkActorCraftAccident(a *Actor, x Action, r Recipe) []Event {
 		})
 		events := []Event{ev}
 		if fatal {
-			events = append(events, w.markDeadIfZero(a, nil, x, "accident")...)
+			events = append(events, w.markDeadIfZero(a, nil, x, "accident", ev)...)
 		}
 		return events
 	}
@@ -1667,7 +1659,7 @@ func (w *World) checkActorCraftAccident(a *Actor, x Action, r Recipe) []Event {
 
 // checkActorTransitHazard evaluates cross-district route accidents and roadside wild encounters
 // when an individual spotlight Actor completes inter-district travel.
-func (w *World) checkActorTransitHazard(a *Actor, x Action, fromDistrict, toDistrict, medium, modeID string) []Event {
+func (w *World) checkActorTransitHazard(a *Actor, x Action, fromDistrict, toDistrict, medium, modeID string, escort int) []Event {
 	if a == nil || a.Dead || w.DistrictStates == nil || fromDistrict == "" || toDistrict == "" || fromDistrict == toDistrict {
 		return nil
 	}
@@ -1723,6 +1715,7 @@ func (w *World) checkActorTransitHazard(a *Actor, x Action, fromDistrict, toDist
 		if mit.tierDefPct > 0 {
 			prob = (prob * (100 - mit.tierDefPct/2)) / 100
 		}
+		prob = (prob * (100 - escort)) / 100
 		if prob <= 0 {
 			continue
 		}
@@ -1760,7 +1753,7 @@ func (w *World) checkActorTransitHazard(a *Actor, x Action, fromDistrict, toDist
 		})
 		events := []Event{ev}
 		if fatal {
-			events = append(events, w.markDeadIfZero(a, nil, x, "accident")...)
+			events = append(events, w.markDeadIfZero(a, nil, x, "accident", ev)...)
 		}
 		return events
 	}
@@ -1789,6 +1782,7 @@ func (w *World) checkActorTransitHazard(a *Actor, x Action, fromDistrict, toDist
 		if mit.tierDefPct > 0 {
 			prob = (prob * (100 - mit.tierDefPct/2)) / 100
 		}
+		prob = (prob * (100 - escort)) / 100
 		if prob <= 0 {
 			continue
 		}
@@ -1825,7 +1819,7 @@ func (w *World) checkActorTransitHazard(a *Actor, x Action, fromDistrict, toDist
 		})
 		events := []Event{ev}
 		if fatal {
-			events = append(events, w.markDeadIfZero(a, nil, x, "beast")...)
+			events = append(events, w.markDeadIfZero(a, nil, x, "beast", ev)...)
 		}
 		return events
 	}
@@ -1844,7 +1838,7 @@ func (w *World) stepActorOutdoorEncounters() []Event {
 		if a.Dead || a.InTransit() || a.InsideHouse != "" || w.Tick < a.JailedUntil {
 			continue
 		}
-		if a.Task != nil && a.Task.Action.Kind == "sleep" {
+		if a.Task != nil && (a.Task.Action.Kind == "sleep" || a.Task.Dormant) {
 			continue
 		}
 		if w.actorHadRecentHazard(*a, TicksPerDay/2) {
@@ -1873,6 +1867,7 @@ func (w *World) stepActorOutdoorEncounters() []Event {
 			if mit.tierDefPct > 0 {
 				prob = (prob * (100 - mit.tierDefPct/2)) / 100
 			}
+			prob = prob * (100 - w.partyEscortRiskReductionPct(*a, "")) / 100
 			if prob <= 0 {
 				continue
 			}
@@ -1904,7 +1899,7 @@ func (w *World) stepActorOutdoorEncounters() []Event {
 			})
 			events = append(events, ev)
 			if fatal {
-				events = append(events, w.markDeadIfZero(a, nil, actObj, "beast")...)
+				events = append(events, w.markDeadIfZero(a, nil, actObj, "beast", ev)...)
 			} else {
 				a.RestUntil = maxInt64(a.RestUntil, w.Tick+16)
 				events = append(events, w.interruptTaskOnDamage(a, "beast")...)

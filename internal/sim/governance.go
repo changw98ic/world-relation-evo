@@ -864,6 +864,19 @@ func (w *World) stepCohortAntiCorruptionAudit() []Event {
 			events = append(events, w.addCohortXP(censor, 5, 3)...)
 		}
 
+		jr := w.ensureJusticeRevolt()
+		jr.ensureInitialized()
+		caseID := jr.NextCaseID
+		jr.NextCaseID++
+		trial := Event{ID: w.NextID, Tick: w.Tick, ActorID: actorID, TargetID: target.ID, Kind: "court_trial_held",
+			Action: Action{Kind: gov.AuditCapability, TargetID: target.ID, Location: target.District},
+			Payload: map[string]any{"text": fmt.Sprintf("Case #%d found %d illicit coins held by %s", caseID, seize, target.Name),
+				"district": target.District, "case_id": caseID, "suspect_cohort": target.ID, "jailed": jailed}}
+		w.NextID++
+		jr.CourtCases = append(jr.CourtCases, CourtCase{ID: caseID, Tick: w.Tick, District: target.District,
+			Kind: "corruption_trial", MagistrateID: actorID, SuspectID: target.ID, IsCohort: true, Status: "convicted",
+			JailedCount: jailed, RootEventID: trial.ID})
+		events = append(events, trial)
 		purgeEv := Event{
 			ID:       w.NextID,
 			Tick:     w.Tick,
@@ -873,6 +886,9 @@ func (w *World) stepCohortAntiCorruptionAudit() []Event {
 			Action:   Action{Kind: gov.AuditCapability, TargetID: target.ID, Location: target.District, Price: int(seize)},
 			Payload: map[string]any{
 				"text":              fmt.Sprintf("%s audited %s for graft & collusion: %d corrupt officers imprisoned (%d injured resisting), %d illicit coins confiscated back to Public Treasury", censorName, target.Name, jailed, wounded, seize),
+				"case_id":           caseID,
+				"root_event_id":     trial.ID,
+				"cause_event_id":    trial.ID,
 				"oversight_cohort":  actorID,
 				"corrupt_cohort":    target.ID,
 				"jailed":            jailed,

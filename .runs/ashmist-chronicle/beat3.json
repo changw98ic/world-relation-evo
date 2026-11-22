@@ -1,0 +1,35 @@
+{
+  "label": "part_3_cocoon_war_and_outer_god",
+  "trigger_world_events": [
+    {
+      "district_id": "red_sea_rift",
+      "inline_spec": {
+        "id": "outer_god_gray_mist_descent",
+        "name": "九星旧日外神·灰雾之主探入大气层",
+        "category": "external_invasion",
+        "duration_ticks": 576,
+        "intensity": 98,
+        "casualty_permille": 140,
+        "damage": 22
+      }
+    },
+    {
+      "district_id": "ruins_zone7",
+      "inline_spec": {
+        "id": "antarctic_000_mother_card",
+        "name": "南极总站遗址·000号纯净母卡基现世",
+        "category": "artifact_emergence",
+        "duration_ticks": 576,
+        "intensity": 95,
+        "reward_item": "pure_mother_card_000",
+        "reward_qty": 1,
+        "reward_coins": 200
+      }
+    }
+  ],
+  "set_diplomacy": [
+    {"faction_a": "graystone_workshop", "faction_b": "high_council", "stance": "at_war", "relation_score": -100, "reason": "shatter_subspace_cocoon_war"},
+    {"faction_a": "red_sea_legion", "faction_b": "high_council", "stance": "at_war", "relation_score": -100, "reason": "frontline_mutiny_against_council"},
+    {"faction_a": "graystone_workshop", "faction_b": "red_sea_legion", "stance": "allied", "relation_score": 85, "reason": "humanity_united_front"}
+  ]
+}

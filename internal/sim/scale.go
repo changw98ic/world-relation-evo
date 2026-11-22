@@ -335,15 +335,16 @@ func (w *World) buildStepIndex() *stepIndex {
 			Name:        a.Name,
 			Role:        a.Role,
 			FormID:      a.FormID,
-			PowerTier:   w.Catalog.ActorPowerTier(*a),
-			CombatPower: CombatPowerWithCatalog(w.Catalog, *a),
+			PowerTier:   w.Catalog.PerceivedPowerTier(*a),
+			CombatPower: w.Catalog.PerceivedCombatPower(*a),
 			Skills:      cloneIntMap(a.Skills),
+			Guilds:      a.Guilds,
 			Tags:        nbTags,
 			Personality: a.Personality,
 			Hobbies:     append([]string(nil), a.Hobbies...),
 			Level:       a.Level,
 			Health:      a.Health,
-			Sleeping:    a.Task != nil && a.Task.Action.Kind == "sleep",
+			Sleeping:    a.Task != nil && (a.Task.Action.Kind == "sleep" || a.Task.Dormant),
 			Jailed:      a.JailedUntil > w.Tick,
 		}
 		if !a.InTransit() {
@@ -370,33 +371,15 @@ func (w *World) buildStepIndex() *stepIndex {
 
 func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 	a := w.Actors[actorIdx]
-	id := a.ID
-	a.Tags = append([]string(nil), a.Tags...)
-	a.Guilds = append([]string(nil), a.Guilds...)
-	a.Professions = cloneIntMap(a.Professions)
-	a.ProfessionRanks = cloneStringMap(a.ProfessionRanks)
-	a.ProfessionXP = cloneIntMap(a.ProfessionXP)
-	a.GuildLevels = cloneIntMap(a.GuildLevels)
-	a.Items = cloneIntMap(a.Items)
-	a.Trust = cloneIntMap(a.Trust)
-	a.StateSlots = cloneIntMap(a.StateSlots)
-	a.Currencies = cloneInt64Map(a.Currencies)
-	if a.Ambitions != nil {
-		a.Ambitions = append([]ActorAmbition(nil), a.Ambitions...)
-	}
+	id, history := a.ID, a.Memories
+	a.Memories = nil
+	a = CloneActor(a)
+	a.Memories = history
 	if a.Items == nil {
 		a.Items = map[string]int{}
 	}
 	if a.Trust == nil {
 		a.Trust = map[string]int{}
-	}
-	if a.Task != nil {
-		tc := *a.Task
-		if tc.Action.Statement != nil {
-			sc := *tc.Action.Statement
-			tc.Action.Statement = &sc
-		}
-		a.Task = &tc
 	}
 
 	dist := idx.districtByID[a.Location]
@@ -465,99 +448,101 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 	}
 	if a.InsideHouse == "" {
 		if roads := idx.roadsByDistrict[a.Location]; len(roads) > 0 {
-			p.Roads = make([]RoadView, len(roads))
-			for i, r := range roads {
+			p.Roads = make([]RoadView, 0, len(roads))
+			for _, r := range roads {
+				medium := ""
+				if road, ok := w.Map.RoadBetween(a.Location, r.To); ok {
+					medium = road.Medium
+				}
+				if severed, _ := w.isRouteSevered(a.Location, r.To, medium, ""); severed {
+					continue
+				}
 				rv := r
 				if r.LeadsToward != nil {
 					rv.LeadsToward = append([]string(nil), r.LeadsToward...)
 				}
-				p.Roads[i] = rv
+				p.Roads = append(p.Roads, rv)
 			}
 		}
 		if len(p.Map.Venues) > 0 {
 			p.Roads = nil
-			p.VenueRoutes = buildVenueRouteViews(p.Map, p.Catalog, idx.districtStates, w.actorWithEffectTags(a))
+			p.VenueRoutes = w.actorVenueRoutes(a)
 		}
 	}
 
-	if !a.InTransit() {
+	if !a.Dead && !a.InTransit() {
 		venueBucket := ""
 		if a.InsideHouse == "" {
 			venueBucket = a.VenueID
 		}
 		bucket := idx.placeBuckets[placeKey{location: a.Location, venueID: venueBucket, insideHouse: a.InsideHouse}]
 		if len(bucket) > 1 {
-			if len(bucket)-1 <= MaxNearbyView {
-				p.Nearby = make([]Neighbor, 0, len(bucket)-1)
-				for _, bi := range bucket {
-					if bi == actorIdx {
-						continue
-					}
-					nb := idx.neighborSnap[bi]
-					nb.Tags = append([]string(nil), nb.Tags...)
-					nb.Hobbies = append([]string(nil), nb.Hobbies...)
-					p.Nearby = append(p.Nearby, nb)
-				}
-			} else {
-				// Attention-capped O(1) neighbor selection for high-density districts:
-				// 1. Counterparties with active offers
-				// 2. Trusted/known acquaintances
-				// 3. Deterministic tick-rotated sample from the co-located bucket
-				selected := make([]Neighbor, 0, MaxNearbyView)
-				picked := make(map[string]bool, MaxNearbyView)
-				offerPeers := make(map[string]bool)
-				for _, o := range idx.offersByActor[id] {
-					offerPeers[o.Seller] = true
-					offerPeers[o.Buyer] = true
-				}
-				for _, bi := range bucket {
-					if bi == actorIdx {
-						continue
-					}
-					nb := idx.neighborSnap[bi]
-					if offerPeers[nb.ID] || a.Trust[nb.ID] != 0 {
-						nb.Tags = append([]string(nil), nb.Tags...)
-					nb.Hobbies = append([]string(nil), nb.Hobbies...)
-						selected = append(selected, nb)
-						picked[nb.ID] = true
-						if len(selected) >= MaxNearbyView {
-							break
+			important := map[string]int{}
+			if len(bucket)-1 > MaxNearbyView {
+				for _, party := range p.Parties {
+					if ActorHasTag(party.MemberIDs, id) {
+						for _, member := range party.MemberIDs {
+							important[member] = 4
 						}
 					}
 				}
-				if len(selected) < MaxNearbyView {
-					offset := int(neighborOrderKey(id, w.Tick, "bucket") % uint64(len(bucket)))
-					for step := 0; step < len(bucket) && len(selected) < MaxNearbyView; step++ {
-						bi := bucket[(offset+step)%len(bucket)]
-						if bi == actorIdx {
-							continue
+				for _, secret := range p.KnownSecrets {
+					important[secret.OwnerID] = maxInt(2, important[secret.OwnerID])
+					important[secret.SubjectID] = maxInt(2, important[secret.SubjectID])
+				}
+				for _, lead := range ActorKnownWrongfulLeads(a) {
+					important[lead.SuspectID] = maxInt(3, important[lead.SuspectID])
+					important[lead.MagistrateID] = maxInt(3, important[lead.MagistrateID])
+				}
+				if w.Relations != nil {
+					for _, g := range w.Relations.Grudges {
+						if !g.Resolved && w.Relations.matchesAggrieved(&a, g) && actorKnowsAboutGrudge(a, g) {
+							important[g.OffenderID] = maxInt(3, important[g.OffenderID])
 						}
-						nb := idx.neighborSnap[bi]
-						if picked[nb.ID] {
-							continue
-						}
-						nb.Tags = append([]string(nil), nb.Tags...)
-					nb.Hobbies = append([]string(nil), nb.Hobbies...)
-						selected = append(selected, nb)
-						picked[nb.ID] = true
 					}
 				}
-				p.Nearby = selected
+				for _, memory := range a.Memories {
+					if memory.Kind == "court_warrant_issued" {
+						important[memory.TargetID] = maxInt(3, important[memory.TargetID])
+					}
+				}
+				for _, offer := range idx.offersByActor[id] {
+					peer := offer.Counterparty(id)
+					important[peer] = maxInt(1, important[peer])
+				}
 			}
-			sort.Slice(p.Nearby, func(i, j int) bool {
-				ki := neighborOrderKey(id, w.Tick, p.Nearby[i].ID)
-				kj := neighborOrderKey(id, w.Tick, p.Nearby[j].ID)
-				if ki != kj {
-					return ki < kj
+			ordered := make([]int, 0, len(bucket)-1)
+			for _, bi := range bucket {
+				if bi != actorIdx {
+					ordered = append(ordered, bi)
 				}
-				return p.Nearby[i].ID < p.Nearby[j].ID
+			}
+			sort.Slice(ordered, func(i, j int) bool {
+				bi, bj := idx.neighborSnap[ordered[i]].ID, idx.neighborSnap[ordered[j]].ID
+				if important[bi] != important[bj] {
+					return important[bi] > important[bj]
+				}
+				ki, kj := neighborOrderKey(id, w.Tick, bi), neighborOrderKey(id, w.Tick, bj)
+				if ki == kj {
+					return bi < bj
+				}
+				return ki < kj
 			})
+			for _, bi := range ordered[:min(len(ordered), MaxNearbyView)] {
+				nb := idx.neighborSnap[bi]
+				nb.Tags = append([]string(nil), nb.Tags...)
+				nb.Hobbies = append([]string(nil), nb.Hobbies...)
+				nb.Guilds = append([]string(nil), nb.Guilds...)
+				nb.Skills = cloneIntMap(nb.Skills)
+				p.Nearby = append(p.Nearby, nb)
+			}
 		}
 	}
 
 	if offers := idx.offersByActor[id]; len(offers) > 0 {
 		p.Offers = append([]Offer(nil), offers...)
 	}
+	p.ActiveGoldenFingers = w.goldenFingerViewsFor(p.Self)
 	w.applyPerceptionEvoHintsWithAgreements(&p, idx.agreementsByActor[id])
 	recallPerceptionMemories(&p)
 	return p
@@ -2498,6 +2483,7 @@ func (w *World) stepCohortRecuperation() []Event {
 			c.ensureResidents(c.Population)
 			c.updateResidentBandState(released, func(b ResidentBand) bool { return b.Jailed }, func(b *ResidentBand) { b.Jailed = false })
 			c.Jailed -= released
+			w.settleCohortRelease(c.ID, released)
 			e := Event{
 				ID:      w.NextID,
 				Tick:    w.Tick,
@@ -2505,7 +2491,7 @@ func (w *World) stepCohortRecuperation() []Event {
 				Kind:    "cohort_released",
 				Action:  Action{Kind: "wait", Location: c.District},
 				Payload: map[string]any{
-					"text":             fmt.Sprintf("Yamen jail released %d sentence-completed members back to %s (%d still imprisoned)", released, c.Name, c.Jailed),
+					"text":             fmt.Sprintf("Authorities released %d members back to %s after their sentences (%d still imprisoned)", released, c.Name, c.Jailed),
 					"cohort_id":        c.ID,
 					"released":         released,
 					"remaining_jailed": c.Jailed,
@@ -2608,7 +2594,7 @@ func (w *World) stepCohortConflictsAt(district string) []Event {
 		} else if dayIdx == 2 && peddlers != nil {
 			target = peddlers
 		}
-		if target != nil && target.EffectivePopulation() >= 10 {
+		if target != nil && target.EffectivePopulation() >= 10 && !w.AreFactionsAllied(bandits.FactionID, target.FactionID) {
 			raiderSquad := bandits.EffectivePopulation() / 25
 			if banditLeaders != nil {
 				raiderSquad += banditLeaders.EffectivePopulation() / 15
@@ -2796,7 +2782,7 @@ func (w *World) stepCohortConflictsAt(district string) []Event {
 		if (w.Tick/TicksPerDay)%2 == 0 && martial != nil && martial.EffectivePopulation() >= 4 {
 			rival = martial
 		}
-		if rival != nil && rival.EffectivePopulation() >= 4 {
+		if rival != nil && !w.AreFactionsAllied(gangsters.FactionID, rival.FactionID) && rival.EffectivePopulation() >= 4 {
 			fighterCount := gangsters.EffectivePopulation() / 18
 			if gangBosses != nil {
 				fighterCount += gangBosses.EffectivePopulation() / 12
@@ -2966,6 +2952,9 @@ func (w *World) stepCohortConflictsAt(district string) []Event {
 		}
 	}
 
+	if clock.Hour == 17 && clock.Minute == 0 {
+		events = append(events, w.settleCohortWarClashes(district)...)
+	}
 	return events
 }
 
@@ -3275,7 +3264,7 @@ func (s *ScaleSummary) RecordEvents(events []Event) {
 			if d > 0 {
 				s.DeathsByCause["beast"] += d
 			}
-		case "cohort_threat_hunted", "threat_hunted":
+		case "threat_hunted":
 			s.ThreatHunts++
 			s.BountyCoins += payloadInt64(e.Payload, "bounty_coins")
 			s.WoundedPeople += payloadInt64(e.Payload, "wounded")
@@ -3550,8 +3539,51 @@ func (s *ScaleSummary) RecordEvents(events []Event) {
 			s.SpotlightDemotions++
 		case "rumor_panic_triggered":
 			s.RumorPanics++
-		case "gossip_seeded":
-			s.GossipSeeded++
 		}
 	}
+}
+
+func (w *World) hasActiveCohorts() bool {
+	for _, cohort := range w.Cohorts {
+		if cohort.Population > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (w *World) settleCohortWarClashes(district string) []Event {
+	if w.Diplomacy == nil {
+		return nil
+	}
+	front := map[string]*PopulationCohort{}
+	for i := range w.Cohorts {
+		c := &w.Cohorts[i]
+		if c.District != district || c.FactionID == "" || c.EffectivePopulation() == 0 ||
+			(!w.isLawCollectorCohort(c) && !w.isOutlawCohort(c, w.effectiveJusticeSpec(w.JusticeRevolt)) && !w.Catalog.HasCoercivePower([]string{c.Profession})) {
+			continue
+		}
+		if prior := front[c.FactionID]; prior == nil || c.EffectivePopulation() > prior.EffectivePopulation() {
+			front[c.FactionID] = c
+		}
+	}
+	factions := sortedProductionKeys(front)
+	var events []Event
+	for i, left := range factions {
+		for _, right := range factions[i+1:] {
+			a, b := front[left], front[right]
+			if !w.AreFactionsAtWar(left, right) || a.EffectivePopulation() == 0 || b.EffectivePopulation() == 0 {
+				continue
+			}
+			attackers, defenders := a.EffectivePopulation(), b.EffectivePopulation()
+			aw, ad, _ := w.applyCohortCasualtiesWithCause(a, maxInt(1, minInt(attackers, defenders)/40), minInt(attackers, defenders)/160, 0, "combat")
+			bw, bd, _ := w.applyCohortCasualtiesWithCause(b, maxInt(1, minInt(attackers, defenders)/35), minInt(attackers, defenders)/150, 0, "combat")
+			events = append(events, Event{ID: w.NextID, Tick: w.Tick, ActorID: a.ID, TargetID: b.ID, Kind: "faction_battle",
+				Action: Action{Kind: "attack", TargetID: b.ID, Location: district},
+				Payload: map[string]any{"text": fmt.Sprintf("%s and %s fought in %s", a.Name, b.Name, district), "district": district,
+					"attacker_wounded": aw, "attacker_deaths": ad, "defender_wounded": bw, "defender_deaths": bd}})
+			w.NextID++
+		}
+	}
+	return events
 }

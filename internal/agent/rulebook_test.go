@@ -965,3 +965,64 @@ func TestRulebookSelector_PowerTierSuppressionAndSkillAffinity(t *testing.T) {
 		t.Fatalf("expected sword_art not to boost unrelated offer action, got %.2f", mNone)
 	}
 }
+
+func TestRulebookParallelDecisionsUseEachObserversKnowledge(t *testing.T) {
+	book := &InteractionRulebook{WorldID: "observer-local", ProactiveRules: []InteractionRule{{
+		ID: "contact", Priority: "high", Weight: 30,
+		Actor1:   RoleMatcher{Roles: []string{"caller"}},
+		Actor2:   RoleMatcher{Roles: []string{"contact"}},
+		Behavior: BehaviorSpec{EngineKind: "transmit_message", TargetBinding: "$actor2"},
+	}}}
+	caller := testPerception("caller", "Caller", "here", 8, nil, 0, 0, 100, 100)
+	caller.Self.Role = "caller"
+	caller.Self.Trust = map[string]int{"peer": 3}
+	peer := testPerception("peer", "Peer", "elsewhere", 8, nil, 0, 0, 100, 100)
+	peer.Self.Role = "contact"
+	options := []Option{
+		{ID: "wait", Action: sim.Action{Kind: "wait"}},
+		{ID: "contact", Action: sim.Action{Kind: "transmit_message", TargetID: "peer", Text: "Hello"}},
+	}
+
+	first := NewRulebookSelector(book, nil)
+	if _, err := first.Select(context.Background(), peer, options[:1]); err != nil {
+		t.Fatal(err)
+	}
+	expected, err := first.Select(context.Background(), caller, options)
+	if err != nil || expected != "wait" {
+		t.Fatalf("caller used another actor's private profile: %q, %v", expected, err)
+	}
+
+	for range 12 {
+		selector := NewRulebookSelector(book, nil)
+		done := make(chan error, 1)
+		go func() {
+			_, err := selector.Select(context.Background(), peer, options[:1])
+			done <- err
+		}()
+		got, err := selector.Select(context.Background(), caller, options)
+		if peerErr := <-done; peerErr != nil {
+			t.Fatal(peerErr)
+		}
+		if err != nil || got != expected {
+			t.Fatalf("parallel selection = %q, %v; serial selection = %q", got, err, expected)
+		}
+	}
+
+	caller.Nearby = []sim.Neighbor{{ID: "peer", Role: "contact", Name: "Peer", Health: 100}}
+	if got, err := NewRulebookSelector(book, nil).Select(context.Background(), caller, options); err != nil || got != "contact" {
+		t.Fatalf("caller ignored a personally observed contact: %q, %v", got, err)
+	}
+}
+
+func TestCommunicationOptionMatchesTheExactCitedStatement(t *testing.T) {
+	death := &sim.Statement{Topic: "actor_died", SubjectID: "offender", ObjectID: "victim"}
+	options := []Option{
+		{ID: "supply", Action: sim.Action{Kind: "speak", TargetID: "listener", BasisEventID: 10, Statement: &sim.Statement{Topic: "supply"}}},
+		{ID: "incorrect-citation", Action: sim.Action{Kind: "speak", TargetID: "listener", BasisEventID: 11, Statement: death}},
+		{ID: "death", Action: sim.Action{Kind: "speak", TargetID: "listener", BasisEventID: 12, Statement: death}},
+	}
+	desired := sim.Action{Kind: "speak", TargetID: "listener", BasisEventID: 12, Statement: death}
+	if got := ruleOptionID(desired, options); got != "death" {
+		t.Fatalf("requested death report selected %q", got)
+	}
+}
