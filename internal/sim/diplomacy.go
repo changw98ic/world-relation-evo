@@ -133,12 +133,57 @@ func (w *World) factionObservers(f1, f2, excludeID string) []*Actor {
 	return out
 }
 
+// announceDiplomacy records diplomatic eyewitness observations strictly for awake, co-located
+// observers (or awake actors in the event's district for world-level emergency coalitions).
+// Remote or sleeping faction members must learn of diplomatic shifts through real communication.
 func (w *World) announceDiplomacy(ev Event, f1, f2 string) {
-	notice := Statement{Topic: ev.Kind, SubjectID: f1, ObjectID: f2, Location: ev.Action.Location}
-	for _, actor := range w.factionObservers(f1, f2, ev.ActorID) {
-		actor.Memories = appendMemory(actor.Memories, Memory{Kind: ev.Kind, Source: ev.ActorID,
-			TargetID: ev.TargetID, Tick: ev.Tick, EventID: ev.ID, RootEventID: payloadInt64(ev.Payload, "root_event_id"),
-			Statement: &notice, Text: relPayloadString(ev.Payload, "text")})
+	obs := Observation{
+		Kind:      ev.Kind,
+		Modality:  "eyewitness",
+		SubjectID: f1,
+		ObjectID:  f2,
+		Location:  ev.Action.Location,
+	}
+	if existing, ok := ev.Payload["observation"].(Observation); ok {
+		obs = existing
+	}
+	var listeners []*Actor
+	if actor := w.actor(ev.ActorID); actor != nil && !actor.Dead {
+		listeners = w.awakeSamePlaceObservers(*actor, actor.ID)
+	} else {
+		district := ev.Action.Location
+		if district == "" {
+			district, _ = ev.Payload["district"].(string)
+		}
+		if district != "" {
+			for i := range w.Actors {
+				b := &w.Actors[i]
+				if b.Dead || b.Location != district || b.InsideHouse != "" {
+					continue
+				}
+				if b.Task != nil && (b.Task.Action.Kind == "sleep" || b.Task.Dormant) {
+					continue
+				}
+				listeners = append(listeners, b)
+			}
+		}
+	}
+	rootID := payloadInt64(ev.Payload, "root_event_id")
+	if rootID == 0 {
+		rootID = ev.ID
+	}
+	for _, observer := range listeners {
+		obsCopy := obs
+		observer.Memories = appendMemory(observer.Memories, Memory{
+			Kind:        ev.Kind,
+			Source:      ev.ActorID,
+			TargetID:    ev.TargetID,
+			Tick:        ev.Tick,
+			EventID:     ev.ID,
+			RootEventID: rootID,
+			Observation: &obsCopy,
+			Text:        relPayloadString(ev.Payload, "text"),
+		})
 	}
 }
 
@@ -709,6 +754,35 @@ func (w *World) stepDiplomacy(settled []Event) []Event {
 	return events
 }
 
+func actorKnowsDiplomacyUpdate(a Actor, rel FactionDiplomacy) bool {
+	// Seeded initial bilateral diplomacy (no post-start RootEventID) is baseline common knowledge.
+	if rel.RootEventID == 0 {
+		return true
+	}
+	for _, m := range a.Memories {
+		if m.EventID == rel.RootEventID || m.RootEventID == rel.RootEventID {
+			return true
+		}
+		if m.Observation != nil && (m.Observation.Kind == "faction_war_declared" || m.Observation.Kind == "alliance_formed" || m.Observation.Kind == "alliance_broken" || m.Observation.Kind == "peace_treaty_signed") {
+			if (m.Observation.SubjectID == rel.FactionA && m.Observation.ObjectID == rel.FactionB) ||
+				(m.Observation.SubjectID == rel.FactionB && m.Observation.ObjectID == rel.FactionA) {
+				if m.Tick >= rel.WarStartedTick {
+					return true
+				}
+			}
+		}
+		if m.Statement != nil && (m.Statement.Topic == "faction_war_declared" || m.Statement.Topic == "alliance_formed" || m.Statement.Topic == "alliance_broken" || m.Statement.Topic == "peace_treaty_signed") {
+			if (m.Statement.SubjectID == rel.FactionA && m.Statement.ObjectID == rel.FactionB) ||
+				(m.Statement.SubjectID == rel.FactionB && m.Statement.ObjectID == rel.FactionA) {
+				if m.Tick >= rel.WarStartedTick {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func (w *World) perceivedFactionDiplomacy(a Actor) []FactionDiplomacy {
 	if w == nil || w.Diplomacy == nil || len(w.Diplomacy.Relations) == 0 {
 		return nil
@@ -724,7 +798,7 @@ func (w *World) perceivedFactionDiplomacy(a Actor) []FactionDiplomacy {
 		if rel == nil {
 			continue
 		}
-		if ActorHasTag(a.Guilds, rel.FactionA) || ActorHasTag(a.Guilds, rel.FactionB) {
+		if (ActorHasTag(a.Guilds, rel.FactionA) || ActorHasTag(a.Guilds, rel.FactionB)) && actorKnowsDiplomacyUpdate(a, *rel) {
 			out = append(out, *rel)
 		}
 	}

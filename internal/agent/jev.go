@@ -23,6 +23,7 @@ type Jev struct {
 	Endpoint, APIKey, Name string
 	Client                 *http.Client
 	Trace                  *runtrace.Writer
+	RulebookAdvisor        *RulebookSelector
 }
 
 // TypeSafe's Choice protocol limit, not a limit on a character's available actions.
@@ -35,6 +36,10 @@ func (j Jev) Select(ctx context.Context, p sim.Perception, options []Option) (ch
 	}()
 	if len(options) == 0 {
 		return "", fmt.Errorf("Jev choice requires at least one option")
+	}
+	var rulebookGuidance []string
+	if j.RulebookAdvisor != nil {
+		options, rulebookGuidance = j.RulebookAdvisor.EnrichOptionsForJev(p, options)
 	}
 	criteria := make(map[string]string, len(options))
 	for _, o := range options {
@@ -63,6 +68,9 @@ func (j Jev) Select(ctx context.Context, p sim.Perception, options []Option) (ch
 	if ap := p.ActivePlan; ap != nil {
 		instructions += fmt.Sprintf(" Active plan directive: stage=%s item=%s recipe=%s target=%d sold=%d remaining_to_sell=%d held=%d deficit_to_produce=%d next_step=%s.",
 			ap.Stage, ap.Item, ap.RecipeID, ap.TargetQuantity, ap.SoldQuantity, ap.RemainingToSell, ap.HeldQuantity, ap.DeficitToProduce, ap.NextStep)
+	}
+	if len(rulebookGuidance) > 0 {
+		instructions += " Matched interaction rulebook recommendations (verified executable): " + strings.Join(rulebookGuidance, "; ") + "."
 	}
 	remaining := options
 	for len(remaining) > jevChoiceLimit {
@@ -108,7 +116,29 @@ func (j Jev) Select(ctx context.Context, p sim.Perception, options []Option) (ch
 	for _, option := range remaining {
 		leafCriteria[option.ID] = criteria[option.ID]
 	}
-	return j.selectChoice(ctx, p, leafCriteria, instructions, "action")
+	chosen, err := j.selectChoice(ctx, p, leafCriteria, instructions, "action")
+	if err != nil {
+		return "", err
+	}
+	if j.RulebookAdvisor != nil {
+		var basisID int64
+		for _, option := range remaining {
+			if option.ID == chosen {
+				basisID = option.Action.BasisEventID
+				break
+			}
+		}
+		j.RulebookAdvisor.SetLastTriggerEventID(p.Self.ID, basisID)
+	}
+	return chosen, nil
+}
+
+// LastTriggerEventID returns the causal trigger event ID recorded for actorID when Jev uses RulebookAdvisor.
+func (j Jev) LastTriggerEventID(actorID string) int64 {
+	if j.RulebookAdvisor == nil {
+		return 0
+	}
+	return j.RulebookAdvisor.LastTriggerEventID(actorID)
 }
 
 func (j Jev) selectChoice(ctx context.Context, p sim.Perception, criteria map[string]string, instructions, stage string) (string, error) {

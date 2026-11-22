@@ -334,7 +334,7 @@ func (w *World) buildStepIndex() *stepIndex {
 			ID:          a.ID,
 			Name:        a.Name,
 			Role:        a.Role,
-			FormID:      a.FormID,
+			FormID:      w.Catalog.PerceivedFormID(*a),
 			PowerTier:   w.Catalog.PerceivedPowerTier(*a),
 			CombatPower: w.Catalog.PerceivedCombatPower(*a),
 			Skills:      cloneIntMap(a.Skills),
@@ -443,6 +443,9 @@ func (w *World) viewIndexed(actorIdx int, idx *stepIndex) Perception {
 			fv.Professions = append([]string(nil), fb.Professions...)
 			fv.Requirements = cloneIntMap(fb.Requirements)
 			fv.Joined = idx.factionMembers[fb.ID][id]
+			if i < len(w.Factions) {
+				fv.JoinBlockReason = w.FactionJoinEligibilityReason(a, w.Factions[i])
+			}
 			p.Factions[i] = fv
 		}
 	}

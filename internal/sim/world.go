@@ -271,14 +271,15 @@ type RoadView struct {
 
 // FactionView is the public summary of a guild visible to every actor.
 type FactionView struct {
-	ID           string         `json:"id"`
-	Name         string         `json:"name"`
-	District     string         `json:"district"`
-	Level        int            `json:"level"`
-	Professions  []string       `json:"professions"`
-	Requirements map[string]int `json:"requirements,omitempty"`
-	Joined       bool           `json:"joined"`
-	Members      int            `json:"members"`
+	ID              string         `json:"id"`
+	Name            string         `json:"name"`
+	District        string         `json:"district"`
+	Level           int            `json:"level"`
+	Professions     []string       `json:"professions"`
+	Requirements    map[string]int `json:"requirements,omitempty"`
+	Joined          bool           `json:"joined"`
+	JoinBlockReason string         `json:"join_block_reason,omitempty"`
+	Members         int            `json:"members"`
 }
 
 type CohortView struct {
@@ -757,6 +758,33 @@ func (w *World) house(id string) *House {
 	return nil
 }
 
+// FactionJoinEligibilityReason returns a non-empty block reason if actor a is ineligible to join
+// faction f (already a member, charter attributes unmet, or f is at war / hostile with any of a's guilds).
+// Both Perception/Options and World.Apply("join_faction") use this single source of truth.
+func (w *World) FactionJoinEligibilityReason(a Actor, f Faction) string {
+	if f.HasMember(a.ID) || ActorHasTag(a.Guilds, f.ID) {
+		return "already a member of " + f.Name
+	}
+	if ok, reason := a.Attributes.Meets(f.Requirements); !ok {
+		return "guild charter unmet: " + reason
+	}
+	for _, gID := range a.Guilds {
+		if gID == f.ID {
+			continue
+		}
+		if w.AreFactionsAtWar(gID, f.ID) {
+			return "cannot join a faction at war with " + gID
+		}
+		if w.Diplomacy != nil {
+			key, _, _ := diplomacyKey(gID, f.ID)
+			if rel := w.Diplomacy.Relations[key]; rel != nil && (rel.Stance == "hostile" || rel.RelationScore <= -30) {
+				return "cannot join hostile faction " + f.Name
+			}
+		}
+	}
+	return ""
+}
+
 func (w *World) faction(id string) *Faction {
 	for i := range w.Factions {
 		if w.Factions[i].ID == id {
@@ -968,14 +996,15 @@ func (w *World) View(id string) Perception {
 	}
 	for _, f := range w.Factions {
 		p.Factions = append(p.Factions, FactionView{
-			ID:           f.ID,
-			Name:         f.Name,
-			District:     f.District,
-			Level:        f.Level,
-			Professions:  append([]string(nil), f.Professions...),
-			Requirements: cloneIntMap(f.Requirements),
-			Joined:       f.HasMember(id),
-			Members:      len(f.Members),
+			ID:              f.ID,
+			Name:            f.Name,
+			District:        f.District,
+			Level:           f.Level,
+			Professions:     append([]string(nil), f.Professions...),
+			Requirements:    cloneIntMap(f.Requirements),
+			Joined:          f.HasMember(id),
+			JoinBlockReason: w.FactionJoinEligibilityReason(a, f),
+			Members:         len(f.Members),
 		})
 	}
 
@@ -1004,7 +1033,7 @@ func (w *World) View(id string) Perception {
 				ID:          b.ID,
 				Name:        b.Name,
 				Role:        b.Role,
-				FormID:      b.FormID,
+				FormID:      w.Catalog.PerceivedFormID(b),
 				PowerTier:   w.Catalog.PerceivedPowerTier(b),
 				CombatPower: w.Catalog.PerceivedCombatPower(b),
 				Skills:      cloneIntMap(b.Skills),
@@ -2454,28 +2483,11 @@ func (w *World) apply(id string, x Action) []Event {
 		if f == nil {
 			return fail("unknown faction: " + x.FactionID)
 		}
-		if f.HasMember(id) {
-			return fail("already a member of " + f.Name)
+		if reason := w.FactionJoinEligibilityReason(*a, *f); reason != "" {
+			return fail(reason)
 		}
 		if a.InsideHouse != "" || a.Location != f.District {
 			return fail("joining " + f.Name + " requires standing at the guild hall in " + f.District)
-		}
-		if ok, reason := a.Attributes.Meets(f.Requirements); !ok {
-			return fail("guild charter unmet: " + reason)
-		}
-		for _, gID := range a.Guilds {
-			if gID == f.ID {
-				continue
-			}
-			if w.AreFactionsAtWar(gID, f.ID) {
-				return fail("cannot join a faction at war with " + gID)
-			}
-			if w.Diplomacy != nil {
-				key, _, _ := diplomacyKey(gID, f.ID)
-				if rel := w.Diplomacy.Relations[key]; rel != nil && (rel.Stance == "hostile" || rel.RelationScore <= -30) {
-					return fail("cannot join hostile faction " + f.Name)
-				}
-			}
 		}
 		f.Members = append(f.Members, id)
 		a.Guilds = appendUnique(a.Guilds, f.ID)

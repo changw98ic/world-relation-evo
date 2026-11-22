@@ -570,7 +570,7 @@ func (policy rulesPolicy) preferences(p sim.Perception, consider func(sim.Action
 					if consider(sim.Action{
 						Kind:     "speak",
 						TargetID: b.ID,
-						Text:     fmt.Sprintf("I have %d food, %d energy, and am trying to %s.", a.Items["food"], a.Energy, a.Goal),
+						Text:     fmt.Sprintf("Checking in from %s; supplies=%d, energy=%d.", a.Location, totalEdibleItems(p.Catalog, a), a.Energy),
 					}) {
 						return
 					}
@@ -976,7 +976,7 @@ func planGuildProgress(p sim.Perception) (sim.Action, bool) {
 					continue
 				}
 			}
-			if ok, _ := a.Attributes.Meets(f.Requirements); ok {
+			if f.JoinBlockReason == "" {
 				return sim.Action{Kind: "join_faction", FactionID: f.ID}, true
 			}
 			continue
@@ -1803,7 +1803,7 @@ func immediateFoodAction(p sim.Perception, options []Option) (sim.Action, bool) 
 				continue
 			}
 			if !f.Joined {
-				if ok, _ := p.Self.Attributes.Meets(f.Requirements); !ok {
+				if f.JoinBlockReason != "" {
 					continue
 				}
 			}

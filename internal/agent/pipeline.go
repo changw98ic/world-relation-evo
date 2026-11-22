@@ -225,7 +225,7 @@ func Options(p sim.Perception) []Option {
 				continue
 			}
 			if !f.Joined {
-				if ok, _ := a.Attributes.Meets(f.Requirements); ok {
+				if f.JoinBlockReason == "" {
 					add(fmt.Sprintf("Join %s guild (guild level %d; charter %s)", f.Name, f.Level, requirementSummary(f.Requirements)), sim.Action{
 						Kind: "join_faction", FactionID: f.ID,
 					})
@@ -1368,7 +1368,7 @@ func buildCommunicationAction(p sim.Perception, a sim.Action) sim.Action {
 			return a
 		}
 	}
-	a.Text = fmt.Sprintf("I have %d food, %d energy, and am trying to %s.", p.Self.Items["food"], p.Self.Energy, p.Self.Goal)
+	a.Text = fmt.Sprintf("Checking in from %s; supplies=%d, energy=%d.", p.Self.Location, totalEdibleItems(p.Catalog, p.Self), p.Self.Energy)
 	return a
 }
 
@@ -1491,6 +1491,26 @@ func reportFromMemory(m sim.Memory, self sim.Actor, listenerID string) (speechDr
 					Item:      m.Observation.Item,
 					Location:  m.Observation.Location,
 					Quantity:  1,
+				},
+			}, true
+		case "faction_war_declared", "alliance_formed", "alliance_broken", "peace_treaty_signed":
+			o := m.Observation
+			if o.SubjectID == "" || o.ObjectID == "" {
+				return speechDraft{}, false
+			}
+			text := m.Text
+			if text == "" {
+				text = fmt.Sprintf("I witnessed %s between %s and %s at %s.", o.Kind, o.SubjectID, o.ObjectID, o.Location)
+			}
+			return speechDraft{
+				Text:         text,
+				BasisEventID: m.EventID,
+				Statement: &sim.Statement{
+					Topic:     o.Kind,
+					SubjectID: o.SubjectID,
+					ObjectID:  o.ObjectID,
+					Location:  o.Location,
+					Quantity:  o.Quantity,
 				},
 			}, true
 		case "actor_died":

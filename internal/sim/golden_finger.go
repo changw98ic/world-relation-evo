@@ -42,6 +42,7 @@ type GFPassiveSpec struct {
 	SkillXPMultiplierPct int           `json:"skill_xp_multiplier_pct,omitempty"`
 	CombatBonus          int           `json:"combat_bonus,omitempty"`
 	DisguisePowerTier    int           `json:"disguise_power_tier,omitempty"`
+	DisguiseFormID       string        `json:"disguise_form_id,omitempty"`
 	DailyPocketYield     *GFRewardSpec `json:"daily_pocket_yield,omitempty"`
 	RescueBelowHealth    int           `json:"rescue_below_health,omitempty"`
 	RescueHeal           int           `json:"rescue_heal,omitempty"`
@@ -363,6 +364,47 @@ func (c Catalog) GoldenFingerCombatBonus(a Actor) int {
 		}
 	}
 	return bonus
+}
+
+// PerceivedFormID returns the actor's apparent FormID to outsiders, honoring DisguiseFormID / DisguisePowerTier.
+func (c Catalog) PerceivedFormID(a Actor) string {
+	trueTier := c.ActorPowerTier(a)
+	disguiseTier := 0
+	for _, gf := range c.ActiveGoldenFingersFor(a) {
+		if gf.Passive == nil {
+			continue
+		}
+		if gf.Passive.DisguiseFormID != "" {
+			return gf.Passive.DisguiseFormID
+		}
+		if gf.Passive.DisguisePowerTier > 0 && gf.Passive.DisguisePowerTier < trueTier {
+			if disguiseTier == 0 || gf.Passive.DisguisePowerTier < disguiseTier {
+				disguiseTier = gf.Passive.DisguisePowerTier
+			}
+		}
+	}
+	if disguiseTier == 0 {
+		return a.FormID
+	}
+	// Deterministically select a matching lower-tier form so the true high-tier FormID is never leaked.
+	formKeys := make([]string, 0, len(c.Forms))
+	for k := range c.Forms {
+		formKeys = append(formKeys, k)
+	}
+	sort.Strings(formKeys)
+	bestID := ""
+	bestTier := -1
+	for _, k := range formKeys {
+		f := c.Forms[k]
+		if f.PowerTier <= disguiseTier && f.PowerTier > bestTier {
+			bestTier = f.PowerTier
+			bestID = f.ID
+			if bestID == "" {
+				bestID = k
+			}
+		}
+	}
+	return bestID
 }
 
 // PerceivedPowerTier returns the actor's apparent power tier to outsiders, honoring DisguisePowerTier ("扮猪吃虎").
@@ -1104,7 +1146,13 @@ func (w *World) stepGoldenFingers(tickEvents []Event) []Event {
 							penParts = append(penParts, fmt.Sprintf("-%d coins", loss))
 						}
 						if len(fp.CurrencyLoss) > 0 {
-							for cur, amt := range fp.CurrencyLoss {
+							curKeys := make([]string, 0, len(fp.CurrencyLoss))
+							for cur := range fp.CurrencyLoss {
+								curKeys = append(curKeys, cur)
+							}
+							sort.Strings(curKeys)
+							for _, cur := range curKeys {
+								amt := fp.CurrencyLoss[cur]
 								if amt > 0 && a.Currencies[cur] > 0 {
 									loss := amt
 									if loss > a.Currencies[cur] {

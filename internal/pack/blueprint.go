@@ -64,7 +64,7 @@ type BlueprintItem struct {
 	Tier           int    `json:"tier,omitempty"`
 	Edible         bool   `json:"edible,omitempty"`
 	Potable        bool   `json:"potable,omitempty"`
-	Tradeable      bool   `json:"tradeable,omitempty"`
+	Tradeable      *bool  `json:"tradeable,omitempty"`
 	BatchPrice     int    `json:"batch_price,omitempty"`
 	NutritionUnits int64  `json:"nutrition_units,omitempty"`
 	MassUnits      int64  `json:"mass_units,omitempty"`
@@ -84,7 +84,7 @@ type BlueprintRoad struct {
 	From       string `json:"from"`
 	To         string `json:"to"`
 	Ticks      int    `json:"ticks,omitempty"`
-	EnergyCost int    `json:"energy_cost,omitempty"`
+	EnergyCost *int   `json:"energy_cost,omitempty"`
 	Medium     string `json:"medium,omitempty"`
 }
 
@@ -115,7 +115,7 @@ type BlueprintActor struct {
 	FormID      string              `json:"form_id,omitempty"`
 	Attributes  *sim.Attributes     `json:"attributes,omitempty"`
 	AgeYears    int                 `json:"age_years,omitempty"`
-	Money       int                 `json:"money,omitempty"`
+	Money       *int                `json:"money,omitempty"`
 	Goal        string              `json:"goal,omitempty"`
 	Trust       map[string]int      `json:"trust,omitempty"`
 	Items       map[string]int      `json:"items,omitempty"`
@@ -154,13 +154,13 @@ type BlueprintWorldEvent struct {
 	Name               string   `json:"name"`
 	Category           string   `json:"category"` // artifact_emergence | terrain_shift | external_invasion
 	TargetFeatures     []string `json:"target_features,omitempty"`
-	ProbPermillePerDay int      `json:"prob_permille_per_day,omitempty"`
+	ProbPermillePerDay *int     `json:"prob_permille_per_day,omitempty"`
 	MinDay             int      `json:"min_day,omitempty"`
 	CooldownDays       int      `json:"cooldown_days,omitempty"`
 	DurationDays       int      `json:"duration_days,omitempty"`
 	Intensity          int      `json:"intensity,omitempty"`
 	RewardItem         string   `json:"reward_item,omitempty"`
-	RewardQty          int      `json:"reward_qty,omitempty"`
+	RewardQty          *int     `json:"reward_qty,omitempty"`
 	RewardCoins        int      `json:"reward_coins,omitempty"`
 	RequiredPowerTier  int      `json:"required_power_tier,omitempty"`
 	CasualtyPermille   int      `json:"casualty_permille,omitempty"`
@@ -326,10 +326,14 @@ func CompileBlueprint(bp Blueprint) (*WorldPack, error) {
 		if nm == "" {
 			nm = ci.ID
 		}
+		tradeable := true
+		if ci.Tradeable != nil {
+			tradeable = *ci.Tradeable
+		}
 		items[ci.ID] = sim.ItemSpec{
 			ID: ci.ID, Name: nm, Tier: tier,
 			Edible: ci.Edible, Potable: ci.Potable,
-			Tradeable: true, MassUnits: mass, NutritionUnits: ci.NutritionUnits,
+			Tradeable: tradeable, MassUnits: mass, NutritionUnits: ci.NutritionUnits,
 			CombatBonus: ci.CombatBonus, EquipSlot: ci.EquipSlot,
 			BatchQty: 1, BatchPrice: price, OfferThreshold: 2, SurplusThreshold: 3,
 		}
@@ -420,9 +424,12 @@ func CompileBlueprint(bp Blueprint) (*WorldPack, error) {
 			if ticks <= 0 {
 				ticks = 1
 			}
-			ecost := r.EnergyCost
-			if ecost <= 0 {
-				ecost = 2
+			ecost := 2
+			if r.EnergyCost != nil {
+				ecost = *r.EnergyCost
+				if ecost < 0 {
+					ecost = 0
+				}
 			}
 			med := r.Medium
 			if med == "" {
@@ -538,9 +545,12 @@ func CompileBlueprint(bp Blueprint) (*WorldPack, error) {
 				}
 			}
 		}
-		money := ba.Money
-		if money <= 0 {
-			money = 50
+		money := 50
+		if ba.Money != nil {
+			money = *ba.Money
+			if money < 0 {
+				money = 0
+			}
 		}
 		age := ba.AgeYears
 		if age <= 0 {
@@ -719,9 +729,21 @@ func CompileBlueprint(bp Blueprint) (*WorldPack, error) {
 				}
 			}
 		}
-		prob := we.ProbPermillePerDay
-		if prob <= 0 {
-			prob = 80
+		prob := 80
+		if we.ProbPermillePerDay != nil {
+			prob = *we.ProbPermillePerDay
+			if prob < 0 {
+				prob = 0
+			}
+		}
+		rewardQty := 0
+		if we.RewardQty != nil {
+			rewardQty = *we.RewardQty
+			if rewardQty < 0 {
+				rewardQty = 0
+			}
+		} else if we.RewardItem != "" {
+			rewardQty = 1
 		}
 		durDays := we.DurationDays
 		if durDays <= 0 {
@@ -742,7 +764,7 @@ func CompileBlueprint(bp Blueprint) (*WorldPack, error) {
 			DurationTicks:      int64(durDays) * sim.TicksPerDay,
 			Intensity:          inten,
 			RewardItem:         we.RewardItem,
-			RewardQty:          we.RewardQty,
+			RewardQty:          rewardQty,
 			RewardCoins:        we.RewardCoins,
 			RequiredPowerTier:  we.RequiredPowerTier,
 			CasualtyPermille:   we.CasualtyPermille,

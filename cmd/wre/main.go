@@ -482,10 +482,18 @@ func buildDecider(mode, playbookDir, rulebookPath, rulebookOverlay string, w *si
 		if key == "" {
 			return nil, nil, nil, fmt.Errorf("jev mode requires WRE_JEV_KEY")
 		}
+		var advisor *agent.RulebookSelector
+		if strings.TrimSpace(rulebookPath) != "" || strings.TrimSpace(rulebookOverlay) != "" {
+			rb, err := agent.LoadRulebookWithOverlay(rulebookPath, rulebookOverlay, w)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			advisor = agent.NewRulebookSelector(rb, evidence)
+		}
 		return agent.Pipeline{
-			Selector: agent.Jev{Endpoint: jevURL, Name: jevName, APIKey: key, Trace: evidence},
+			Selector: agent.Jev{Endpoint: jevURL, Name: jevName, APIKey: key, Trace: evidence, RulebookAdvisor: advisor},
 			Trace:    evidence,
-		}, nil, nil, nil
+		}, nil, advisor, nil
 	default:
 		return nil, nil, nil, fmt.Errorf("unknown decider %q", mode)
 	}

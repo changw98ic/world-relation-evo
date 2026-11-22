@@ -100,12 +100,12 @@ func TestGoldenFingerEndToEndBlueprintAndAgentLoop(t *testing.T) {
 			{
 				ID: "hero", Name: "林凡", Role: "disciple", Location: "sect_outer",
 				Tags: []string{"fighter"}, FormID: "qi_1", Skills: map[string]int{"qi_art": 1},
-				Personality: "patient studious righteous", Money: 50,
+				Personality: "patient studious righteous", Money: intPtr(50),
 			},
 			{
 				ID: "rival", Name: "赵虎", Role: "disciple", Location: "sect_outer",
 				Tags: []string{"fighter"}, FormID: "qi_1",
-				Personality: "proud reckless", Money: 50,
+				Personality: "proud reckless", Money: intPtr(50),
 			},
 		},
 	}
