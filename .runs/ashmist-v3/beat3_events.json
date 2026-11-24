@@ -1,0 +1,148 @@
+[
+  {
+    "id": 11974,
+    "tick": 5760,
+    "actor_id": "world",
+    "kind": "world_event_triggered",
+    "action": {
+      "kind": "wait",
+      "location": "red_sea_rift"
+    },
+    "payload": {
+      "category": "external_invasion",
+      "deaths": 0,
+      "district": "red_sea_rift",
+      "event_id": "outer_god_descent",
+      "event_name": "九星旧日外神·灰雾之主探入大气层",
+      "instance_id": "outer_god_descent@5760:11974",
+      "intensity": 98,
+      "invasion_threat_id": "",
+      "reward_coins": 0,
+      "reward_item": "",
+      "reward_qty": 0,
+      "root_event_id": 11974,
+      "severed_medium": "",
+      "text": "Major world event [九星旧日外神·灰雾之主探入大气层] (external_invasion) erupted at red_sea_rift (intensity 98)",
+      "witnesses": [
+        "zhou_jin",
+        "bai_ya",
+        "captain_lei",
+        "scholar_su",
+        "director_lin",
+        "councilor_shen",
+        "veteran_qin"
+      ],
+      "wounded": 0
+    }
+  },
+  {
+    "id": 11975,
+    "tick": 5760,
+    "actor_id": "world",
+    "kind": "world_event_triggered",
+    "action": {
+      "kind": "wait",
+      "location": "ruins_zone7"
+    },
+    "payload": {
+      "category": "artifact_emergence",
+      "deaths": 0,
+      "district": "ruins_zone7",
+      "event_id": "antarctic_000_mother_card",
+      "event_name": "南极总站遗址·000号纯净母卡基现世",
+      "instance_id": "antarctic_000_mother_card@5760:11975",
+      "intensity": 95,
+      "invasion_threat_id": "",
+      "reward_coins": 200,
+      "reward_item": "pure_mother_card_000",
+      "reward_qty": 1,
+      "root_event_id": 11975,
+      "severed_medium": "",
+      "text": "Major world event [南极总站遗址·000号纯净母卡基现世] (artifact_emergence) erupted at ruins_zone7 (intensity 95)",
+      "witnesses": [
+        "zhou_jin",
+        "bai_ya",
+        "captain_lei",
+        "scholar_su",
+        "director_lin",
+        "councilor_shen",
+        "veteran_qin"
+      ],
+      "wounded": 0
+    }
+  },
+  {
+    "id": 11976,
+    "tick": 5760,
+    "actor_id": "zhou_jin",
+    "target_id": "councilor_shen",
+    "kind": "grudge_formed",
+    "action": {
+      "kind": "speak",
+      "target_id": "councilor_shen"
+    },
+    "payload": {
+      "aggrieved_clan_id": "clan_周",
+      "aggrieved_id": "zhou_jin",
+      "cause": "subspace_cocoon_humanity_betrayal",
+      "grudge_id": "grudge_16",
+      "intensity": 95,
+      "offender_clan_id": "clan_沈",
+      "offender_id": "councilor_shen",
+      "root_event_id": 0,
+      "source_event_id": 0,
+      "text": "zhou_jin recorded a blood grievance against councilor_shen over subspace_cocoon_humanity_betrayal (intensity 95)"
+    }
+  },
+  {
+    "id": 11977,
+    "tick": 5760,
+    "actor_id": "world",
+    "kind": "faction_war_declared",
+    "action": {
+      "kind": "wait"
+    },
+    "payload": {
+      "faction_a": "graystone_workshop",
+      "faction_b": "high_council",
+      "reason": "shatter_subspace_cocoon_war",
+      "relation_score": -100,
+      "stance": "at_war",
+      "text": "Diplomatic shift: graystone_workshop \u003c-\u003e high_council is now at_war (shatter_subspace_cocoon_war)"
+    }
+  },
+  {
+    "id": 11978,
+    "tick": 5760,
+    "actor_id": "world",
+    "kind": "faction_war_declared",
+    "action": {
+      "kind": "wait"
+    },
+    "payload": {
+      "faction_a": "high_council",
+      "faction_b": "red_sea_legion",
+      "reason": "frontline_mutiny_against_council",
+      "relation_score": -100,
+      "stance": "at_war",
+      "text": "Diplomatic shift: high_council \u003c-\u003e red_sea_legion is now at_war (frontline_mutiny_against_council)"
+    }
+  },
+  {
+    "id": 11979,
+    "tick": 5760,
+    "actor_id": "world",
+    "kind": "alliance_formed",
+    "action": {
+      "kind": "wait"
+    },
+    "payload": {
+      "faction_a": "graystone_workshop",
+      "faction_b": "red_sea_legion",
+      "reason": "humanity_united_front",
+      "relation_score": 90,
+      "stance": "allied",
+      "text": "Diplomatic shift: graystone_workshop \u003c-\u003e red_sea_legion is now allied (humanity_united_front)"
+    }
+  }
+]

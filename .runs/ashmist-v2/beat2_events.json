@@ -1,0 +1,150 @@
+[
+  {
+    "id": 3603,
+    "tick": 2880,
+    "actor_id": "scion_ye",
+    "kind": "actor_entered_world",
+    "action": {
+      "kind": "wait",
+      "location": "tianshu_city"
+    },
+    "payload": {
+      "actor_id": "scion_ye",
+      "district": "tianshu_city",
+      "label": "Part 2: 第44号疯人院争霸与红海六星血潮",
+      "name": "叶玄(世家魁首)",
+      "role": "noble_duelist",
+      "text": "叶玄(世家魁首) (noble_duelist) entered the stage at tianshu_city"
+    }
+  },
+  {
+    "id": 3604,
+    "tick": 2880,
+    "actor_id": "veteran_qin",
+    "kind": "actor_entered_world",
+    "action": {
+      "kind": "wait",
+      "location": "red_sea_rift"
+    },
+    "payload": {
+      "actor_id": "veteran_qin",
+      "district": "red_sea_rift",
+      "label": "Part 2: 第44号疯人院争霸与红海六星血潮",
+      "name": "秦烈(红海断臂老将)",
+      "role": "frontline_veteran",
+      "text": "秦烈(红海断臂老将) (frontline_veteran) entered the stage at red_sea_rift"
+    }
+  },
+  {
+    "id": 3605,
+    "tick": 2880,
+    "actor_id": "world",
+    "kind": "world_event_triggered",
+    "action": {
+      "kind": "wait",
+      "location": "tianshu_city"
+    },
+    "payload": {
+      "category": "artifact_emergence",
+      "deaths": 0,
+      "district": "tianshu_city",
+      "event_id": "asylum_44_trial",
+      "event_name": "第44号颠倒疯人院争霸·理智天平现世",
+      "instance_id": "asylum_44_trial@2880:3605",
+      "intensity": 88,
+      "invasion_threat_id": "",
+      "reward_coins": 150,
+      "reward_item": "sanity_scale",
+      "reward_qty": 1,
+      "root_event_id": 3605,
+      "severed_medium": "",
+      "text": "Major world event [第44号颠倒疯人院争霸·理智天平现世] (artifact_emergence) erupted at tianshu_city (intensity 88)",
+      "witnesses": [
+        "zhou_jin",
+        "bai_ya",
+        "old_zhang",
+        "director_lin",
+        "scion_ye",
+        "veteran_qin"
+      ],
+      "wounded": 0
+    }
+  },
+  {
+    "id": 3606,
+    "tick": 2880,
+    "actor_id": "world",
+    "kind": "world_event_triggered",
+    "action": {
+      "kind": "wait",
+      "location": "red_sea_rift"
+    },
+    "payload": {
+      "category": "external_invasion",
+      "deaths": 0,
+      "district": "red_sea_rift",
+      "event_id": "red_sea_blood_tide",
+      "event_name": "红海裂隙六星眷族血潮",
+      "instance_id": "red_sea_blood_tide@2880:3606",
+      "intensity": 92,
+      "invasion_threat_id": "",
+      "reward_coins": 0,
+      "reward_item": "",
+      "reward_qty": 0,
+      "root_event_id": 3606,
+      "severed_medium": "",
+      "text": "Major world event [红海裂隙六星眷族血潮] (external_invasion) erupted at red_sea_rift (intensity 92)",
+      "witnesses": [
+        "zhou_jin",
+        "bai_ya",
+        "old_zhang",
+        "director_lin",
+        "scion_ye",
+        "veteran_qin"
+      ],
+      "wounded": 1
+    }
+  },
+  {
+    "id": 3607,
+    "tick": 2880,
+    "actor_id": "veteran_qin",
+    "kind": "actor_environment_injured",
+    "action": {
+      "kind": "wait"
+    },
+    "payload": {
+      "basis_event_id": 0,
+      "cause": "beast",
+      "cause_event_id": 3606,
+      "health": 83,
+      "previous_health": 100,
+      "root_event_id": 3606,
+      "text": "environmental exposure injured 秦烈(红海断臂老将)",
+      "world_event_instance_id": "red_sea_blood_tide@2880:3606"
+    }
+  },
+  {
+    "id": 3608,
+    "tick": 2880,
+    "actor_id": "veteran_qin",
+    "target_id": "councilor_shen",
+    "kind": "grudge_formed",
+    "action": {
+      "kind": "speak",
+      "target_id": "councilor_shen"
+    },
+    "payload": {
+      "aggrieved_clan_id": "clan_秦",
+      "aggrieved_id": "veteran_qin",
+      "cause": "red_sea_frontline_betrayal",
+      "grudge_id": "grudge_17",
+      "intensity": 90,
+      "offender_clan_id": "clan_沈",
+      "offender_id": "councilor_shen",
+      "root_event_id": 0,
+      "source_event_id": 0,
+      "text": "veteran_qin recorded a blood grievance against councilor_shen over red_sea_frontline_betrayal (intensity 90)"
+    }
+  }
+]

@@ -1,0 +1,371 @@
+{
+  "id": "ashmist-wasteland-v2",
+  "name": "灰雾废土·熟练度面板与旧日终战",
+  "genre": "scifi_wasteland",
+  "summary": "灰雾降临百年，人类龟缩于壁垒与内环巨城，凭规则卡对抗畸变与旧日。灰石工坊周烬觉醒熟练度面板，靠零污染制卡术从19号壁垒一路破境封神，与陈铁、白鸦、陆峥、秦烈并肩打破白塔寡头垄断与十三席亚空间茧房阴谋，迎战九星旧日外神。",
+  "currency_name": "信用点",
+  "actor_noun": "卡徒",
+  "authority_name": "壁垒武装",
+  "oversight_name": "巴别塔监察院",
+  "food_item_id": "nutrient_ration",
+  "food_item_name": "合成营养膏",
+  "water_item_id": "purified_water",
+  "water_item_name": "净化水",
+  "supply_days": 240,
+  "skills": [
+    {
+      "id": "card_crafting",
+      "name": "零污染制卡术",
+      "category": "craft",
+      "max_level": 6,
+      "ranks": ["废卡学徒", "无污刻刀", "规则剥离", "鲜活抽髓", "宗师改写", "封装旧日"],
+      "combat_bonus_per_level": 4
+    },
+    {
+      "id": "card_combat",
+      "name": "战卡御使",
+      "category": "martial",
+      "max_level": 6,
+      "ranks": ["初通卡槽", "链式叠卡", "高危压制", "规则斩断", "灭城统御", "破界斩神"],
+      "combat_bonus_per_level": 6
+    }
+  ],
+  "action_specs": [
+    {
+      "id": "forge_zero_card",
+      "name": "刻录零污染核心卡",
+      "granted_by_tags": ["card_crafter"],
+      "target_kind": "self",
+      "ticks": 2,
+      "energy_cost": 6,
+      "item_gains": {"zero_card_essence": 1}
+    },
+    {
+      "id": "unleash_rule_slash",
+      "name": "规则剥离斩",
+      "granted_by_tags": ["card_crafter"],
+      "target_kind": "actor",
+      "ticks": 1,
+      "energy_cost": 8,
+      "min_health": 25,
+      "attack": {"tier": 4, "damage_by_type": {"physical": 32}}
+    }
+  ],
+  "forms": [
+    {"id": "star_1", "name": "一星卡徒", "power_tier": 1, "combat_bonus": 0},
+    {"id": "star_2", "name": "二星卡徒", "power_tier": 2, "combat_bonus": 8},
+    {"id": "star_3", "name": "三星卡徒", "power_tier": 3, "combat_bonus": 18},
+    {"id": "star_5", "name": "五星高危级", "power_tier": 4, "combat_bonus": 34},
+    {"id": "star_7", "name": "七星灭城级", "power_tier": 5, "combat_bonus": 52},
+    {"id": "star_9", "name": "九星旧日封装者", "power_tier": 6, "combat_bonus": 80}
+  ],
+  "transitions": [
+    {
+      "id": "ascend_star_2_craft",
+      "name": "熟练度破限·二星神经扩槽",
+      "required_form_id": "star_1",
+      "required_skills": {"card_crafting": 2},
+      "ticks": 2,
+      "base_success_permille": 1000,
+      "success_form_id": "star_2"
+    },
+    {
+      "id": "ascend_star_2_combat",
+      "name": "实战破限·二星战卡扩槽",
+      "required_form_id": "star_1",
+      "required_skills": {"card_combat": 2},
+      "ticks": 2,
+      "base_success_permille": 1000,
+      "success_form_id": "star_2"
+    },
+    {
+      "id": "ascend_star_3_craft",
+      "name": "熟练度破限·三星零污核心",
+      "required_form_id": "star_2",
+      "required_skills": {"card_crafting": 3},
+      "item_costs": {"zero_card_essence": 1},
+      "ticks": 2,
+      "base_success_permille": 1000,
+      "success_form_id": "star_3"
+    },
+    {
+      "id": "ascend_star_3_combat",
+      "name": "实战破限·三星战卡宗师",
+      "required_form_id": "star_2",
+      "required_skills": {"card_combat": 3},
+      "ticks": 2,
+      "base_success_permille": 1000,
+      "success_form_id": "star_3"
+    },
+    {
+      "id": "ascend_star_3_core",
+      "name": "雾核淬炼·三星破境",
+      "required_form_id": "star_2",
+      "item_costs": {"mist_mother_core": 1},
+      "ticks": 2,
+      "base_success_permille": 1000,
+      "success_form_id": "star_3"
+    },
+    {
+      "id": "ascend_star_5_craft",
+      "name": "熟练度破限·五星鲜活抽髓",
+      "required_form_id": "star_3",
+      "required_skills": {"card_crafting": 4},
+      "item_costs": {"zero_card_essence": 2},
+      "ticks": 3,
+      "base_success_permille": 1000,
+      "success_form_id": "star_5"
+    },
+    {
+      "id": "ascend_star_5_combat",
+      "name": "实战破限·五星高危战将",
+      "required_form_id": "star_3",
+      "required_skills": {"card_combat": 4},
+      "ticks": 3,
+      "base_success_permille": 1000,
+      "success_form_id": "star_5"
+    },
+    {
+      "id": "ascend_star_5_scale",
+      "name": "理智天平·五星速成",
+      "required_form_id": "star_3",
+      "item_costs": {"sanity_scale": 1},
+      "ticks": 2,
+      "base_success_permille": 1000,
+      "success_form_id": "star_5"
+    },
+    {
+      "id": "ascend_star_7_craft",
+      "name": "熟练度破限·七星规则改写",
+      "required_form_id": "star_5",
+      "required_skills": {"card_crafting": 5},
+      "item_costs": {"zero_card_essence": 3},
+      "ticks": 3,
+      "base_success_permille": 1000,
+      "success_form_id": "star_7"
+    },
+    {
+      "id": "ascend_star_7_combat",
+      "name": "实战破限·七星灭城统帅",
+      "required_form_id": "star_5",
+      "required_skills": {"card_combat": 5},
+      "ticks": 3,
+      "base_success_permille": 1000,
+      "success_form_id": "star_7"
+    },
+    {
+      "id": "ascend_star_7_blood",
+      "name": "红海血晶·七星晋升",
+      "required_form_id": "star_5",
+      "item_costs": {"red_sea_essence": 1},
+      "ticks": 2,
+      "base_success_permille": 1000,
+      "success_form_id": "star_7"
+    },
+    {
+      "id": "ascend_star_9_mother",
+      "name": "000号母卡基·九星封装旧日",
+      "required_form_id": "star_7",
+      "item_costs": {"pure_mother_card_000": 1},
+      "ticks": 4,
+      "base_success_permille": 1000,
+      "success_form_id": "star_9"
+    },
+    {
+      "id": "ascend_star_9_panel",
+      "name": "面板满级破限·九星自铸神卡",
+      "required_form_id": "star_7",
+      "required_skills": {"card_crafting": 6},
+      "item_costs": {"zero_card_essence": 4},
+      "ticks": 4,
+      "base_success_permille": 1000,
+      "success_form_id": "star_9"
+    }
+  ],
+  "custom_items": [
+    {"id": "zero_card_essence", "name": "零污染规则卡胚", "tier": 3, "batch_price": 45, "mass_units": 1, "combat_bonus": 3},
+    {"id": "mist_mother_core", "name": "准五星混沌雾核", "tier": 4, "batch_price": 120, "mass_units": 1, "combat_bonus": 6},
+    {"id": "sanity_scale", "name": "理智天平奇物", "tier": 4, "batch_price": 150, "mass_units": 1, "combat_bonus": 8},
+    {"id": "red_sea_essence", "name": "红海六星纯净血晶", "tier": 5, "batch_price": 240, "mass_units": 1, "combat_bonus": 10},
+    {"id": "pure_mother_card_000", "name": "000号行星级纯净母卡基", "tier": 5, "batch_price": 500, "mass_units": 1, "combat_bonus": 15}
+  ],
+  "districts": [
+    {"id": "barrier_19", "name": "19号壁垒外城", "terrain": "ruined_city", "features": ["public_forum", "barrier_core"], "controlling_faction": "garrison_squad"},
+    {"id": "ruins_zone7", "name": "7号废弃收容区", "terrain": "wasteland", "features": ["market", "ruins_vault"], "controlling_faction": "graystone_workshop"},
+    {"id": "tianshu_city", "name": "天枢内环巨城", "terrain": "fortress", "features": ["public_forum", "authority_seat", "asylum_district"], "controlling_faction": "white_tower"},
+    {"id": "red_sea_rift", "name": "红海裂隙前线", "terrain": "rift_front", "features": ["public_forum", "rift_front"], "controlling_faction": "high_council"}
+  ],
+  "roads": [
+    {"from": "barrier_19", "to": "ruins_zone7", "ticks": 1, "energy_cost": 2, "medium": "land"},
+    {"from": "ruins_zone7", "to": "tianshu_city", "ticks": 2, "energy_cost": 3, "medium": "land"},
+    {"from": "barrier_19", "to": "tianshu_city", "ticks": 2, "energy_cost": 3, "medium": "land"},
+    {"from": "tianshu_city", "to": "red_sea_rift", "ticks": 2, "energy_cost": 4, "medium": "land"}
+  ],
+  "factions": [
+    {"id": "graystone_workshop", "name": "灰石工坊", "district": "ruins_zone7", "leader_id": "zhou_jin", "level": 1},
+    {"id": "garrison_squad", "name": "19号驻城特遣队", "district": "barrier_19", "leader_id": "captain_lei", "level": 1},
+    {"id": "white_tower", "name": "白塔医药集团", "district": "tianshu_city", "leader_id": "director_lin", "level": 2},
+    {"id": "high_council", "name": "最高议会·十三席", "district": "red_sea_rift", "leader_id": "councilor_shen", "level": 3},
+    {"id": "red_sea_legion", "name": "红海前线老兵团", "district": "red_sea_rift", "leader_id": "colonel_lu", "level": 2}
+  ],
+  "actors": [
+    {
+      "id": "zhou_jin", "name": "周烬(刻刀/白面)", "role": "card_master", "location": "ruins_zone7",
+      "faction": "graystone_workshop", "tags": ["ruler", "fighter", "card_crafter"],
+      "form_id": "star_1",
+      "skills": {"card_crafting": 1, "card_combat": 1},
+      "attributes": {"strength": 13, "dexterity": 16, "insight": 19, "spirit": 18},
+      "personality": "patient studious righteous proud", "money": 180,
+      "trust": {"chen_tie": 5, "bai_ya": 5, "scholar_su": 3, "colonel_lu": 3, "captain_lei": -4, "director_lin": -4, "assassin_yin": -4, "councilor_shen": -5},
+      "goal": "以熟练度面板肝穿零污染制卡术，率灰石工坊打破白塔与议会垄断并封装旧日",
+      "ambitions": [{"kind": "master_skill", "target_id": "card_crafting", "target_value": 6}, {"kind": "ascend_tier", "target_value": 6}, {"kind": "expose_corrupt", "target_id": "councilor_shen"}]
+    },
+    {
+      "id": "chen_tie", "name": "陈铁(石像重装)", "role": "shield_veteran", "location": "barrier_19",
+      "faction": "graystone_workshop", "tags": ["fighter", "commander"],
+      "form_id": "star_2",
+      "skills": {"card_combat": 2},
+      "attributes": {"strength": 19, "dexterity": 12, "insight": 10, "spirit": 13},
+      "personality": "righteous proud dutiful vengeful", "money": 100,
+      "trust": {"zhou_jin": 5, "bai_ya": 4, "captain_lei": -5, "assassin_yin": -4},
+      "goal": "手刃构陷自己的雷霆队长并死守灰石工坊",
+      "ambitions": [{"kind": "avenge_blood", "target_id": "captain_lei"}, {"kind": "master_skill", "target_id": "card_combat", "target_value": 5}]
+    },
+    {
+      "id": "bai_ya", "name": "白鸦(暗网中枢)", "role": "intel_broker", "location": "ruins_zone7",
+      "faction": "graystone_workshop", "tags": ["trader", "card_crafter"],
+      "form_id": "star_2",
+      "skills": {"card_crafting": 1},
+      "attributes": {"strength": 10, "dexterity": 16, "insight": 18, "spirit": 14},
+      "personality": "inquisitive patient loyal studious", "money": 140,
+      "trust": {"zhou_jin": 5, "chen_tie": 4, "director_lin": -4, "councilor_shen": -4},
+      "goal": "协助周烬构建灰石暗网并彻查最高议会亚空间茧房阴谋",
+      "ambitions": [{"kind": "expose_corrupt", "target_id": "councilor_shen"}]
+    },
+    {
+      "id": "captain_lei", "name": "雷霆队长", "role": "squad_captain", "location": "barrier_19",
+      "faction": "garrison_squad", "tags": ["ruler", "fighter"],
+      "form_id": "star_3",
+      "skills": {"card_combat": 2},
+      "attributes": {"strength": 16, "dexterity": 13, "insight": 9, "spirit": 10},
+      "personality": "ruthless reckless arrogant vengeful", "money": 160,
+      "trust": {"chen_tie": -5, "zhou_jin": -4, "director_lin": 3},
+      "goal": "铁血镇压19号壁垒并铲除灰石工坊"
+    },
+    {
+      "id": "old_zhang", "name": "老张(废卡铺主)", "role": "scrap_dealer", "location": "barrier_19",
+      "faction": "graystone_workshop", "tags": ["trader"],
+      "form_id": "star_1",
+      "attributes": {"strength": 8, "dexterity": 10, "insight": 13, "spirit": 9},
+      "personality": "cautious benevolent sociable", "money": 90,
+      "trust": {"zhou_jin": 4, "chen_tie": 3, "captain_lei": -4},
+      "goal": "在19号壁垒为灰石工坊收购畸变废卡与原材"
+    },
+    {
+      "id": "scholar_su", "name": "巴别塔学者苏明", "role": "babel_scholar", "location": "tianshu_city",
+      "faction": "graystone_workshop", "tags": ["healer", "card_crafter"],
+      "form_id": "star_2",
+      "skills": {"card_crafting": 2},
+      "attributes": {"strength": 9, "dexterity": 11, "insight": 18, "spirit": 15},
+      "personality": "inquisitive studious righteous", "money": 130,
+      "trust": {"zhou_jin": 4, "councilor_shen": -4, "director_lin": -3},
+      "goal": "破译规则怪谈底层律法并揭穿十三席茧房骗局"
+    },
+    {
+      "id": "director_lin", "name": "林崇山(白塔总裁)", "role": "pharma_tycoon", "location": "tianshu_city",
+      "faction": "white_tower", "tags": ["ruler", "fighter", "card_crafter"],
+      "form_id": "star_5",
+      "skills": {"card_crafting": 3, "card_combat": 3},
+      "attributes": {"strength": 14, "dexterity": 13, "insight": 17, "spirit": 16},
+      "personality": "ruthless proud ambitious vengeful", "money": 320,
+      "trust": {"councilor_shen": 4, "assassin_yin": 5, "captain_lei": 3, "zhou_jin": -5, "bai_ya": -4, "colonel_lu": -3},
+      "goal": "维持白塔净化晶垄断并派影七血洗灰石工坊"
+    },
+    {
+      "id": "assassin_yin", "name": "影七(白塔暗刃)", "role": "assassin", "location": "ruins_zone7",
+      "faction": "white_tower", "tags": ["fighter", "outlaw"],
+      "form_id": "star_3",
+      "skills": {"card_combat": 3},
+      "attributes": {"strength": 17, "dexterity": 19, "insight": 12, "spirit": 12},
+      "personality": "ruthless vengeful reckless", "money": 120,
+      "trust": {"director_lin": 5, "zhou_jin": -5, "chen_tie": -5, "bai_ya": -4},
+      "goal": "奉林崇山之命潜入7号区刺杀周烬与灰石骨干"
+    },
+    {
+      "id": "councilor_shen", "name": "沈渊(十三席议长)", "role": "high_councilor", "location": "red_sea_rift",
+      "faction": "high_council", "tags": ["ruler", "fighter"],
+      "form_id": "star_7",
+      "skills": {"card_combat": 5},
+      "attributes": {"strength": 19, "dexterity": 16, "insight": 19, "spirit": 19},
+      "personality": "ruthless proud ambitious vengeful", "money": 400,
+      "trust": {"director_lin": 4, "colonel_lu": -5, "zhou_jin": -5},
+      "goal": "血腥镇压红海叛军并隐瞒亚空间冬眠舱茧房逃逸计划"
+    },
+    {
+      "id": "colonel_lu", "name": "陆峥上校(红海悍将)", "role": "frontline_colonel", "location": "red_sea_rift",
+      "faction": "red_sea_legion", "tags": ["ruler", "commander", "fighter"],
+      "form_id": "star_5",
+      "skills": {"card_combat": 4},
+      "attributes": {"strength": 19, "dexterity": 16, "insight": 14, "spirit": 15},
+      "personality": "righteous stern dutiful vengeful", "money": 160,
+      "trust": {"councilor_shen": -5, "director_lin": -3, "zhou_jin": 4, "chen_tie": 3},
+      "goal": "血战红海防线，清算沈渊克扣净化晶之血债",
+      "ambitions": [{"kind": "avenge_blood", "target_id": "councilor_shen"}, {"kind": "expose_corrupt", "target_id": "councilor_shen"}]
+    }
+  ],
+  "mentorships": [
+    {"mentor_id": "zhou_jin", "apprentice_id": "bai_ya", "topic_id": "card_crafting"}
+  ],
+  "kinships": [
+    {"actor_id": "zhou_jin", "sworn_ids": ["chen_tie", "bai_ya"]},
+    {"actor_id": "chen_tie", "sworn_ids": ["zhou_jin", "bai_ya"]},
+    {"actor_id": "bai_ya", "sworn_ids": ["zhou_jin", "chen_tie"]}
+  ],
+  "grudges": [
+    {"aggrieved_id": "chen_tie", "offender_id": "captain_lei", "cause": "framed_as_pollution_scapegoat", "intensity": 90},
+    {"aggrieved_id": "colonel_lu", "offender_id": "councilor_shen", "cause": "abandoned_red_sea_frontline_soldiers", "intensity": 90},
+    {"aggrieved_id": "zhou_jin", "offender_id": "assassin_yin", "cause": "white_tower_assassination_contract", "intensity": 80}
+  ],
+  "diplomacy": [
+    {"faction_a": "graystone_workshop", "faction_b": "garrison_squad", "stance": "at_war", "relation_score": -85, "reason": "barrier_19_blockade_war"},
+    {"faction_a": "graystone_workshop", "faction_b": "white_tower", "stance": "at_war", "relation_score": -85, "reason": "zero_pollution_card_blood_war"},
+    {"faction_a": "graystone_workshop", "faction_b": "high_council", "stance": "hostile", "relation_score": -75, "reason": "cocoon_conspiracy"},
+    {"faction_a": "white_tower", "faction_b": "high_council", "stance": "allied", "relation_score": 70, "reason": "purify_crystal_cartel"},
+    {"faction_a": "red_sea_legion", "faction_b": "high_council", "stance": "at_war", "relation_score": -95, "reason": "red_sea_mutiny"},
+    {"faction_a": "graystone_workshop", "faction_b": "red_sea_legion", "stance": "allied", "relation_score": 75, "reason": "humanity_defense_pact"}
+  ],
+  "secrets": [
+    {"owner_id": "councilor_shen", "kind": "hidden_plot", "subject_id": "colonel_lu", "severity": 95, "known_by": ["councilor_shen", "director_lin", "bai_ya"]}
+  ],
+  "world_events": [
+    {
+      "id": "mist_mother_breakout",
+      "name": "19号壁垒地底·饥饿雾母破封",
+      "category": "artifact_emergence",
+      "target_features": ["barrier_core"],
+      "min_day": 12,
+      "cooldown_days": 22,
+      "prob_permille_per_day": 140,
+      "duration_days": 6,
+      "intensity": 88,
+      "reward_item": "mist_mother_core",
+      "reward_qty": 1,
+      "reward_coins": 120,
+      "casualty_permille": 220,
+      "damage": 28
+    },
+    {
+      "id": "grey_mist_high_tide",
+      "name": "灰雾大涨潮·规则怪谈滋生",
+      "category": "external_invasion",
+      "target_features": ["barrier_core", "ruins_vault", "rift_front"],
+      "min_day": 8,
+      "cooldown_days": 14,
+      "prob_permille_per_day": 130,
+      "duration_days": 3,
+      "intensity": 80,
+      "casualty_permille": 180,
+      "damage": 24
+    }
+  ]
+}

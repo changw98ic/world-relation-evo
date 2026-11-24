@@ -1,0 +1,71 @@
+{
+  "label": "Part 2: 第44号疯人院争霸与红海六星血潮",
+  "spawn_actors": [
+    {
+      "id": "scion_ye",
+      "name": "叶玄(世家魁首)",
+      "role": "noble_duelist",
+      "location": "tianshu_city",
+      "guilds": ["white_tower"],
+      "tags": ["resident", "fighter", "commander"],
+      "form_id": "star_3",
+      "skills": {"card_combat": 3},
+      "attributes": {"strength": 17, "dexterity": 18, "insight": 15, "spirit": 16},
+      "personality": "proud ruthless opportunistic ambitious",
+      "money": 240,
+      "items": {"nutrient_ration": 450, "purified_water": 350, "medicine_pack": 2},
+      "trust": {"director_lin": 3, "zhou_jin": -4, "colonel_lu": -3},
+      "goal": "夺取第44号疯人院理智天平并替内环世家镇杀灰石工坊",
+      "pin_focal": true
+    },
+    {
+      "id": "veteran_qin",
+      "name": "秦烈(红海断臂老将)",
+      "role": "frontline_veteran",
+      "location": "red_sea_rift",
+      "guilds": ["red_sea_legion"],
+      "tags": ["resident", "fighter", "commander"],
+      "form_id": "star_5",
+      "skills": {"card_combat": 5},
+      "attributes": {"strength": 20, "dexterity": 15, "insight": 13, "spirit": 16},
+      "personality": "righteous stern dutiful vengeful",
+      "money": 160,
+      "items": {"nutrient_ration": 450, "purified_water": 350, "medicine_pack": 2, "red_sea_essence": 1},
+      "trust": {"colonel_lu": 5, "zhou_jin": 4, "councilor_shen": -5, "scion_ye": -3},
+      "goal": "在红海血潮中为陆峥与周烬开辟生路，死战十三席与外神眷族",
+      "pin_focal": true
+    }
+  ],
+  "trigger_world_events": [
+    {
+      "district_id": "tianshu_city",
+      "inline_spec": {
+        "id": "asylum_44_trial",
+        "name": "第44号颠倒疯人院争霸·理智天平现世",
+        "category": "artifact_emergence",
+        "duration_ticks": 576,
+        "intensity": 88,
+        "reward_item": "sanity_scale",
+        "reward_qty": 1,
+        "reward_coins": 150,
+        "casualty_permille": 180,
+        "damage": 24
+      }
+    },
+    {
+      "district_id": "red_sea_rift",
+      "inline_spec": {
+        "id": "red_sea_blood_tide",
+        "name": "红海裂隙六星眷族血潮",
+        "category": "external_invasion",
+        "duration_ticks": 480,
+        "intensity": 92,
+        "casualty_permille": 260,
+        "damage": 32
+      }
+    }
+  ],
+  "add_grudges": [
+    {"aggrieved_id": "veteran_qin", "offender_id": "councilor_shen", "cause": "red_sea_frontline_betrayal", "intensity": 90}
+  ]
+}

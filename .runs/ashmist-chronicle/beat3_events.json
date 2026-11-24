@@ -1,0 +1,156 @@
+[
+  {
+    "id": 30389,
+    "tick": 5760,
+    "actor_id": "world",
+    "kind": "world_event_triggered",
+    "action": {
+      "kind": "wait",
+      "location": "red_sea_rift"
+    },
+    "payload": {
+      "category": "external_invasion",
+      "deaths": 0,
+      "district": "red_sea_rift",
+      "event_id": "outer_god_gray_mist_descent",
+      "event_name": "九星旧日外神·灰雾之主探入大气层",
+      "instance_id": "outer_god_gray_mist_descent@5760:30389",
+      "intensity": 98,
+      "invasion_threat_id": "",
+      "reward_coins": 0,
+      "reward_item": "",
+      "reward_qty": 0,
+      "root_event_id": 30389,
+      "severed_medium": "",
+      "text": "Major world event [九星旧日外神·灰雾之主探入大气层] (external_invasion) erupted at red_sea_rift (intensity 98)",
+      "witnesses": [
+        "zhou_jin",
+        "chen_tie",
+        "bai_ya",
+        "captain_lei",
+        "old_zhang",
+        "scholar_su",
+        "pawn_keeper",
+        "director_lin",
+        "assassin_yin",
+        "councilor_shen",
+        "colonel_lu",
+        "scion_ye",
+        "veteran_qin"
+      ],
+      "wounded": 1
+    }
+  },
+  {
+    "id": 30390,
+    "tick": 5760,
+    "actor_id": "councilor_shen",
+    "kind": "actor_environment_injured",
+    "action": {
+      "kind": "wait"
+    },
+    "payload": {
+      "basis_event_id": 0,
+      "cause": "beast",
+      "cause_event_id": 30389,
+      "health": 92,
+      "previous_health": 100,
+      "root_event_id": 30389,
+      "text": "environmental exposure injured 沈渊(十三席议长)",
+      "world_event_instance_id": "outer_god_gray_mist_descent@5760:30389"
+    }
+  },
+  {
+    "id": 30391,
+    "tick": 5760,
+    "actor_id": "world",
+    "kind": "world_event_triggered",
+    "action": {
+      "kind": "wait",
+      "location": "ruins_zone7"
+    },
+    "payload": {
+      "category": "artifact_emergence",
+      "deaths": 0,
+      "district": "ruins_zone7",
+      "event_id": "antarctic_000_mother_card",
+      "event_name": "南极总站遗址·000号纯净母卡基现世",
+      "instance_id": "antarctic_000_mother_card@5760:30391",
+      "intensity": 95,
+      "invasion_threat_id": "",
+      "reward_coins": 200,
+      "reward_item": "pure_mother_card_000",
+      "reward_qty": 1,
+      "root_event_id": 30391,
+      "severed_medium": "",
+      "text": "Major world event [南极总站遗址·000号纯净母卡基现世] (artifact_emergence) erupted at ruins_zone7 (intensity 95)",
+      "witnesses": [
+        "zhou_jin",
+        "chen_tie",
+        "bai_ya",
+        "captain_lei",
+        "old_zhang",
+        "scholar_su",
+        "pawn_keeper",
+        "director_lin",
+        "assassin_yin",
+        "councilor_shen",
+        "colonel_lu",
+        "scion_ye",
+        "veteran_qin"
+      ],
+      "wounded": 0
+    }
+  },
+  {
+    "id": 30392,
+    "tick": 5760,
+    "actor_id": "world",
+    "kind": "faction_war_declared",
+    "action": {
+      "kind": "wait"
+    },
+    "payload": {
+      "faction_a": "graystone_workshop",
+      "faction_b": "high_council",
+      "reason": "shatter_subspace_cocoon_war",
+      "relation_score": -100,
+      "stance": "at_war",
+      "text": "Diplomatic shift: graystone_workshop \u003c-\u003e high_council is now at_war (shatter_subspace_cocoon_war)"
+    }
+  },
+  {
+    "id": 30393,
+    "tick": 5760,
+    "actor_id": "world",
+    "kind": "faction_war_declared",
+    "action": {
+      "kind": "wait"
+    },
+    "payload": {
+      "faction_a": "high_council",
+      "faction_b": "red_sea_legion",
+      "reason": "frontline_mutiny_against_council",
+      "relation_score": -100,
+      "stance": "at_war",
+      "text": "Diplomatic shift: high_council \u003c-\u003e red_sea_legion is now at_war (frontline_mutiny_against_council)"
+    }
+  },
+  {
+    "id": 30394,
+    "tick": 5760,
+    "actor_id": "world",
+    "kind": "alliance_formed",
+    "action": {
+      "kind": "wait"
+    },
+    "payload": {
+      "faction_a": "graystone_workshop",
+      "faction_b": "red_sea_legion",
+      "reason": "humanity_united_front",
+      "relation_score": 85,
+      "stance": "allied",
+      "text": "Diplomatic shift: graystone_workshop \u003c-\u003e red_sea_legion is now allied (humanity_united_front)"
+    }
+  }
+]

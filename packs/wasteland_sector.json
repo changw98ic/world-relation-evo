@@ -1,0 +1,2209 @@
+{
+  "id": "wasteland-sector",
+  "name": "Post-Apocalyptic Wasteland Sector",
+  "genre": "scifi_wasteland",
+  "description": "Irradiated crater and shielded bunker basins where Orbital Authority (DeJure) contests the seceded Scrap Syndicate (DeFacto), with satellite_scan vs bunker Shielding: 80 and radio_broadcast.",
+  "public_treasury": 220,
+  "catalog": {
+    "planning": {
+      "horizon_ticks": 96,
+      "inertia_margin": 0.05,
+      "offer_acceptance_prior": 0.35,
+      "needs": [
+        {"measure": "nutrition", "target": 2, "scale": 4, "base_weight": 3},
+        {"measure": "hydration", "target": 0, "scale": 3, "base_weight": 2},
+        {"measure": "energy", "target": 65, "scale": 40, "base_weight": 2},
+        {"measure": "health", "target": 100, "scale": 40, "base_weight": 2},
+        {"measure": "hygiene", "target": 0, "scale": 5, "base_weight": 0.4},
+        {"measure": "provisions", "target": 8, "scale": 8, "base_weight": 1},
+        {"measure": "money", "target": 40, "scale": 40, "base_weight": 1.2},
+        {"measure": "housing", "target": 80, "scale": 50, "base_weight": 1.4},
+        {"measure": "stock", "target": 2, "scale": 2, "base_weight": 0.6},
+        {"measure": "progress", "target": 1, "scale": 1, "base_weight": 0.7},
+        {"measure": "obligation", "target": 1, "scale": 1, "base_weight": 2},
+        {"measure": "relationship", "target": 20, "scale": 40, "base_weight": 0.15},
+        {"measure": "skill", "target": 5, "scale": 5, "base_weight": 0.4},
+        {"measure": "knowledge", "target": 1, "scale": 1, "base_weight": 0.45},
+        {"measure": "safety", "target": 0, "scale": 10, "base_weight": 1},
+        {"measure": "state_slot", "subject": "battery", "target": 80, "scale": 50, "base_weight": 1},
+        {"measure": "state_slot", "subject": "radiation", "target": 0, "scale": 50, "base_weight": 1, "minimize": true}
+      ]
+    },
+    "tag_actions": {
+      "resident": [
+        "refuel",
+        "harvest",
+        "propose_growth_care",
+        "accept_growth_care",
+        "dispatch_harvest",
+        "start_plan",
+        "abandon_plan",
+        "wait",
+        "move",
+        "move_venue",
+        "enter_house",
+        "leave_house",
+        "sleep",
+        "eat",
+        "drink",
+        "relieve",
+        "medicate",
+        "speak",
+        "repair_house",
+        "transfer_house",
+        "upgrade_house",
+        "maintain_infra",
+        "join_faction",
+        "join_profession",
+        "marry",
+        "swear_bond",
+        "mediate_feud",
+        "begin_rest",
+        "end_rest",
+        "claim_world_event",
+        "form_party",
+        "join_party",
+        "leave_party",
+        "betray_party",
+        "propose_alliance",
+        "declare_war",
+        "make_peace",
+        "set_ambition",
+        "investigate_actor",
+        "blackmail",
+        "expose_secret"
+      ],
+      "trader": [
+        "propose_agreement",
+        "accept_agreement",
+        "reject_agreement",
+        "fulfill_agreement",
+        "accept_loan",
+        "reject_loan",
+        "cancel_loan",
+        "offer",
+        "accept",
+        "reject",
+        "borrow_loan",
+        "repay_loan",
+        "foreclose_collateral"
+      ],
+      "healer": [
+        "heal"
+      ],
+      "engineer": [
+        "craft",
+        "maintain_infra",
+        "research_tech"
+      ],
+      "scavenger": [
+        "craft"
+      ],
+      "commander": [
+        "issue_decree",
+        "arrest",
+        "audit_corruption",
+        "hunt_threat"
+      ],
+      "security": [
+        "arrest",
+        "hunt_threat",
+        "audit_corruption",
+        "claim_turf"
+      ],
+      "oversight": [
+        "audit_corruption",
+        "file_appeal"
+      ],
+      "ruler": [
+        "issue_decree"
+      ],
+      "fighter": [
+        "attack",
+        "hunt_threat"
+      ]
+    },
+    "items": {
+      "food": {
+        "id": "food",
+        "name": "Synthetic Ration",
+        "tier": 1,
+        "edible": true,
+        "tradeable": true,
+        "batch_qty": 2,
+        "batch_price": 2,
+        "offer_threshold": 6,
+        "surplus_threshold": 8,
+        "shortage_threshold": 4,
+        "mass_units": 1,
+        "nutrition_units": 1
+      },
+      "hydro_ration": {
+        "id": "hydro_ration",
+        "name": "Hydroponic Ration Pack",
+        "tier": 2,
+        "edible": true,
+        "tradeable": true,
+        "batch_qty": 2,
+        "batch_price": 3,
+        "offer_threshold": 6,
+        "surplus_threshold": 6,
+        "shortage_threshold": 2,
+        "mass_units": 2,
+        "nutrition_units": 2
+      },
+      "medicine": {
+        "id": "medicine",
+        "name": "herbal medicine",
+        "tier": 3,
+        "medicinal_heal": 20,
+        "disease_cure": 1,
+        "tradeable": true,
+        "batch_qty": 1,
+        "batch_price": 3,
+        "offer_threshold": 3,
+        "surplus_threshold": 3,
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
+      },
+      "rad_med": {
+        "id": "rad_med",
+        "name": "Anti-Rad Stabilizer",
+        "tier": 3,
+        "medicinal_heal": 30,
+        "disease_cure": 2,
+        "tradeable": true,
+        "batch_qty": 1,
+        "batch_price": 6,
+        "offer_threshold": 3,
+        "surplus_threshold": 3,
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
+      },
+      "radio_transceiver": {
+        "id": "radio_transceiver",
+        "name": "Field Radio Transceiver",
+        "tier": 3,
+        "safety_bonus_pct": 15,
+        "tradeable": true,
+        "batch_qty": 1,
+        "batch_price": 8,
+        "offer_threshold": 2,
+        "surplus_threshold": 2,
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
+      },
+      "scrap_metal": {
+        "id": "scrap_metal",
+        "name": "Salvaged Alloy Scrap",
+        "tier": 1,
+        "tradeable": true,
+        "batch_qty": 2,
+        "batch_price": 3,
+        "offer_threshold": 4,
+        "surplus_threshold": 5,
+        "shortage_threshold": 2,
+        "mass_units": 1,
+        "nutrition_units": 0
+      },
+      "seeds": {
+        "id": "seeds",
+        "name": "Hydroponic Seed Pod",
+        "tier": 1,
+        "tradeable": true,
+        "batch_qty": 3,
+        "batch_price": 1,
+        "offer_threshold": 6,
+        "surplus_threshold": 6,
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
+      },
+      "water": {
+        "id": "water",
+        "name": "Filtered Water",
+        "tier": 1,
+        "potable": true,
+        "thirst_relief": 2,
+        "tradeable": true,
+        "batch_qty": 2,
+        "batch_price": 1,
+        "offer_threshold": 6,
+        "surplus_threshold": 5,
+        "shortage_threshold": 1,
+        "mass_units": 1,
+        "nutrition_units": 0
+      },
+      "fuel_cell": {
+        "id": "fuel_cell",
+        "name": "generator fuel cell",
+        "tier": 1,
+        "tradeable": true,
+        "batch_qty": 1,
+        "batch_price": 3,
+        "mass_units": 1,
+        "nutrition_units": 0
+      },
+      "security_pass": {
+        "id": "security_pass",
+        "name": "Orbital Security Warrant",
+        "tier": 3,
+        "mass_units": 1,
+        "nutrition_units": 0,
+        "tradeable": false
+      }
+    },
+    "professions": [
+      {
+        "id": "commander",
+        "name": "Orbital Security Officer",
+        "tier": 2,
+        "guild": "orbital_command_guild",
+        "requirements": {
+          "strength": 9,
+          "insight": 9
+        },
+        "max_level": 6,
+        "yield_every": 2,
+        "combat_bonus_per_level": 3,
+        "vigilance_bonus_per_level": 4,
+        "grants": [
+          "commander",
+          "security",
+          "oversight"
+        ],
+        "ranks": [
+          "Security Lieutenant",
+          "Sector Commander",
+          "Orbital Admiral"
+        ]
+      },
+      {
+        "id": "engineer",
+        "name": "Bunker Systems Engineer",
+        "tier": 2,
+        "guild": "bunker_guild",
+        "requirements": {
+          "insight": 9,
+          "dexterity": 8
+        },
+        "max_level": 6,
+        "yield_every": 2,
+        "base_yield_bonus": 1,
+        "grants": [
+          "engineer"
+        ],
+        "ranks": [
+          "Tech",
+          "Chief Tech",
+          "Reactor Master"
+        ]
+      },
+      {
+        "id": "medic",
+        "name": "Bunker Field Medic",
+        "tier": 1,
+        "guild": "bunker_guild",
+        "requirements": {
+          "insight": 9,
+          "spirit": 8
+        },
+        "max_level": 6,
+        "yield_every": 2,
+        "grants": [
+          "healer"
+        ],
+        "ranks": [
+          "Med-Tech",
+          "Field Medic",
+          "Chief Surgeon"
+        ]
+      },
+      {
+        "id": "broker",
+        "name": "Syndicate Trade Broker",
+        "tier": 1,
+        "guild": "scrap_syndicate_guild",
+        "requirements": {
+          "insight": 7,
+          "spirit": 8
+        },
+        "max_level": 6,
+        "yield_every": 3,
+        "trade_margin": true,
+        "grants": [
+          "trader"
+        ],
+        "ranks": [
+          "Runner",
+          "Exchange Broker",
+          "Syndicate Boss"
+        ]
+      },
+      {
+        "id": "scavenger",
+        "name": "Crater Scavenger",
+        "tier": 1,
+        "guild": "scrap_syndicate_guild",
+        "max_level": 5,
+        "yield_every": 2,
+        "base_yield_bonus": 1,
+        "grants": [
+          "scavenger"
+        ],
+        "ranks": [
+          "Scrapper",
+          "Wasteland Runner",
+          "Relic Hunter"
+        ]
+      }
+    ],
+    "recipes": [
+      {
+        "id": "fetch_water",
+        "label": "filter bunker water",
+        "required_tag": "resident",
+        "node_feature": "water_source",
+        "resource_pool": "water_table",
+        "resource_draw": 1,
+        "ticks": 2,
+        "energy_cost": 5,
+        "output_item": "water",
+        "output_qty": 2,
+        "conversion": {
+          "source": "finite water_table extraction: 1 resource units fund at most 2 output units",
+          "external_mass_units": 2,
+          "external_nutrition_units": 0
+        },
+        "profession": ""
+      },
+      {
+        "id": "hunt_wasteland_game",
+        "label": "hunt wasteland game and scavenge sealed rations",
+        "profession": "scavenger",
+        "node_feature": "hunting_ground",
+        "ticks": 2,
+        "energy_cost": 10,
+        "output_item": "food",
+        "output_qty": 2,
+        "resource_pool": "game_herd",
+        "resource_draw": 2,
+        "conversion": {
+          "source": "finite game_herd extraction: 2 resource units fund at most 2 food units",
+          "external_mass_units": 2,
+          "external_nutrition_units": 2
+        },
+        "skill_id": "scavenging"
+      },
+      {
+        "id": "salvage_scrap",
+        "label": "salvage alloy scrap from crater ruins",
+        "profession": "scavenger",
+        "node_feature": "woodland",
+        "ticks": 2,
+        "energy_cost": 12,
+        "output_item": "scrap_metal",
+        "output_qty": 2,
+        "resource_pool": "scrap_reserve",
+        "resource_draw": 2,
+        "conversion": {
+          "source": "finite scrap_reserve extraction: 2 resource units fund at most 2 output units",
+          "external_mass_units": 2,
+          "external_nutrition_units": 0
+        },
+        "skill_id": "scavenging"
+      },
+      {
+        "id": "assemble_radio",
+        "label": "assemble field radio transceiver",
+        "profession": "engineer",
+        "node_feature": "workshop_row",
+        "ticks": 2,
+        "energy_cost": 14,
+        "inputs": {
+          "scrap_metal": 2
+        },
+        "output_item": "radio_transceiver",
+        "output_qty": 1,
+        "conversion": {
+          "source": "scenario conversion: declared recipe inputs -> OutputQty units; unused matter is process loss"
+        },
+        "skill_id": "cyber_engineering"
+      },
+      {
+        "id": "grow_hydro_rations",
+        "label": "harvest hydroponic ration packs",
+        "profession": "engineer",
+        "node_feature": "farmland",
+        "ticks": 2,
+        "energy_cost": 10,
+        "inputs": {
+          "water": 1,
+          "seeds": 1
+        },
+        "output_item": "hydro_ration",
+        "output_qty": 3,
+        "growth": {
+          "duration_ticks": 11520,
+          "maintenance_interval_ticks": 96,
+          "supplies": {
+            "water": 1
+          },
+          "source": "WorldPack hydroponic wheat preset: 120 days; a different cultivar or accelerated technology must declare its own cycle and supplies; scenario care-survival budget: seven continuous days without required care ends the batch; not a measured species mortality threshold",
+          "failure_after_ticks": 672
+        },
+        "conversion": {
+          "source": "configured biological assimilation from growth supplies, environment and retained parents; WorldPack hydroponic wheat preset: 120 days; a different cultivar or accelerated technology must declare its own cycle and supplies",
+          "external_mass_units": 4,
+          "external_nutrition_units": 6
+        },
+        "skill_id": "biomed_tech"
+      }
+    ],
+    "tag_profiles": {
+      "commander": {
+        "consumes": [
+          "hydro_ration",
+          "food",
+          "water"
+        ],
+        "target_stock": {
+          "hydro_ration": 4,
+          "water": 4
+        }
+      },
+      "engineer": {
+        "produces": [
+          "hydro_ration",
+          "radio_transceiver"
+        ],
+        "consumes": [
+          "scrap_metal",
+          "water",
+          "seeds"
+        ],
+        "target_stock": {
+          "scrap_metal": 4,
+          "hydro_ration": 4
+        }
+      },
+      "medic": {
+        "consumes": [
+          "food",
+          "water",
+          "rad_med"
+        ],
+        "target_stock": {
+          "rad_med": 3,
+          "medicine": 2
+        }
+      },
+      "broker": {
+        "consumes": [
+          "food",
+          "water"
+        ],
+        "target_stock": {
+          "scrap_metal": 4,
+          "hydro_ration": 3
+        }
+      },
+      "scavenger": {
+        "produces": [
+          "scrap_metal",
+          "food"
+        ],
+        "consumes": [
+          "food",
+          "water"
+        ],
+        "target_stock": {
+          "scrap_metal": 4,
+          "food": 6
+        }
+      }
+    },
+    "level_thresholds": [
+      0,
+      8,
+      20,
+      40,
+      70,
+      110
+    ],
+    "faction_level_thresholds": [
+      0,
+      30,
+      90,
+      200,
+      360
+    ],
+    "calendar": {
+      "seasons": [
+        {
+          "days": 92,
+          "id": "spring",
+          "name": "春季",
+          "feature_yield_pct": {
+            "farmland": 115,
+            "fishery_waters": 110,
+            "herb_patch": 120,
+            "pasture": 120,
+            "woodland": 105
+          },
+          "weather_weights": {
+            "clear": 45,
+            "dense_fog": 12,
+            "rain": 35,
+            "storm": 8
+          },
+          "canal_capacity_pct": 100
+        },
+        {
+          "days": 92,
+          "id": "summer",
+          "name": "夏季",
+          "feature_yield_pct": {
+            "farmland": 110,
+            "fishery_waters": 125,
+            "pasture": 110,
+            "woodland": 115
+          },
+          "weather_weights": {
+            "clear": 38,
+            "drought_heat": 16,
+            "rain": 28,
+            "storm": 18
+          },
+          "canal_capacity_pct": 110
+        },
+        {
+          "days": 91,
+          "id": "autumn",
+          "name": "秋季",
+          "feature_yield_pct": {
+            "farmland": 130,
+            "forage_ground": 120,
+            "hunting_ground": 125,
+            "pasture": 105
+          },
+          "weather_weights": {
+            "clear": 55,
+            "dense_fog": 15,
+            "rain": 20,
+            "storm": 10
+          },
+          "canal_capacity_pct": 100
+        },
+        {
+          "days": 90,
+          "id": "winter",
+          "name": "冬季",
+          "feature_yield_pct": {
+            "farmland": 55,
+            "fishery_waters": 75,
+            "herb_patch": 60,
+            "hunting_ground": 110,
+            "mine_shaft": 100,
+            "pasture": 65
+          },
+          "weather_weights": {
+            "clear": 35,
+            "dense_fog": 12,
+            "frost_snow": 45,
+            "storm": 8
+          },
+          "cold_exposure": 2,
+          "canal_capacity_pct": 55
+        }
+      ]
+    },
+    "weathers": {
+      "clear": {
+        "id": "clear",
+        "name": "晴朗",
+        "accident_multiplier_pct": 100
+      },
+      "dense_fog": {
+        "id": "dense_fog",
+        "name": "江山浓雾",
+        "travel_tick_penalty": 1,
+        "route_hazard_permille": {
+          "land": 5,
+          "mountain_pass": 18,
+          "waterway": 22
+        },
+        "route_capacity_pct": {
+          "mountain_pass": 80,
+          "waterway": 80
+        },
+        "accident_multiplier_pct": 130
+      },
+      "drought_heat": {
+        "id": "drought_heat",
+        "name": "酷暑伏旱",
+        "travel_energy_penalty": 2,
+        "route_capacity_pct": {
+          "land": 95,
+          "waterway": 60
+        },
+        "feature_yield_pct": {
+          "farmland": 65,
+          "fishery_waters": 80,
+          "pasture": 70
+        },
+        "resource_regen_pct": {
+          "pasture_grass": 60,
+          "soil_fertility": 55,
+          "water_table": 50
+        },
+        "accident_multiplier_pct": 125
+      },
+      "frost_snow": {
+        "id": "frost_snow",
+        "name": "霜雪严寒",
+        "travel_tick_penalty": 1,
+        "travel_energy_penalty": 2,
+        "route_hazard_permille": {
+          "land": 12,
+          "mountain_pass": 30,
+          "waterway": 20
+        },
+        "route_capacity_pct": {
+          "land": 80,
+          "mountain_pass": 55,
+          "waterway": 50
+        },
+        "feature_yield_pct": {
+          "farmland": 50,
+          "herb_patch": 55,
+          "pasture": 60
+        },
+        "accident_multiplier_pct": 150,
+        "cold_damage": 3
+      },
+      "rain": {
+        "id": "rain",
+        "name": "甘霖细雨",
+        "travel_energy_penalty": 1,
+        "route_hazard_permille": {
+          "land": 2,
+          "mountain_pass": 8,
+          "waterway": 5
+        },
+        "feature_yield_pct": {
+          "farmland": 115,
+          "herb_patch": 115,
+          "pasture": 110
+        },
+        "resource_regen_pct": {
+          "herb_bed": 125,
+          "pasture_grass": 120,
+          "soil_fertility": 125,
+          "water_table": 130
+        },
+        "accident_multiplier_pct": 120
+      },
+      "storm": {
+        "id": "storm",
+        "name": "狂风暴雨",
+        "travel_tick_penalty": 1,
+        "travel_energy_penalty": 2,
+        "route_hazard_permille": {
+          "land": 10,
+          "mountain_pass": 35,
+          "waterway": 45
+        },
+        "route_capacity_pct": {
+          "land": 80,
+          "mountain_pass": 60,
+          "waterway": 65
+        },
+        "feature_yield_pct": {
+          "farmland": 80,
+          "fishery_waters": 65,
+          "mine_shaft": 75,
+          "woodland": 75
+        },
+        "resource_regen_pct": {
+          "water_table": 140
+        },
+        "accident_multiplier_pct": 185
+      }
+    },
+    "resources": {
+      "fish_stock": {
+        "id": "fish_stock",
+        "name": "江河鱼汛",
+        "node_features": [
+          "fishery_waters"
+        ],
+        "regen_permille_per_day": 105,
+        "seasonal_regen_pct": {
+          "autumn": 110,
+          "spring": 120,
+          "summer": 135,
+          "winter": 65
+        },
+        "biological": true,
+        "reproduction_source": "fish_stock",
+        "maturity_ticks": 960
+      },
+      "game_herd": {
+        "id": "game_herd",
+        "name": "山野兽群",
+        "node_features": [
+          "hunting_ground"
+        ],
+        "regen_permille_per_day": 95,
+        "seasonal_regen_pct": {
+          "autumn": 120,
+          "spring": 125,
+          "summer": 115,
+          "winter": 75
+        },
+        "biological": true,
+        "reproduction_source": "game_herd",
+        "maturity_ticks": 1056
+      },
+      "herb_bed": {
+        "id": "herb_bed",
+        "name": "灵药山苗",
+        "node_features": [
+          "herb_patch",
+          "woodland"
+        ],
+        "regen_permille_per_day": 95,
+        "seasonal_regen_pct": {
+          "autumn": 100,
+          "spring": 135,
+          "summer": 120,
+          "winter": 50
+        },
+        "biological": true,
+        "reproduction_source": "herb_bed",
+        "maturity_ticks": 1056
+      },
+      "ore_vein": {
+        "id": "ore_vein",
+        "name": "矿脉储量",
+        "node_features": [
+          "mine_shaft",
+          "woodland"
+        ],
+        "regen_permille_per_day": 0,
+        "seasonal_regen_pct": {
+          "autumn": 100,
+          "spring": 100,
+          "summer": 100,
+          "winter": 100
+        }
+      },
+      "pasture_grass": {
+        "id": "pasture_grass",
+        "name": "牧场水草",
+        "node_features": [
+          "pasture"
+        ],
+        "regen_permille_per_day": 110,
+        "seasonal_regen_pct": {
+          "autumn": 95,
+          "spring": 140,
+          "summer": 125,
+          "winter": 50
+        },
+        "biological": true,
+        "reproduction_source": "pasture_grass",
+        "maturity_ticks": 960
+      },
+      "soil_fertility": {
+        "id": "soil_fertility",
+        "name": "水田地力",
+        "node_features": [
+          "farmland"
+        ],
+        "regen_permille_per_day": 90,
+        "seasonal_regen_pct": {
+          "autumn": 100,
+          "spring": 130,
+          "summer": 115,
+          "winter": 70
+        }
+      },
+      "timber_stand": {
+        "id": "timber_stand",
+        "name": "山林蓄木",
+        "node_features": [
+          "woodland"
+        ],
+        "regen_permille_per_day": 75,
+        "seasonal_regen_pct": {
+          "autumn": 90,
+          "spring": 125,
+          "summer": 120,
+          "winter": 55
+        },
+        "biological": true,
+        "reproduction_source": "timber_stand",
+        "maturity_ticks": 1344
+      },
+      "water_table": {
+        "id": "water_table",
+        "name": "河井水源",
+        "node_features": [
+          "water_source",
+          "canal_wharf"
+        ],
+        "potable_water": true,
+        "regen_permille_per_day": 160,
+        "seasonal_regen_pct": {
+          "autumn": 100,
+          "spring": 120,
+          "summer": 125,
+          "winter": 85
+        }
+      },
+      "scrap_reserve": {
+        "id": "scrap_reserve",
+        "name": "recoverable wreck material",
+        "node_features": [
+          "woodland"
+        ],
+        "regen_permille_per_day": 0
+      }
+    },
+    "encounters": [
+      {
+        "id": "rogue_drone_pack",
+        "name": "失控巡逻无人机群",
+        "category": "anomaly",
+        "node_features": [
+          "woodland",
+          "mine_shaft"
+        ],
+        "base_activity": 22,
+        "growth_per_day": 6,
+        "surge_threshold": 55,
+        "hazard_permille": 16,
+        "damage": 18,
+        "lethality_permille": 45,
+        "rare_drop_item": "fuel_cell",
+        "rare_drop_permille": 380,
+        "suppressor_tags": [
+          "security",
+          "commander",
+          "engineer"
+        ],
+        "bounty_coins": 10,
+        "source_resource": "scrap_reserve",
+        "resource_per_kill": 1
+      },
+      {
+        "id": "mutant_stalker",
+        "name": "辐射区变异潜伏者",
+        "category": "beast",
+        "node_features": [
+          "hunting_ground",
+          "herb_patch"
+        ],
+        "base_activity": 18,
+        "growth_per_day": 6,
+        "surge_threshold": 52,
+        "hazard_permille": 14,
+        "damage": 18,
+        "lethality_permille": 40,
+        "rare_drop_item": "rad_med",
+        "rare_drop_permille": 300,
+        "suppressor_tags": [
+          "security",
+          "commander"
+        ],
+        "bounty_coins": 8,
+        "source_resource": "game_herd",
+        "resource_per_kill": 1
+      }
+    ],
+    "disasters": [
+      {
+        "id": "rad_dust_storm",
+        "name": "强辐射尘暴",
+        "trigger_weathers": [
+          "storm",
+          "drought_heat"
+        ],
+        "trigger_seasons": [
+          "summer",
+          "autumn"
+        ],
+        "target_features": [
+          "farmland",
+          "residential",
+          "hub"
+        ],
+        "prob_permille_per_day": 85,
+        "duration_ticks": 120,
+        "resource_damage_pct": {
+          "water_table": 18,
+          "soil_fertility": 12
+        },
+        "house_damage": 5,
+        "sanitation_drop": 20,
+        "casualty_permille": 2,
+        "mitigated_by_infra": "air_scrubber",
+        "relief_item": "rad_med"
+      },
+      {
+        "id": "water_reclaimer_drought",
+        "name": "净水回路干旱衰减",
+        "trigger_weathers": [
+          "drought_heat"
+        ],
+        "trigger_seasons": [
+          "summer",
+          "autumn"
+        ],
+        "target_features": [
+          "farmland",
+          "water_source"
+        ],
+        "prob_permille_per_day": 95,
+        "duration_ticks": 144,
+        "resource_damage_pct": {
+          "water_table": 24
+        },
+        "sanitation_drop": 10,
+        "casualty_permille": 1,
+        "mitigated_by_infra": "water_reclaimer",
+        "relief_item": "water"
+      }
+    ],
+    "accidents": [
+      {
+        "id": "salvage_collapse",
+        "name": "废墟结构坍塌",
+        "node_features": [
+          "woodland",
+          "mine_shaft"
+        ],
+        "recipes": [
+          "salvage_scrap"
+        ],
+        "base_permille": 12,
+        "safety_infra": "salvage_rig",
+        "damage": 18,
+        "lethality_permille": 30
+      },
+      {
+        "id": "arc_short_circuit",
+        "name": "电弧短路灼伤",
+        "recipes": [
+          "assemble_radio"
+        ],
+        "base_permille": 8,
+        "damage": 14,
+        "lethality_permille": 15
+      },
+      {
+        "id": "crater_convoy_hazard",
+        "name": "辐射荒漠车队遇险",
+        "route_mediums": [
+          "road",
+          "air",
+          "land"
+        ],
+        "base_permille": 16,
+        "damage": 20,
+        "lethality_permille": 75
+      }
+    ],
+    "infrastructures": {
+      "air_scrubber": {
+        "id": "air_scrubber",
+        "name": "空气净化滤波塔",
+        "node_feature": "hub",
+        "node_features": [
+          "hub",
+          "residential",
+          "market"
+        ],
+        "sanitation_role": true,
+        "max_condition": 100,
+        "decay_per_day": 2,
+        "build_inputs": {
+          "scrap_metal": 2
+        },
+        "build_energy": 8
+      },
+      "water_reclaimer": {
+        "id": "water_reclaimer",
+        "name": "循环净水回收站",
+        "node_feature": "water_source",
+        "node_features": [
+          "water_source",
+          "farmland"
+        ],
+        "max_condition": 100,
+        "decay_per_day": 2,
+        "build_inputs": {
+          "scrap_metal": 2
+        },
+        "build_energy": 8
+      },
+      "salvage_rig": {
+        "id": "salvage_rig",
+        "name": "残骸支护吊臂",
+        "node_feature": "woodland",
+        "node_features": [
+          "woodland",
+          "mine_shaft"
+        ],
+        "max_condition": 100,
+        "decay_per_day": 3,
+        "build_inputs": {
+          "scrap_metal": 2
+        },
+        "build_energy": 9
+      }
+    },
+    "rituals": [],
+    "diseases": [
+      {
+        "id": "rad_sickness",
+        "name": "低剂量辐射病",
+        "max_sanitation_trigger": 62,
+        "contagion_permille": 6,
+        "duration_ticks": 192,
+        "health_drain_per_day": 12,
+        "lethality_permille": 20
+      },
+      {
+        "id": "dust_pneumonia",
+        "name": "尘肺热症",
+        "cold_trigger": true,
+        "contagion_permille": 12,
+        "duration_ticks": 144,
+        "health_drain_per_day": 10,
+        "lethality_permille": 14
+      }
+    ],
+    "lifecycle": {
+      "child_max_age": 15,
+      "elder_min_age": 55,
+      "max_expectancy": 78,
+      "fertility_min_food_per_capita": 3,
+      "annual_birth_permille": 18,
+      "elder_annual_death_permille": 34,
+      "auto_hydrate_successor": true
+    },
+    "governance": {
+      "market_tax_permille": 90,
+      "transit_customs_permille": 55,
+      "daily_poll_tax_permille": 24,
+      "subsistence_reserve_per_cap": 8,
+      "civic_stipend_per_cap": 3,
+      "tax_skim_base_permille": 135,
+      "embezzle_base_permille": 110,
+      "audit_threshold": 34,
+      "racket_rate_permille": 22,
+      "bribe_share_permille": 260,
+      "law_capability": "arrest",
+      "audit_capability": "audit_corruption",
+      "racket_tag": "gang",
+      "outlaw_tag": "outlaw"
+    },
+    "sensory_modes": {
+      "satellite_scan": {
+        "id": "satellite_scan",
+        "name": "Orbital Recon Satellite Scan",
+        "granted_by_tags": [
+          "orbital_uplink",
+          "commander"
+        ],
+        "range_km": 120,
+        "penetrates_indoor": true,
+        "penetration_power": 50
+      }
+    },
+    "comm_channels": {
+      "radio_broadcast": {
+        "id": "radio_broadcast",
+        "name": "Wasteland Shortwave Radio Broadcast",
+        "granted_by_tags": [
+          "radio_transceiver"
+        ],
+        "receiver_tags": [
+          "radio_transceiver"
+        ],
+        "range_km": 120,
+        "broadcast": true,
+        "penetration_power": 60,
+        "energy_cost": 1
+      }
+    },
+    "combat_profiles": [
+      {
+        "id": "aegis_mech_chassis",
+        "name": "Aegis Heavy Mech Chassis",
+        "granted_by_tags": [
+          "mech"
+        ],
+        "tier": 3,
+        "attack_types": {
+          "kinetic": 32
+        },
+        "defense_by_type": {
+          "emp": {
+            "reduction_pct": 0
+          },
+          "kinetic": {
+            "immunity_below_tier": 3,
+            "reduction_pct": 85
+          }
+        }
+      }
+    ],
+    "action_specs": {
+      "emp_pulse": {
+        "id": "emp_pulse",
+        "name": "Targeted EMP Discharge",
+        "granted_by_tags": [
+          "engineer"
+        ],
+        "target_kind": "actor",
+        "range_km": 4,
+        "ticks": 1,
+        "energy_cost": 5,
+        "slot_costs": {
+          "battery": 20
+        },
+        "attack": {
+          "tier": 2,
+          "damage_by_type": {
+            "emp": 35
+          }
+        }
+      }
+    },
+    "state_slots": {
+      "battery": {
+        "id": "battery",
+        "name": "Cell Charge",
+        "min": 0,
+        "max": 100,
+        "default": 80,
+        "regen_per_tick": 1
+      },
+      "radiation": {
+        "id": "radiation",
+        "name": "Rad Exposure",
+        "min": 0,
+        "max": 100,
+        "default": 0
+      }
+    },
+    "techs": {
+      "fusion_microcell": {
+        "id": "fusion_microcell",
+        "name": "Compact Fusion Microcell",
+        "granted_by_tags": [
+          "engineer"
+        ],
+        "research_ticks": 3,
+        "research_energy_cost": 6,
+        "facility_name": "fusion_reactor",
+        "adopt_inputs": {
+          "scrap_metal": 2
+        },
+        "adopt_ticks": 2,
+        "adopt_energy_cost": 4,
+        "production_bonus_pct": 25
+      }
+    },
+    "production": {
+      "facility_capacity": {
+        "forge": 1,
+        "carpentry_bench": 1,
+        "herb_rack": 1,
+        "compost_pit": 1
+      },
+      "field_area_per_batch_m2": 1000,
+      "field_area_per_farmer_m2": 1000,
+      "field_source": "scenario budget: one 1000 m2 field per farmer; one simultaneous crop per field; not agronomic calibration",
+      "facility_source": "scenario equipment budget: each installed facility has one serial workstation; capacity is configured, not inferred from population"
+    },
+    "house_wear": {
+      "interval_ticks": 35040,
+      "condition_loss": 2,
+      "source": "world setting: metal habitat shelters have a 50-year natural renewal scale; accidents and environmental disasters apply their declared damage"
+    },
+    "forms": {
+      "wastelander": {
+        "id": "wastelander",
+        "name": "废土凡民",
+        "power_tier": 1,
+        "combat_bonus": 0,
+        "vigilance_bonus": 0,
+        "life_expectancy_years": 70,
+        "daily_intake_pct": 100,
+        "starvation_threshold": 6,
+        "starvation_damage": 10
+      },
+      "cyber_mercenary": {
+        "id": "cyber_mercenary",
+        "name": "义体佣兵",
+        "power_tier": 2,
+        "combat_bonus": 18,
+        "vigilance_bonus": 8,
+        "life_expectancy_years": 100,
+        "daily_intake_pct": 140,
+        "starvation_threshold": 8,
+        "starvation_damage": 10,
+        "slot_metabolism": {
+          "battery": -1
+        }
+      },
+      "bio_mutant": {
+        "id": "bio_mutant",
+        "name": "基因改造者",
+        "power_tier": 3,
+        "combat_bonus": 42,
+        "vigilance_bonus": 14,
+        "life_expectancy_years": 130,
+        "daily_intake_pct": 260,
+        "starvation_threshold": 10,
+        "starvation_damage": 12
+      },
+      "combat_android": {
+        "id": "combat_android",
+        "name": "自律机兵",
+        "power_tier": 4,
+        "combat_bonus": 72,
+        "vigilance_bonus": 24,
+        "life_expectancy_years": 300,
+        "daily_intake_pct": 0,
+        "disable_hunger": true,
+        "slot_metabolism": {
+          "battery": -2
+        }
+      }
+    },
+    "skills": {
+      "ballistics": {
+        "id": "ballistics",
+        "name": "火控枪术",
+        "category": "combat",
+        "max_level": 6,
+        "ranks": [
+          "新兵",
+          "老兵",
+          "神枪手",
+          "火控专家"
+        ],
+        "combat_bonus_per_level": 4,
+        "vigilance_bonus_per_level": 2,
+        "action_affinities": [
+          "attack",
+          "hunt_threat",
+          "arrest"
+        ]
+      },
+      "cyber_engineering": {
+        "id": "cyber_engineering",
+        "name": "义体工程",
+        "category": "craft",
+        "max_level": 6,
+        "ranks": [
+          "焊工",
+          "技师",
+          "总工",
+          "首席机师"
+        ],
+        "repair_bonus_per_level": 6,
+        "action_affinities": [
+          "craft",
+          "maintain_infra",
+          "research_tech"
+        ]
+      },
+      "biomed_tech": {
+        "id": "biomed_tech",
+        "name": "辐射医疗",
+        "category": "healing",
+        "max_level": 6,
+        "ranks": [
+          "急救员",
+          "军医",
+          "生化医师",
+          "基因专家"
+        ],
+        "heal_bonus_per_level": 6,
+        "action_affinities": [
+          "heal",
+          "medicate"
+        ]
+      },
+      "scavenging": {
+        "id": "scavenging",
+        "name": "废土拾荒",
+        "category": "gathering",
+        "max_level": 6,
+        "ranks": [
+          "拾荒客",
+          "探荒老手",
+          "废墟猎手",
+          "遗迹宗师"
+        ],
+        "stealth_bonus_per_level": 3,
+        "action_affinities": [
+          "craft",
+          "move"
+        ]
+      },
+      "wasteland_trade": {
+        "id": "wasteland_trade",
+        "name": "黑市走私",
+        "category": "trade",
+        "max_level": 6,
+        "ranks": [
+          "倒爷",
+          "商队头目",
+          "黑市掮客",
+          "辛迪加巨头"
+        ],
+        "trade_margin_per_level": 2,
+        "vigilance_bonus_per_level": 2,
+        "action_affinities": [
+          "offer",
+          "propose_agreement",
+          "accept"
+        ]
+      }
+    },
+    "world_events": [
+      {
+        "id": "orbital_core_drop",
+        "name": "轨道稀世核心空投",
+        "category": "artifact_emergence",
+        "target_features": [
+          "woodland",
+          "mine_shaft",
+          "market"
+        ],
+        "prob_permille_per_day": 60,
+        "min_tick": 96,
+        "cooldown_ticks": 672,
+        "duration_ticks": 288,
+        "intensity": 68,
+        "reward_item": "rad_med",
+        "reward_qty": 2,
+        "reward_coins": 35,
+        "required_power_tier": 2
+      },
+      {
+        "id": "tectonic_crater_fissure",
+        "name": "地壳震裂·荒漠公路中断",
+        "category": "terrain_shift",
+        "target_features": [
+          "woodland",
+          "mine_shaft"
+        ],
+        "prob_permille_per_day": 35,
+        "min_tick": 192,
+        "cooldown_ticks": 960,
+        "duration_ticks": 192,
+        "intensity": 75,
+        "sever_medium": "road",
+        "add_features": [
+          "mine_shaft"
+        ],
+        "resource_deposits": {
+          "ore_vein": 400
+        },
+        "casualty_permille": 20,
+        "damage": 18
+      },
+      {
+        "id": "alien_vanguard_invasion",
+        "name": "外星母舰先遣队入侵",
+        "category": "external_invasion",
+        "target_features": [
+          "market",
+          "hub",
+          "workshop_row"
+        ],
+        "prob_permille_per_day": 35,
+        "min_tick": 288,
+        "cooldown_ticks": 960,
+        "duration_ticks": 288,
+        "intensity": 82,
+        "invasion_threat_id": "rogue_drone_pack",
+        "invasion_threat_boost": 40,
+        "bounty_boost": 90,
+        "casualty_permille": 22,
+        "damage": 20
+      }
+    ]
+  },
+  "map": {
+    "districts": [
+      {
+        "id": "orbital_uplink_pad",
+        "name": "Orbital Uplink Command",
+        "geo_region_id": "shielded_bunker_zone",
+        "polity_id": "orbital_authority",
+        "terrain": "mesa",
+        "features": [
+          "hub",
+          "authority_seat",
+          "water_source",
+          "residential",
+          "academy",
+          "martial_hall",
+          "public_forum"
+        ]
+      },
+      {
+        "id": "bunker_district",
+        "name": "Aegis Bunker Sector",
+        "geo_region_id": "shielded_bunker_zone",
+        "polity_id": "aegis_bunker_sector",
+        "terrain": "subterranean",
+        "features": [
+          "workshop_row",
+          "farmland",
+          "market",
+          "water_source",
+          "residential",
+          "forage_ground",
+          "herb_patch",
+          "pasture",
+          "canal_wharf"
+        ]
+      },
+      {
+        "id": "crater_outpost",
+        "name": "Sector-7 Scrap Outpost",
+        "geo_region_id": "irradiated_crater",
+        "polity_id": "sector_7_scrapyard",
+        "terrain": "crater",
+        "features": [
+          "market",
+          "woodland",
+          "water_source",
+          "residential",
+          "mine_shaft",
+          "fishery_waters",
+          "hunting_ground"
+        ]
+      }
+    ],
+    "roads": [
+      {
+        "from": "orbital_uplink_pad",
+        "to": "bunker_district",
+        "ticks": 1,
+        "energy_cost": 2,
+        "medium": "road",
+        "freight_capacity": 0
+      },
+      {
+        "from": "bunker_district",
+        "to": "crater_outpost",
+        "ticks": 2,
+        "energy_cost": 4,
+        "medium": "road",
+        "freight_capacity": 0
+      }
+    ],
+    "geo_regions": [
+      {
+        "id": "irradiated_crater",
+        "name": "Glassed Crater Wastes",
+        "coord": {
+          "x": 0,
+          "y": 0
+        },
+        "elevation_m": 110,
+        "terrain": "crater",
+        "climate": "arid",
+        "resources": {
+          "freshwater": 1200,
+          "ore_vein": 2400
+        },
+        "ambient_fields": {
+          "radiation": 75
+        }
+      },
+      {
+        "id": "shielded_bunker_zone",
+        "name": "Aegis Shielded Basin",
+        "coord": {
+          "x": 25,
+          "y": 0
+        },
+        "elevation_m": 160,
+        "terrain": "mesa",
+        "climate": "temperate",
+        "resources": {
+          "freshwater": 3000,
+          "soil_fertility": 2600
+        },
+        "ambient_fields": {
+          "radiation": 5
+        }
+      }
+    ],
+    "geo_flows": [
+      {
+        "from_region": "irradiated_crater",
+        "to_region": "shielded_bunker_zone",
+        "kind": "wind_corridor",
+        "conductance_permille": 750
+      }
+    ],
+    "venues": [
+      {
+        "id": "uplink_deck",
+        "name": "Spire Uplink Deck",
+        "district_id": "orbital_uplink_pad",
+        "geo_region_id": "shielded_bunker_zone",
+        "polity_id": "orbital_authority",
+        "kind": "command",
+        "features": [
+          "hub",
+          "authority_seat",
+          "water_source"
+        ]
+      },
+      {
+        "id": "bunker_core",
+        "name": "Lead-Lined Bunker Core",
+        "district_id": "bunker_district",
+        "geo_region_id": "shielded_bunker_zone",
+        "polity_id": "aegis_bunker_sector",
+        "kind": "bunker",
+        "features": [
+          "workshop_row",
+          "water_source"
+        ],
+        "shielding": 80,
+        "indoor": true
+      },
+      {
+        "id": "bunker_airlock",
+        "name": "Aegis Airlock Exchange",
+        "district_id": "bunker_district",
+        "geo_region_id": "shielded_bunker_zone",
+        "polity_id": "aegis_bunker_sector",
+        "kind": "market",
+        "features": [
+          "market",
+          "farmland",
+          "water_source"
+        ]
+      },
+      {
+        "id": "scrap_exchange",
+        "name": "Crater Scrap Exchange",
+        "district_id": "crater_outpost",
+        "geo_region_id": "irradiated_crater",
+        "polity_id": "sector_7_scrapyard",
+        "kind": "outpost",
+        "features": [
+          "market",
+          "woodland",
+          "water_source"
+        ]
+      }
+    ],
+    "venue_routes": [
+      {
+        "from_venue": "uplink_deck",
+        "to_venue": "bunker_airlock",
+        "distance_km": 3,
+        "ticks": 1,
+        "energy_cost": 2,
+        "medium": "road"
+      },
+      {
+        "from_venue": "bunker_airlock",
+        "to_venue": "bunker_core",
+        "distance_km": 1,
+        "ticks": 1,
+        "energy_cost": 1,
+        "medium": "road"
+      },
+      {
+        "from_venue": "bunker_airlock",
+        "to_venue": "scrap_exchange",
+        "distance_km": 25,
+        "ticks": 2,
+        "energy_cost": 4,
+        "medium": "road"
+      }
+    ]
+  },
+  "polities": {
+    "nodes": [
+      {
+        "id": "orbital_authority",
+        "name": "Orbital Authority",
+        "level": "orbital_command",
+        "seat_district_id": "orbital_uplink_pad",
+        "seat_venue_id": "uplink_deck",
+        "leader_actor_id": "admiral_vance",
+        "treasury": 220,
+        "ledger": {},
+        "market_tax_permille": 60
+      },
+      {
+        "id": "aegis_bunker_sector",
+        "name": "Aegis Bunker Sector",
+        "level": "bunker_sector",
+        "de_jure_parent_id": "orbital_authority",
+        "seat_district_id": "bunker_district",
+        "seat_venue_id": "bunker_core",
+        "leader_actor_id": "chief_eng_kael",
+        "treasury": 95,
+        "ledger": {}
+      },
+      {
+        "id": "scrap_syndicate",
+        "name": "Scrap Syndicate",
+        "level": "warlord_syndicate",
+        "seat_district_id": "crater_outpost",
+        "seat_venue_id": "scrap_exchange",
+        "leader_actor_id": "syndicate_boss_nyx",
+        "treasury": 110,
+        "ledger": {}
+      },
+      {
+        "id": "sector_7_scrapyard",
+        "name": "Sector-7 Scrap Zone",
+        "level": "surface_sector",
+        "de_jure_parent_id": "orbital_authority",
+        "de_facto_controller_id": "scrap_syndicate",
+        "seat_district_id": "crater_outpost",
+        "seat_venue_id": "scrap_exchange",
+        "treasury": 45,
+        "ledger": {}
+      }
+    ]
+  },
+  "houses": [
+    {
+      "id": "h_uplink",
+      "name": "Command Spire Quarters",
+      "district": "orbital_uplink_pad",
+      "owner_id": "admiral_vance",
+      "residents": [
+        "admiral_vance"
+      ],
+      "level": 3,
+      "comfort": 3,
+      "condition": 95
+    },
+    {
+      "id": "h_bunker",
+      "name": "Aegis Habitation Bay",
+      "district": "bunker_district",
+      "owner_id": "chief_eng_kael",
+      "residents": [
+        "chief_eng_kael",
+        "bunker_medic_eli"
+      ],
+      "level": 3,
+      "comfort": 3,
+      "condition": 94,
+      "shielding": 80,
+      "facilities": [
+        "herb_rack",
+        "carpentry_bench"
+      ]
+    },
+    {
+      "id": "h_crater",
+      "name": "Rusthull Outpost Bar",
+      "district": "crater_outpost",
+      "owner_id": "syndicate_boss_nyx",
+      "residents": [
+        "syndicate_boss_nyx",
+        "scavenger_rex",
+        "scavenger_vera"
+      ],
+      "level": 2,
+      "comfort": 2,
+      "condition": 80
+    }
+  ],
+  "factions": [
+    {
+      "id": "orbital_command_guild",
+      "name": "Orbital Security Corps",
+      "district": "orbital_uplink_pad",
+      "professions": [
+        "commander"
+      ],
+      "level": 2,
+      "influence": 0
+    },
+    {
+      "id": "bunker_guild",
+      "name": "Aegis Engineering Guild",
+      "district": "bunker_district",
+      "professions": [
+        "engineer",
+        "medic"
+      ],
+      "level": 2,
+      "influence": 0
+    },
+    {
+      "id": "scrap_syndicate_guild",
+      "name": "Scrap Syndicate Exchange",
+      "district": "crater_outpost",
+      "professions": [
+        "scavenger",
+        "broker"
+      ],
+      "level": 1,
+      "influence": 0
+    }
+  ],
+  "actors": [
+    {
+      "id": "admiral_vance",
+      "name": "Admiral Vance",
+      "role": "commander",
+      "tags": [
+        "resident",
+        "commander",
+        "ruler",
+        "orbital_uplink",
+        "radio_transceiver",
+        "security",
+        "oversight"
+      ],
+      "attributes": {
+        "strength": 10,
+        "dexterity": 9,
+        "insight": 14,
+        "spirit": 12
+      },
+      "professions": {
+        "commander": 2
+      },
+      "level": 0,
+      "guilds": [
+        "orbital_command_guild"
+      ],
+      "location": "orbital_uplink_pad",
+      "venue_id": "uplink_deck",
+      "home_id": "h_uplink",
+      "age_years": 48,
+      "health": 100,
+      "energy": 96,
+      "hunger": 0,
+      "sleep_trait": "",
+      "money": 85,
+      "items": {
+        "food": 8,
+        "hydro_ration": 4,
+        "radio_transceiver": 1,
+        "water": 4,
+        "security_pass": 1
+      },
+      "goal": "Monitor wasteland sectors via satellite scan and enforce orbital authority",
+      "personality": "",
+      "trust": {},
+      "form_id": "combat_android",
+      "skills": {
+        "ballistics": 5,
+        "cyber_engineering": 3
+      }
+    },
+    {
+      "id": "chief_eng_kael",
+      "name": "Chief Engineer Kael",
+      "role": "engineer",
+      "tags": [
+        "resident",
+        "trader",
+        "engineer",
+        "radio_transceiver"
+      ],
+      "attributes": {
+        "strength": 9,
+        "dexterity": 11,
+        "insight": 14,
+        "spirit": 10
+      },
+      "professions": {
+        "engineer": 3
+      },
+      "level": 0,
+      "guilds": [
+        "bunker_guild"
+      ],
+      "location": "bunker_district",
+      "venue_id": "bunker_core",
+      "home_id": "h_bunker",
+      "age_years": 37,
+      "health": 100,
+      "energy": 94,
+      "hunger": 0,
+      "sleep_trait": "",
+      "money": 45,
+      "items": {
+        "food": 8,
+        "hydro_ration": 3,
+        "radio_transceiver": 1,
+        "scrap_metal": 4,
+        "water": 4
+      },
+      "goal": "Maintain Aegis bunker shielding and grow hydroponic rations",
+      "personality": "",
+      "trust": {},
+      "form_id": "cyber_mercenary",
+      "skills": {
+        "cyber_engineering": 5,
+        "wasteland_trade": 2
+      }
+    },
+    {
+      "id": "bunker_medic_eli",
+      "name": "Doc Eli",
+      "role": "medic",
+      "tags": [
+        "resident",
+        "healer",
+        "trader",
+        "radio_transceiver"
+      ],
+      "attributes": {
+        "strength": 7,
+        "dexterity": 9,
+        "insight": 13,
+        "spirit": 11
+      },
+      "professions": {
+        "medic": 2
+      },
+      "level": 0,
+      "guilds": [
+        "bunker_guild"
+      ],
+      "location": "bunker_district",
+      "venue_id": "bunker_airlock",
+      "home_id": "h_bunker",
+      "age_years": 40,
+      "health": 100,
+      "energy": 92,
+      "hunger": 0,
+      "sleep_trait": "",
+      "money": 35,
+      "items": {
+        "food": 8,
+        "medicine": 2,
+        "rad_med": 3,
+        "radio_transceiver": 1,
+        "water": 4
+      },
+      "goal": "Treat radiation sickness and distribute medical supplies",
+      "personality": "",
+      "trust": {},
+      "form_id": "wastelander",
+      "skills": {
+        "biomed_tech": 5,
+        "cyber_engineering": 2
+      }
+    },
+    {
+      "id": "syndicate_boss_nyx",
+      "name": "Boss Nyx",
+      "role": "broker",
+      "tags": [
+        "resident",
+        "trader",
+        "ruler",
+        "radio_transceiver"
+      ],
+      "attributes": {
+        "strength": 10,
+        "dexterity": 10,
+        "insight": 11,
+        "spirit": 11
+      },
+      "professions": {
+        "broker": 2
+      },
+      "level": 0,
+      "guilds": [
+        "scrap_syndicate_guild"
+      ],
+      "location": "crater_outpost",
+      "venue_id": "scrap_exchange",
+      "home_id": "h_crater",
+      "age_years": 34,
+      "health": 100,
+      "energy": 92,
+      "hunger": 0,
+      "sleep_trait": "",
+      "money": 65,
+      "state_slots": {
+        "battery": 80,
+        "radiation": 0
+      },
+      "items": {
+        "food": 8,
+        "radio_transceiver": 1,
+        "scrap_metal": 5,
+        "water": 4
+      },
+      "goal": "Control Sector-7 scrap trade outside Orbital Authority embargoes",
+      "personality": "",
+      "trust": {},
+      "form_id": "bio_mutant",
+      "skills": {
+        "wasteland_trade": 5,
+        "ballistics": 3
+      }
+    },
+    {
+      "id": "scavenger_rex",
+      "name": "Scavenger Rex",
+      "role": "scavenger",
+      "tags": [
+        "resident",
+        "trader",
+        "scavenger",
+        "radio_transceiver"
+      ],
+      "attributes": {
+        "strength": 11,
+        "dexterity": 11,
+        "insight": 9,
+        "spirit": 10
+      },
+      "professions": {
+        "scavenger": 2
+      },
+      "level": 0,
+      "guilds": [
+        "scrap_syndicate_guild"
+      ],
+      "location": "crater_outpost",
+      "venue_id": "scrap_exchange",
+      "home_id": "h_crater",
+      "age_years": 26,
+      "health": 100,
+      "energy": 90,
+      "hunger": 0,
+      "sleep_trait": "",
+      "money": 25,
+      "items": {
+        "food": 7,
+        "radio_transceiver": 1,
+        "scrap_metal": 3,
+        "water": 4
+      },
+      "goal": "Salvage crater alloys and broadcast hazard warnings over radio",
+      "personality": "",
+      "trust": {},
+      "form_id": "bio_mutant",
+      "skills": {
+        "scavenging": 4,
+        "ballistics": 2
+      }
+    },
+    {
+      "id": "scavenger_vera",
+      "name": "Scavenger Vera",
+      "role": "scavenger",
+      "tags": [
+        "resident",
+        "trader",
+        "scavenger"
+      ],
+      "attributes": {
+        "strength": 10,
+        "dexterity": 10,
+        "insight": 9,
+        "spirit": 9
+      },
+      "professions": {
+        "scavenger": 1
+      },
+      "level": 0,
+      "guilds": [
+        "scrap_syndicate_guild"
+      ],
+      "location": "crater_outpost",
+      "venue_id": "scrap_exchange",
+      "home_id": "h_crater",
+      "age_years": 23,
+      "health": 100,
+      "energy": 90,
+      "hunger": 0,
+      "sleep_trait": "",
+      "money": 18,
+      "items": {
+        "food": 7,
+        "scrap_metal": 2,
+        "water": 4
+      },
+      "goal": "Collect crater scrap and trade for bunker hydroponic rations",
+      "personality": "",
+      "trust": {},
+      "form_id": "wastelander",
+      "skills": {
+        "scavenging": 3,
+        "biomed_tech": 2
+      }
+    }
+  ],
+  "cohorts": [
+    {
+      "id": "cohort_crater_scavengers",
+      "name": "Crater Scrapper Crew",
+      "district": "crater_outpost",
+      "faction_id": "scrap_syndicate_guild",
+      "profession": "scavenger",
+      "tier": 1,
+      "prof_level": 1,
+      "rank": "Scrapper",
+      "population": 120,
+      "avg_energy": 84,
+      "avg_hunger": 0,
+      "money_pool": 1500,
+      "item_pool": {
+        "food": 800,
+        "scrap_metal": 300,
+        "water": 400
+      },
+      "form_id": "wastelander"
+    },
+    {
+      "id": "cohort_bunker_techs",
+      "name": "Aegis Hydro-Techs",
+      "district": "bunker_district",
+      "faction_id": "bunker_guild",
+      "profession": "engineer",
+      "tier": 2,
+      "prof_level": 2,
+      "rank": "Tech",
+      "population": 80,
+      "avg_energy": 84,
+      "avg_hunger": 0,
+      "money_pool": 1300,
+      "item_pool": {
+        "food": 600,
+        "hydro_ration": 240,
+        "water": 350
+      },
+      "form_id": "cyber_mercenary"
+    }
+  ],
+  "ecology": {
+    "enabled": true,
+    "scale_pop": 206
+  },
+  "flow_grid": {
+    "nodes": [
+      {
+        "id": "bunker_generator",
+        "venue_id": "bunker_core",
+        "district_id": "bunker_district",
+        "kind": "generator",
+        "generation": 100,
+        "active": true,
+        "powered": false,
+        "source": {
+          "fuel_item": "fuel_cell",
+          "units_per_cycle": 1,
+          "energy_per_unit": 9600,
+          "cycle_ticks": 96,
+          "source": "WorldPack fuel-cell rating: one cell stores one day at the configured nameplate output"
+        },
+        "fuel_stock": 1,
+        "stored_energy": 0,
+        "energy_capacity": 9600
+      },
+      {
+        "id": "bunker_workshop_grid",
+        "venue_id": "bunker_core",
+        "district_id": "bunker_district",
+        "kind": "consumer",
+        "demand": 30,
+        "active": true,
+        "powered": true
+      },
+      {
+        "id": "airlock_market_grid",
+        "venue_id": "bunker_airlock",
+        "district_id": "bunker_district",
+        "kind": "consumer",
+        "demand": 20,
+        "active": true,
+        "powered": true
+      }
+    ],
+    "edges": [
+      {
+        "id": "gen_to_bunker",
+        "from_node_id": "bunker_generator",
+        "to_node_id": "bunker_workshop_grid",
+        "capacity": 80,
+        "loss_permille": 50
+      },
+      {
+        "id": "gen_to_airlock",
+        "from_node_id": "bunker_generator",
+        "to_node_id": "airlock_market_grid",
+        "capacity": 60,
+        "loss_permille": 100
+      }
+    ]
+  },
+  "environment": {
+    "genre": "scifi_wasteland",
+    "theme": "Post-Apocalyptic Wasteland Sector",
+    "summary": "Orbital security command, subterranean Aegis bunker engineers, and crater scrap scavengers competing over rations, clean water, and salvage.",
+    "currency_name": "credits",
+    "actor_noun": "survivor",
+    "authority_name": "Orbital Security Corps",
+    "oversight_name": "Command Oversight",
+    "forum_features": [
+      "public_forum",
+      "authority_seat",
+      "exchange_hub",
+      "hub",
+      "market"
+    ],
+    "enforcement_tags": [
+      "security"
+    ],
+    "oversight_tags": [
+      "oversight"
+    ],
+    "outlaw_tags": [
+      "outlaw",
+      "raider",
+      "thief"
+    ],
+    "enforcement_item": "security_pass",
+    "repair_item": "scrap_metal",
+    "builder_profession": "engineer",
+    "institutions": {
+      "taxation": true,
+      "enforcement": true,
+      "oversight": true,
+      "racketeering": false,
+      "revolt": false,
+      "rituals": false
+    }
+  }
+}

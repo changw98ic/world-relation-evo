@@ -1,0 +1,72 @@
+{
+  "label": "part_2_asylum_and_red_sea",
+  "spawn_actors": [
+    {
+      "id": "scion_ye",
+      "name": "叶玄(世家魁首)",
+      "role": "noble_duelist",
+      "location": "tianshu_city",
+      "guilds": ["white_tower"],
+      "tags": ["resident", "fighter", "trader"],
+      "form_id": "star_3",
+      "attributes": {"strength": 16, "dexterity": 16, "insight": 14, "spirit": 15},
+      "personality": "proud competitive ruthless",
+      "money": 180,
+      "items": {"nutrient_ration": 500, "purified_water": 360, "medicine_pack": 2},
+      "trust": {"director_lin": 3, "zhou_jin": -4}
+    },
+    {
+      "id": "veteran_qin",
+      "name": "秦烈(红海断臂老将)",
+      "role": "frontline_veteran",
+      "location": "red_sea_rift",
+      "guilds": ["red_sea_legion"],
+      "tags": ["resident", "fighter", "commander"],
+      "form_id": "star_5",
+      "attributes": {"strength": 18, "dexterity": 14, "insight": 12, "spirit": 14},
+      "personality": "righteous vengeful dutiful",
+      "money": 110,
+      "items": {"nutrient_ration": 500, "purified_water": 360, "medicine_pack": 2, "red_sea_essence": 1},
+      "trust": {"colonel_lu": 4, "zhou_jin": 3, "councilor_shen": -5}
+    }
+  ],
+  "trigger_world_events": [
+    {
+      "district_id": "tianshu_city",
+      "inline_spec": {
+        "id": "asylum_44_trial",
+        "name": "第44号颠倒疯人院争霸·理智天平现世",
+        "category": "artifact_emergence",
+        "duration_ticks": 576,
+        "intensity": 85,
+        "reward_item": "sanity_scale",
+        "reward_qty": 1,
+        "reward_coins": 150
+      }
+    },
+    {
+      "district_id": "red_sea_rift",
+      "inline_spec": {
+        "id": "red_sea_six_star_tide",
+        "name": "红海裂隙六星眷族血潮",
+        "category": "external_invasion",
+        "duration_ticks": 480,
+        "intensity": 90,
+        "casualty_permille": 110,
+        "damage": 18
+      }
+    }
+  ],
+  "add_secrets": [
+    {
+      "owner_id": "councilor_shen",
+      "kind": "hidden_plot",
+      "subject_id": "zhou_jin",
+      "severity": 95,
+      "known_by": ["councilor_shen", "scholar_su", "zhou_jin"]
+    }
+  ],
+  "add_ambitions": [
+    {"actor_id": "zhou_jin", "kind": "ascend_tier", "target_value": 4}
+  ]
+}
