@@ -3,8 +3,10 @@ package optiongen
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"time"
 
+	"github.com/changw98ic/world-relation-evo/internal/agent"
 	"github.com/changw98ic/world-relation-evo/internal/sim"
 )
 
@@ -102,30 +104,30 @@ type FactionSummary struct {
 }
 
 type OtherActorSummary struct {
-	ID               string         `json:"id"`
-	Name             string         `json:"name"`
-	Role             string         `json:"role"`
-	Tags             []string       `json:"tags,omitempty"`
-	Professions      map[string]int `json:"professions,omitempty"`
-	Guilds           []string       `json:"guilds,omitempty"`
-	Location         string         `json:"location"`
-	VenueID          string         `json:"venue_id,omitempty"`
-	HomeID           string         `json:"home_id,omitempty"`
-	AgeYears         int            `json:"age_years,omitempty"`
-	Money            int            `json:"money"`
-	Items            map[string]int `json:"items,omitempty"`
-	Goal             string         `json:"goal,omitempty"`
-	Personality      string         `json:"personality,omitempty"`
-	CoLocated        bool           `json:"co_located,omitempty"`
-	MyTrustToThem    int            `json:"my_trust_to_them,omitempty"`
-	TheirTrustToMe   int            `json:"their_trust_to_me,omitempty"`
-	LeadsPolityIDs   []string       `json:"leads_polity_ids,omitempty"`
+	ID             string         `json:"id"`
+	Name           string         `json:"name"`
+	Role           string         `json:"role"`
+	Tags           []string       `json:"tags,omitempty"`
+	Professions    map[string]int `json:"professions,omitempty"`
+	Guilds         []string       `json:"guilds,omitempty"`
+	Location       string         `json:"location"`
+	VenueID        string         `json:"venue_id,omitempty"`
+	HomeID         string         `json:"home_id,omitempty"`
+	AgeYears       int            `json:"age_years,omitempty"`
+	Money          int            `json:"money"`
+	Items          map[string]int `json:"items,omitempty"`
+	Goal           string         `json:"goal,omitempty"`
+	Personality    string         `json:"personality,omitempty"`
+	CoLocated      bool           `json:"co_located,omitempty"`
+	MyTrustToThem  int            `json:"my_trust_to_them,omitempty"`
+	TheirTrustToMe int            `json:"their_trust_to_me,omitempty"`
+	LeadsPolityIDs []string       `json:"leads_polity_ids,omitempty"`
 }
 
 type CatalogSummary struct {
-	Items        []ItemSummary        `json:"items"`
-	Recipes      []RecipeSummary      `json:"recipes"`
-	Professions  []ProfessionSummary  `json:"professions"`
+	Items        []ItemSummary         `json:"items"`
+	Recipes      []RecipeSummary       `json:"recipes"`
+	Professions  []ProfessionSummary   `json:"professions"`
 	CommChannels []sim.CommChannelSpec `json:"comm_channels,omitempty"`
 }
 
@@ -203,6 +205,34 @@ type ExpandedOption struct {
 	FollowUpHooks       []string         `json:"follow_up_hooks"`
 }
 
+func (o *ExpandedOption) UnmarshalJSON(data []byte) error {
+	type wire ExpandedOption
+	decoded := struct {
+		*wire
+		DayWindow []int `json:"day_window"`
+	}{wire: (*wire)(o)}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	if decoded.DayWindow == nil {
+		return nil
+	}
+	window, err := agent.ResolvePlanningDayWindow(decoded.DayWindow, 0)
+	if err != nil {
+		return fmt.Errorf("option %q: %w", o.ID, err)
+	}
+	o.DayWindow = window
+	return nil
+}
+
+func (c *ActorOptionCatalog) fillOmittedWindows(horizon int) {
+	for i := range c.Options {
+		if c.Options[i].DayWindow == [2]int{} {
+			c.Options[i].DayWindow = [2]int{1, horizon}
+		}
+	}
+}
+
 type OptionCondition struct {
 	Conditions   []string `json:"conditions"`
 	TriggerEvent string   `json:"trigger_event,omitempty"`
@@ -251,35 +281,28 @@ type OptionActionSpec struct {
 
 // ActorExpansionRecord stores the full audit trail for one actor's DS call.
 type ActorExpansionRecord struct {
-	WorldID          string             `json:"world_id"`
-	ActorID          string             `json:"actor_id"`
-	ActorName        string             `json:"actor_name"`
-	Model            string             `json:"model"`
-	Endpoint         string             `json:"endpoint"`
-	RequestedAt      time.Time          `json:"requested_at"`
-	DurationMS       int64              `json:"duration_ms"`
-	PromptTokens     int                `json:"prompt_tokens,omitempty"`
-	CompletionTokens int                `json:"completion_tokens,omitempty"`
-	TotalTokens      int                `json:"total_tokens,omitempty"`
-	Dossier          CharacterDossier   `json:"dossier"`
-	Catalog          ActorOptionCatalog `json:"catalog"`
-	RawResponse      string             `json:"raw_response"`
+	generationOutput
+	WorldID   string             `json:"world_id"`
+	ActorID   string             `json:"actor_id"`
+	ActorName string             `json:"actor_name"`
+	Dossier   CharacterDossier   `json:"dossier"`
+	Catalog   ActorOptionCatalog `json:"catalog"`
 }
 
 // WorldExpansionSummary aggregates results across all characters in a world.
 type WorldExpansionSummary struct {
-	WorldID        string                 `json:"world_id"`
-	PackPath       string                 `json:"pack_path,omitempty"`
-	HorizonDays    int                    `json:"horizon_days"`
-	Model          string                 `json:"model"`
-	Endpoint       string                 `json:"endpoint"`
-	StartedAt      time.Time              `json:"started_at"`
-	CompletedAt    time.Time              `json:"completed_at"`
-	TotalActors    int                    `json:"total_actors"`
-	TotalRequests  int                    `json:"total_requests"`
-	TotalOptions   int                    `json:"total_options"`
-	TotalTokens    int                    `json:"total_tokens"`
-	Actors         []ActorExpansionBrief  `json:"actors"`
+	WorldID       string                `json:"world_id"`
+	PackPath      string                `json:"pack_path,omitempty"`
+	HorizonDays   int                   `json:"horizon_days"`
+	Model         string                `json:"model"`
+	Endpoint      string                `json:"endpoint"`
+	StartedAt     time.Time             `json:"started_at"`
+	CompletedAt   time.Time             `json:"completed_at"`
+	TotalActors   int                   `json:"total_actors"`
+	TotalRequests int                   `json:"total_requests"`
+	TotalOptions  int                   `json:"total_options"`
+	TotalTokens   int                   `json:"total_tokens"`
+	Actors        []ActorExpansionBrief `json:"actors"`
 }
 
 type ActorExpansionBrief struct {

@@ -379,18 +379,31 @@ func (dir *PlanDirectiveView) planGrowth(p Perception, item string, covered bool
 }
 
 type Agreement struct {
-	ID           int64  `json:"id"`
-	SupplierID   string `json:"supplier_id"`
-	BuyerID      string `json:"buyer_id"`
-	Item         string `json:"item"`
-	Quantity     int    `json:"quantity"`
-	Price        int    `json:"price"`
-	ProposedTick int64  `json:"proposed_tick"`
-	ResponseBy   int64  `json:"response_by"`
-	DueTick      int64  `json:"due_tick"`
-	AcceptedTick int64  `json:"accepted_tick,omitempty"`
-	ClosedTick   int64  `json:"closed_tick,omitempty"`
-	Status       string `json:"status"`
+	ProposedEventID int64  `json:"proposed_event_id,omitempty"`
+	AcceptedEventID int64  `json:"accepted_event_id,omitempty"`
+	RootEventID     int64  `json:"root_event_id,omitempty"`
+	ID              int64  `json:"id"`
+	SupplierID      string `json:"supplier_id"`
+	BuyerID         string `json:"buyer_id"`
+	Item            string `json:"item"`
+	Quantity        int    `json:"quantity"`
+	Price           int    `json:"price"`
+	ProposedTick    int64  `json:"proposed_tick"`
+	ResponseBy      int64  `json:"response_by"`
+	DueTick         int64  `json:"due_tick"`
+	AcceptedTick    int64  `json:"accepted_tick,omitempty"`
+	ClosedTick      int64  `json:"closed_tick,omitempty"`
+	Status          string `json:"status"`
+	District        string `json:"district,omitempty"`
+	Venue           string `json:"venue,omitempty"`
+	House           string `json:"house,omitempty"`
+}
+
+// quote snapshots the original proposal, including where it was heard.
+func (g Agreement) quote() Offer {
+	return Offer{ID: g.ProposedEventID, RootEventID: g.RootEventID, Seller: g.SupplierID, Buyer: g.BuyerID,
+		Item: g.Item, Quantity: g.Quantity, Price: g.Price, Expires: g.ResponseBy,
+		District: g.District, Venue: g.Venue, House: g.House}
 }
 
 // Terms copied into an event or option are a snapshot of the contract as signed.
@@ -436,20 +449,23 @@ func (w *World) perceivedAgreementDeliveryBlockReason(g Agreement, supplier, buy
 	return ""
 }
 
-func (w *World) agreementDeliveryBlockReason(g Agreement, supplier, buyer *Actor) string {
+func (w *World) agreementDeliveryBlockReason(g Agreement, supplier, buyer *Actor) (reason string, paymentUnavailable bool) {
 	if g.Status != "active" || w.Tick > g.DueTick {
-		return "agreement is not active or its delivery deadline has passed"
+		return "agreement is not active or its delivery deadline has passed", false
 	}
 	if supplier == nil || buyer == nil || !SamePlace(*supplier, *buyer) || w.Tick < supplier.JailedUntil || w.Tick < buyer.JailedUntil || (buyer.Task != nil && (buyer.Task.Action.Kind == "sleep" || buyer.Task.Dormant)) {
-		return "agreement participants are unavailable for delivery at the same place"
+		return "agreement participants are unavailable for delivery at the same place", false
 	}
 	if reason := w.buyerItemBlockReason(*buyer, g.Item, "coins"); reason != "" {
-		return reason
+		return reason, false
 	}
-	if supplier.Items[g.Item] < g.Quantity || buyer.Money < g.Price {
-		return "delivery goods or payment unavailable"
+	if supplier.Items[g.Item] < g.Quantity {
+		return "delivery goods or payment unavailable", false
 	}
-	return ""
+	if buyer.Money < g.Price {
+		return "delivery goods or payment unavailable", true
+	}
+	return "", false
 }
 
 // DialogueTurn keeps actual exchanges, including their event identity. Content
@@ -643,9 +659,14 @@ func (w *World) applyContinuityTx(tx *WorldTx, a *Actor, x Action) []Event {
 		}
 		state.NextAgreementID++
 		g := Agreement{ID: state.NextAgreementID, SupplierID: a.ID, BuyerID: b.ID, Item: x.Item, Quantity: q, Price: price, ProposedTick: w.Tick, ResponseBy: min(w.Tick+TicksPerDay, due), DueTick: due, Status: "proposed"}
-		state.Agreements = append(state.Agreements, g)
+		g.District, g.Venue, g.House = a.Location, a.VenueID, a.InsideHouse
 		x = g.withTerms(x)
-		return emit("agreement_proposed", fmt.Sprintf("%s proposes to deliver %d %s to %s for %d coins by tick %d", a.Name, g.Quantity, g.Item, b.Name, g.Price, g.DueTick), b)
+		ev := tx.record(a, x, "agreement_proposed", map[string]any{
+			"text": fmt.Sprintf("%s proposes to deliver %d %s to %s for %d coins by tick %d", a.Name, g.Quantity, g.Item, b.Name, g.Price, g.DueTick),
+		}, b)
+		g.ProposedEventID, g.RootEventID = ev.ID, ev.causalRoot()
+		state.Agreements = append(state.Agreements, g)
+		return []Event{ev}
 	case "accept_agreement", "reject_agreement", "fulfill_agreement":
 		state := w.continuity()
 		for i := range state.Agreements {
@@ -668,29 +689,107 @@ func (w *World) applyContinuityTx(tx *WorldTx, a *Actor, x Action) []Event {
 				if x.Kind == "reject_agreement" {
 					g.Status = "rejected"
 					g.ClosedTick = w.Tick
-					return emit("agreement_rejected", a.Name+" rejected the delivery proposal", supplier)
+					return []Event{tx.record(a, x, "agreement_rejected", map[string]any{
+						"text":           a.Name + " rejected the delivery proposal",
+						"cause_event_id": g.ProposedEventID,
+						"root_event_id":  g.RootEventID,
+						"trade":          g.quote(),
+					}, supplier)}
 				}
 				g.Status = "active"
 				g.AcceptedTick = w.Tick
-				return emit("agreement_accepted", a.Name+" accepted the delivery and payment terms", supplier)
+				ev := tx.record(a, x, "agreement_accepted", map[string]any{
+					"text":           a.Name + " accepted the delivery and payment terms",
+					"cause_event_id": g.ProposedEventID,
+					"root_event_id":  g.RootEventID,
+					"trade":          g.quote(),
+				}, supplier)
+				g.AcceptedEventID, g.RootEventID = ev.ID, ev.causalRoot()
+				return []Event{ev}
 			}
 			if a.ID != g.SupplierID || x.TargetID != g.BuyerID {
 				return fail("delivery requires the named supplier and buyer")
 			}
-			if reason := w.agreementDeliveryBlockReason(*g, supplier, buyer); reason != "" {
+			if reason, paymentUnavailable := w.agreementDeliveryBlockReason(*g, supplier, buyer); reason != "" {
+				if paymentUnavailable {
+					return []Event{tx.record(a, x, "action_failed", map[string]any{
+						"text": reason, "cause_event_id": g.AcceptedEventID, "root_event_id": g.RootEventID,
+						"observation": Observation{Kind: "coin_payment_unavailable", Modality: "participant",
+							ObjectID: g.BuyerID, Quantity: g.Price, Location: a.Location},
+					})}
+				}
 				return fail(reason)
 			}
-			tx.TransferItem(supplier, buyer, g.Item, g.Quantity, x.Kind)
-			tx.TransferCurrency(buyer, supplier, "coins", int64(g.Price), x.Kind)
+			effort := w.Catalog.tradeEnergy(g.Item, g.Quantity)
+			if buyer.Energy < effort {
+				return fail("the recipient has insufficient energy to handle this delivery")
+			}
+			tx.setEnergy(buyer, buyer.Energy-effort, x.Kind)
+			if !tx.TransferItem(supplier, buyer, g.Item, g.Quantity, x.Kind) {
+				return fail("buyer cannot receive delivery goods")
+			}
+			if g.Price > 0 && !tx.TransferCurrency(buyer, supplier, "coins", int64(g.Price), x.Kind) {
+				return fail("supplier cannot receive delivery payment")
+			}
 			g.Status = "fulfilled"
-			tx.MutateTrust(buyer, supplier.ID, 1)
-			tx.MutateTrust(supplier, buyer.ID, 1)
 			g.ClosedTick = w.Tick
-			return []Event{tx.record(a, x, "agreement_fulfilled", map[string]any{"text": fmt.Sprintf("%s delivered %d %s to %s for %d coins", supplier.Name, g.Quantity, g.Item, buyer.Name, g.Price), "item": g.Item, "quantity": g.Quantity, "price": g.Price, "seller_id": supplier.ID, "buyer_id": buyer.ID}, buyer)}
+			return []Event{tx.record(a, x, "agreement_fulfilled", map[string]any{
+				"text":                fmt.Sprintf("%s delivered %d %s to %s for %d coins", supplier.Name, g.Quantity, g.Item, buyer.Name, g.Price),
+				"item":                g.Item,
+				"quantity":            g.Quantity,
+				"price":               g.Price,
+				"seller_id":           supplier.ID,
+				"buyer_id":            buyer.ID,
+				"seller_energy_spent": effort,
+				"buyer_energy_spent":  effort,
+				"cause_event_id":      g.AcceptedEventID,
+				"root_event_id":       g.RootEventID,
+				"district":            a.Location,
+			}, buyer)}
 		}
 		return fail("agreement not found")
 	}
 	return nil
+}
+
+func (w *World) observeContinuityWithTx(tx *WorldTx, e Event) {
+	if tx == nil {
+		w.ObserveContinuity(e)
+		return
+	}
+
+	previous := w.Continuity
+	var dialogue map[string][]DialogueTurn
+	if previous != nil {
+		dialogue = previous.DialogueByActor
+	}
+	speaker, speakerExists := dialogue[e.ActorID]
+	listener, listenerExists := dialogue[e.TargetID]
+	tx.pushUndo(func() {
+		w.Continuity = previous
+		if previous == nil {
+			return
+		}
+		previous.DialogueByActor = dialogue
+		if speakerExists {
+			dialogue[e.ActorID] = speaker
+		} else {
+			delete(dialogue, e.ActorID)
+		}
+		if listenerExists {
+			dialogue[e.TargetID] = listener
+		} else {
+			delete(dialogue, e.TargetID)
+		}
+	})
+	seller, _ := e.Payload["seller_id"].(string)
+	for _, id := range []string{e.ActorID, e.TargetID, seller} {
+		if a := w.actor(id); a != nil && a.Plan != nil {
+			plan, prev := a.Plan, *a.Plan
+			tx.pushUndo(func() { *plan = prev; a.Plan = plan })
+		}
+	}
+	w.ObserveContinuity(e)
 }
 
 // ObserveContinuity runs after a real event is recorded. It does not emit more
@@ -714,7 +813,7 @@ func (w *World) ObserveContinuity(e Event) {
 		}
 		return
 	}
-	quantity := payloadQuantity(e.Payload["quantity"])
+	quantity := int(payloadInt64(e.Payload, "quantity"))
 	if e.Kind == "crafted" || e.Kind == "harvested" {
 		if a := w.actor(e.ActorID); a != nil && a.Plan != nil && a.Plan.Status == "active" && e.Action.RecipeID == a.Plan.RecipeID {
 			a.Plan.Produced += quantity
@@ -736,18 +835,6 @@ func (w *World) ObserveContinuity(e Event) {
 		}
 	}
 }
-func payloadQuantity(v any) int {
-	switch n := v.(type) {
-	case int:
-		return n
-	case int64:
-		return int(n)
-	case float64:
-		return int(n)
-	}
-	return 0
-}
-
 func (w *World) AdvanceContinuity() []Event {
 	if w.Continuity == nil {
 		return nil
@@ -756,6 +843,7 @@ func (w *World) AdvanceContinuity() []Event {
 	for i := range w.Continuity.Agreements {
 		g := &w.Continuity.Agreements[i]
 		kind := ""
+		cause := g.ProposedEventID
 		if g.Status == "proposed" && w.Tick > g.ResponseBy {
 			g.Status = "expired"
 			kind = "agreement_expired"
@@ -763,6 +851,7 @@ func (w *World) AdvanceContinuity() []Event {
 		if g.Status == "active" && w.Tick > g.DueTick {
 			g.Status = "unfulfilled"
 			kind = "agreement_unfulfilled"
+			cause = g.AcceptedEventID
 		}
 		if kind == "" {
 			continue
@@ -770,7 +859,12 @@ func (w *World) AdvanceContinuity() []Event {
 		g.ClosedTick = w.Tick
 		a, b := w.actor(g.SupplierID), w.actor(g.BuyerID)
 		if a != nil {
-			events = append(events, w.record(a, g.withTerms(Action{Kind: "agreement_deadline", TargetID: g.BuyerID}), kind, map[string]any{"text": fmt.Sprintf("delivery agreement %d %s", g.ID, g.Status)}, b))
+			events = append(events, w.record(a, g.withTerms(Action{Kind: "agreement_deadline", TargetID: g.BuyerID}), kind, map[string]any{
+				"text":           fmt.Sprintf("delivery agreement %d %s", g.ID, g.Status),
+				"cause_event_id": cause,
+				"root_event_id":  g.RootEventID,
+				"trade":          g.quote(),
+			}, b))
 		}
 	}
 	return events

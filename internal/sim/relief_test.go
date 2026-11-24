@@ -48,18 +48,25 @@ func TestFoodReliefProcurementPaysOnlyForAnAffordableSurplusLot(t *testing.T) {
 			if !funded {
 				w.PublicTreasury--
 			}
-			w.Catalog.Items["grain"] = ItemSpec{ID: "grain", Edible: true, NutritionUnits: 1, Tradeable: true, BatchQty: 20, BatchPrice: price}
+			w.Catalog.Items["grain"] = ItemSpec{ID: "grain", Edible: true, NutritionUnits: 1, MassUnits: 1, Tradeable: true, BatchQty: 20, BatchPrice: price}
 			// Four portions feed this seller for the next day. Exactly twenty
 			// additional portions are available for the declared trade lot.
-			w.Cohorts = []PopulationCohort{{ID: "seller", District: "home", Population: 1, Adults: 1, ItemPool: map[string]int64{"grain": 24}}}
+			w.Cohorts = []PopulationCohort{{ID: "seller", District: "home", Population: 1, Adults: 1, AvgEnergy: 21, ItemPool: map[string]int64{"grain": 24}}}
 			beforeTreasury := w.PublicTreasury
-			w.clearFocalActorCohortTrades()
+			w.settleFocalRelief()
 			want := 0
 			if funded {
 				want = 20
 			}
 			if w.Actors[0].Items["grain"] != want || w.Cohorts[0].ItemPool["grain"] != int64(24-want) || funded && (w.PublicTreasury != 0 || w.Cohorts[0].MoneyPool != int64(price)) || !funded && (w.PublicTreasury != beforeTreasury || w.Cohorts[0].MoneyPool != 0) {
 				t.Fatalf("price=%d funded=%v: procurement did not match actual delivery and preserved subsistence", price, funded)
+			}
+			wantEnergy := 21
+			if funded {
+				wantEnergy = 0
+			}
+			if w.Cohorts[0].AvgEnergy != wantEnergy {
+				t.Fatalf("price=%d funded=%v: only actual delivery should consume the supplier's energy", price, funded)
 			}
 		}
 	}

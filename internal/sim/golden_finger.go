@@ -554,9 +554,6 @@ func (w *World) applyGFReward(tx *WorldTx, a *Actor, x Action, r GFRewardSpec, m
 		parts = append(parts, fmt.Sprintf("+%d coins", gain))
 	}
 	if len(r.Currencies) > 0 {
-		if a.Currencies == nil {
-			a.Currencies = map[string]int64{}
-		}
 		keys := make([]string, 0, len(r.Currencies))
 		for k := range r.Currencies {
 			keys = append(keys, k)
@@ -572,9 +569,6 @@ func (w *World) applyGFReward(tx *WorldTx, a *Actor, x Action, r GFRewardSpec, m
 		}
 	}
 	if len(r.Items) > 0 {
-		if a.Items == nil {
-			a.Items = map[string]int{}
-		}
 		keys := sortedProductionKeys(r.Items)
 		for _, itemID := range keys {
 			qty := r.Items[itemID] * multiplier
@@ -658,7 +652,7 @@ func (w *World) applyGFReward(tx *WorldTx, a *Actor, x Action, r GFRewardSpec, m
 	return strings.Join(parts, ", "), extraEvents
 }
 
-func (w *World) maybeExposeGoldenFinger(tx *WorldTx, a *Actor, gf GoldenFingerSpec, causeEventID int64) []Event {
+func (w *World) maybeExposeGoldenFinger(tx *WorldTx, a *Actor, gf GoldenFingerSpec, cause Event) []Event {
 	if gf.ExposureRiskPermille <= 0 {
 		return nil
 	}
@@ -666,7 +660,7 @@ func (w *World) maybeExposeGoldenFinger(tx *WorldTx, a *Actor, gf GoldenFingerSp
 	if len(observers) == 0 {
 		return nil
 	}
-	roll := int(worldHash(w.ID, w.Tick, "gf_expose:"+a.ID+":"+gf.ID) % 1000)
+	roll := int(w.settlementRandom(w.Tick, "gf_expose:"+a.ID+":"+gf.ID) % 1000)
 	if roll >= gf.ExposureRiskPermille {
 		return nil
 	}
@@ -685,20 +679,17 @@ func (w *World) maybeExposeGoldenFinger(tx *WorldTx, a *Actor, gf GoldenFingerSp
 		knownBy = appendUnique(knownBy, obs.ID)
 		witnessIDs = appendUnique(witnessIDs, obs.ID)
 	}
-	sec, extra := w.addSecretWithWitnesses(a.ID, kind, gf.ID, 85, causeEventID, knownBy, witnessIDs)
-	secID := ""
-	if sec != nil {
-		secID = sec.ID
-	}
-	ev := w.recordWithTx(tx, a, Action{Kind: "wait", BasisEventID: causeEventID}, "secret_caught_red_handed", map[string]any{
+	sec, extra := w.addSecretWithWitnesses(a.ID, kind, gf.ID, 85, cause, knownBy, witnessIDs)
+	ev := w.recordWithTx(tx, a, Action{Kind: "wait", BasisEventID: cause.ID}, "secret_caught_red_handed", map[string]any{
 		"text":           fmt.Sprintf("Witnesses glimpsed %s's hidden anomaly [%s] at %s", a.Name, gf.Name, a.Location),
-		"secret_id":      secID,
+		"secret_id":      sec.ID,
 		"secret_kind":    kind,
 		"golden_finger":  gf.ID,
 		"witnesses":      witnessIDs,
 		"witness_count":  len(observers),
-		"cause_event_id": causeEventID,
-		"root_event_id":  causeEventID,
+		"cause_event_id": cause.ID,
+		"root_event_id":  cause.causalRoot(),
+		"observation":    Observation{Kind: "secret_caught_red_handed", Modality: "eyewitness", SubjectID: a.ID, ObjectID: sec.ID, Item: kind, Location: a.Location, Quantity: sec.Severity},
 	}, observers...)
 	return append([]Event{ev}, extra...)
 }
@@ -761,7 +752,7 @@ func (w *World) applyGFExchange(tx *WorldTx, a *Actor, x Action) []Event {
 		"reward":        rewardText,
 	})
 	events := append([]Event{ev}, extra...)
-	events = append(events, w.maybeExposeGoldenFinger(tx, a, *matchedGF, ev.ID)...)
+	events = append(events, w.maybeExposeGoldenFinger(tx, a, *matchedGF, ev)...)
 	return events
 }
 
@@ -927,7 +918,7 @@ func (w *World) stepGoldenFingers(tickEvents []Event) []Event {
 						heal = 45
 					}
 					adjustActorHealthBounded(a, heal, 0)
-					a.Energy = minInt(MaxEnergy, a.Energy+20)
+					setActorEnergy(a, minInt(MaxEnergy, a.Energy+20))
 					rName := gf.Passive.RescueName
 					if rName == "" {
 						rName = gf.Name + "护主"
@@ -938,7 +929,7 @@ func (w *World) stepGoldenFingers(tickEvents []Event) []Event {
 						"heal":          heal,
 					})
 					out = append(out, ev)
-					out = append(out, w.maybeExposeGoldenFinger(nil, a, gf, ev.ID)...)
+					out = append(out, w.maybeExposeGoldenFinger(nil, a, gf, ev)...)
 				}
 			}
 
@@ -1101,13 +1092,13 @@ func (w *World) stepGoldenFingers(tickEvents []Event) []Event {
 						"golden_finger":  gf.ID,
 						"trigger_id":     tr.ID,
 						"cause_event_id": evSrc.ID,
-						"root_event_id":  evSrc.ID,
+						"root_event_id":  evSrc.causalRoot(),
 						"multiplier":     mult,
 						"reward":         strings.Join(summaryParts, "; "),
 					})
 					out = append(out, ev)
 					out = append(out, extra...)
-					out = append(out, w.maybeExposeGoldenFinger(nil, a, gf, ev.ID)...)
+					out = append(out, w.maybeExposeGoldenFinger(nil, a, gf, ev)...)
 					break // fire each trigger at most once per tick
 				}
 			}
@@ -1156,8 +1147,7 @@ func (w *World) stepGoldenFingers(tickEvents []Event) []Event {
 									if loss > a.Currencies[cur] {
 										loss = a.Currencies[cur]
 									}
-									a.Currencies[cur] -= loss
-									w.recordLedgerCurrencyConsumed(cur, loss)
+									w.adjustActorCurrency(a, cur, -loss, true)
 									penParts = append(penParts, fmt.Sprintf("-%d %s", loss, cur))
 								}
 							}

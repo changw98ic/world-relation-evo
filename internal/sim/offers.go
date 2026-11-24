@@ -64,6 +64,10 @@ func (w *World) offerSettlementBlockReason(buyer Actor, offer Offer) string {
 	if buyer.Dead || seller == nil || seller.Dead || !SamePlace(buyer, *seller) || w.Tick < seller.JailedUntil || w.Tick < buyer.JailedUntil {
 		return "seller is not available at the buyer's location"
 	}
+	effort := w.Catalog.tradeEnergy(offer.Item, offer.Quantity)
+	if buyer.Energy < effort || seller.Energy < effort {
+		return "one participant cannot handle this lot with their remaining energy"
+	}
 	if seller.Items[offer.Item] < offer.Quantity {
 		return "seller no longer holds the offered quantity"
 	}

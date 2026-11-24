@@ -5,6 +5,28 @@
   "description": "Two river-basin counties under Qingzhou Province linked by downstream watershed hydrology, sub-district venues, and multi-tier yamen governance. Spring sowing starts with last-season grain: 720 meal portions per anonymous resident, covering the 120-day crop period plus its preparation time. Initial grain is stored harvest from the previous season. Initial anonymous households hold 180 days of last-season rations (720 meal units/person at four meals/day), a finite six-month store covering the 120-day spring crop plus actual preparation, care and harvest delays; no automatic restocking.",
   "public_treasury": 240,
   "catalog": {
+    "planning": {
+      "horizon_ticks": 96,
+      "inertia_margin": 0.05,
+      "offer_acceptance_prior": 0.35,
+      "needs": [
+        {"measure": "nutrition", "target": 2, "scale": 4, "base_weight": 3},
+        {"measure": "hydration", "target": 0, "scale": 3, "base_weight": 2},
+        {"measure": "energy", "target": 65, "scale": 40, "base_weight": 2},
+        {"measure": "health", "target": 100, "scale": 40, "base_weight": 2},
+        {"measure": "hygiene", "target": 0, "scale": 5, "base_weight": 0.4},
+        {"measure": "provisions", "target": 8, "scale": 8, "base_weight": 1},
+        {"measure": "money", "target": 40, "scale": 40, "base_weight": 1.2},
+        {"measure": "housing", "target": 80, "scale": 50, "base_weight": 1.4},
+        {"measure": "stock", "target": 2, "scale": 2, "base_weight": 0.6},
+        {"measure": "progress", "target": 1, "scale": 1, "base_weight": 0.7},
+        {"measure": "obligation", "target": 1, "scale": 1, "base_weight": 2},
+        {"measure": "relationship", "target": 20, "scale": 40, "base_weight": 0.15},
+        {"measure": "skill", "target": 5, "scale": 5, "base_weight": 0.4},
+        {"measure": "knowledge", "target": 1, "scale": 1, "base_weight": 0.45},
+        {"measure": "safety", "target": 0, "scale": 10, "base_weight": 1}
+      ]
+    },
     "tag_actions": {
       "censor": [
         "audit_corruption",

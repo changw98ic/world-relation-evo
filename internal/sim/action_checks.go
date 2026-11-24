@@ -1,11 +1,15 @@
 package sim
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // actionPeerView abstracts co-located target state for single-source action checks
 // across both Perception (candidate generation) and World (authoritative execution).
 type actionPeerView struct {
 	ID              string
+	CanArrest       bool
 	Dead            bool
 	Health          int
 	DiseaseID       string
@@ -13,12 +17,15 @@ type actionPeerView struct {
 	Sleeping        bool
 	Tags            []string
 	FactionRelation string
+	KinshipToSelf   string
+	PatronageToSelf string
 }
 
 // actionCheckEnv supplies the read-only facts needed by checkActionShared so that
 // Perception.CheckAction and World.CheckAction execute the exact same condition logic.
 type actionCheckEnv struct {
 	tick                   int64
+	checkTransmission      func(Action) string
 	actor                  Actor
 	catalog                Catalog
 	worldMap               WorldMap
@@ -29,8 +36,11 @@ type actionCheckEnv struct {
 	accessibleHouse        func(houseID string) (House, bool)
 	faction                func(factionID string) (FactionView, bool)
 	peer                   func(targetID string) (actionPeerView, bool)
+	openQuestion           func(peer string) (Memory, bool)
 	offer                  func(offerID int64) (Offer, bool)
+	agreements             []Agreement
 	offerBlockReason       func(offer Offer) string
+	marketLotAvailable     func(Action) bool
 	recipeBlockReason      func(r Recipe) string
 	actionSpecBlockReason  func(x Action, spec ActionSpec) string
 	knownTechs             []string
@@ -58,9 +68,15 @@ type actionCheckEnv struct {
 
 // CheckAction evaluates single-source preconditions for action x from a Perception snapshot.
 func (p Perception) CheckAction(x Action) ActionCheckResult {
-	a := p.Self
-	env := p.buildActionCheckEnv()
-	return checkActionShared(env, x, a.ID)
+	return checkActionShared(p.buildActionCheckEnv(), x, p.Self.ID)
+}
+
+// ActionChecker builds the shared precondition context once for one view.
+func (p Perception) ActionChecker() func(Action) ActionCheckResult {
+	env, id := p.buildActionCheckEnv(), p.Self.ID
+	return func(x Action) ActionCheckResult {
+		return checkActionShared(env, x, id)
+	}
 }
 
 // CheckAction evaluates the same single-source preconditions for action x against authoritative World state.
@@ -72,17 +88,25 @@ func (w *World) CheckAction(actorID string, x Action) ActionCheckResult {
 	if a == nil {
 		return BlockAction("unknown actor: " + actorID)
 	}
-	if w.storedActorCohort(actorID) != nil {
+	return w.checkActorAction(a, x, w.Relations)
+}
+
+func (w *World) checkActorAction(a *Actor, x Action, relations *RelationEvoState) ActionCheckResult {
+	if w.storedActorCohort(a.ID) != nil {
 		return BlockAction("dehydrated cohort member must be hydrated before acting")
 	}
-	env := w.buildActionCheckEnv(*a)
-	return checkActionShared(env, x, actorID)
+	env := w.buildActionCheckEnv(*a, relations)
+	return checkActionShared(env, x, a.ID)
 }
 
 func (p Perception) buildActionCheckEnv() actionCheckEnv {
 	a := p.Self
 	envSpec := p.Catalog.EffectiveEnvironment()
-	jrSpec := EffectiveJusticeRevoltSpec(JusticeRevoltSpec{})
+	var jrRaw JusticeRevoltSpec
+	if p.JusticeRules != nil {
+		jrRaw = *p.JusticeRules
+	}
+	jrSpec := EffectiveJusticeRevoltSpec(jrRaw)
 	localCorr := 0
 	bribeShielded := false
 	if p.DistrictState != nil {
@@ -108,13 +132,21 @@ func (p Perception) buildActionCheckEnv() actionCheckEnv {
 			break
 		}
 	}
-	freeWater := p.Map.DistrictHasFeature(a.Location, "water_source") ||
-		p.Map.DistrictHasFeature(a.Location, "well") ||
-		p.Map.DistrictHasFeature(a.Location, "river") ||
-		p.Map.DistrictHasFeature(a.Location, "spring") ||
-		(p.DistrictState != nil && p.DistrictState.Resources["water"] > 0)
+	freeWater := p.HasPotableWater()
 
 	return actionCheckEnv{
+		checkTransmission: func(x Action) string {
+			local := World{Tick: p.Tick, Map: p.Map, ActiveEffects: p.ActiveEffects}
+			if p.CurrentHouse != nil {
+				local.Houses = []House{*p.CurrentHouse}
+			}
+			_, shielding := local.actorEnclosure(a)
+			ch, reason := transmissionChannel(p.Catalog, a, selfTags, shielding, x)
+			if reason == "" && !ch.Broadcast && p.localNeighbor(x.TargetID) == nil && !ActorHasTag(p.CommunicationContacts, x.TargetID) {
+				return "unknown channel recipient"
+			}
+			return reason
+		},
 		tick:          p.Tick,
 		actor:         a,
 		catalog:       p.Catalog,
@@ -124,6 +156,18 @@ func (p Perception) buildActionCheckEnv() actionCheckEnv {
 		districtState: p.DistrictState,
 		currentHouse:  p.CurrentHouse,
 		knownTechs:    p.KnownTechs,
+		openQuestion: func(peer string) (Memory, bool) {
+			question, open := p.OpenQuestions[peer]
+			return question, open
+		},
+		marketLotAvailable: func(x Action) bool {
+			for _, lot := range p.MarketLots {
+				if sameMarketLot(x, lot) {
+					return true
+				}
+			}
+			return false
+		},
 		accessibleHouse: func(houseID string) (House, bool) {
 			if p.CurrentHouse != nil && p.CurrentHouse.ID == houseID {
 				return *p.CurrentHouse, true
@@ -153,6 +197,8 @@ func (p Perception) buildActionCheckEnv() actionCheckEnv {
 						Sleeping:        nb.Sleeping,
 						Tags:            nb.Tags,
 						FactionRelation: nb.FactionRelation,
+						KinshipToSelf:   nb.KinshipToSelf,
+						PatronageToSelf: nb.PatronageToSelf,
 					}, true
 				}
 			}
@@ -169,6 +215,7 @@ func (p Perception) buildActionCheckEnv() actionCheckEnv {
 		offerBlockReason: func(offer Offer) string {
 			return p.OfferAcceptanceBlockReason(offer)
 		},
+		agreements: p.Continuity.Agreements,
 		recipeBlockReason: func(r Recipe) string {
 			return p.RecipeBlockReason(r)
 		},
@@ -211,7 +258,7 @@ func (p Perception) buildActionCheckEnv() actionCheckEnv {
 		},
 		activeWorldEvent: func(instanceID string) (ActiveWorldEvent, bool) {
 			for _, we := range p.ActiveWorldEvents {
-				if we.InstanceID == instanceID {
+				if (instanceID == "" || we.InstanceID == instanceID) && we.Category == "artifact_emergence" && we.DistrictID == a.Location && we.ClaimedBy == "" {
 					return we, true
 				}
 			}
@@ -247,7 +294,11 @@ func (p Perception) buildActionCheckEnv() actionCheckEnv {
 	}
 }
 
-func (w *World) buildActionCheckEnv(a Actor) actionCheckEnv {
+func (w *World) buildActionCheckEnv(a Actor, relations *RelationEvoState) actionCheckEnv {
+	var agreements []Agreement
+	if w.Continuity != nil {
+		agreements = w.Continuity.Agreements
+	}
 	var dsPtr *DistrictState
 	localCorr := 0
 	bribeShielded := false
@@ -266,10 +317,9 @@ func (w *World) buildActionCheckEnv(a Actor) actionCheckEnv {
 			curHouse = &hc
 		}
 	}
-	jr := w.ensureJusticeRevolt()
 	jrRaw := JusticeRevoltSpec{}
-	if jr.Spec != nil {
-		jrRaw = *jr.Spec
+	if w.JusticeRevolt != nil && w.JusticeRevolt.Spec != nil {
+		jrRaw = *w.JusticeRevolt.Spec
 	}
 	jrSpec := EffectiveJusticeRevoltSpec(jrRaw)
 	hasActiveLoan := false
@@ -296,13 +346,31 @@ func (w *World) buildActionCheckEnv(a Actor) actionCheckEnv {
 			break
 		}
 	}
-	freeWater := w.Map.DistrictHasFeature(a.Location, "water_source") ||
-		w.Map.DistrictHasFeature(a.Location, "well") ||
-		w.Map.DistrictHasFeature(a.Location, "river") ||
-		w.Map.DistrictHasFeature(a.Location, "spring") ||
-		(dsPtr != nil && dsPtr.Resources["water"] > 0)
+	freeWater := dsPtr != nil && w.potablePoolID(*dsPtr) != ""
 
 	return actionCheckEnv{
+		agreements:   agreements,
+		openQuestion: a.OpenQuestionWith,
+		marketLotAvailable: func(x Action) bool {
+			c := w.findCohort(x.TargetID)
+			lot, ok := w.cohortMarketLot(c, x.Item, x.Kind)
+			return ok && sameMarketLot(x, lot) && (x.Kind != "market_buy" || w.buyerItemBlockReason(a, x.Item, "coins") == "")
+		},
+		checkTransmission: func(x Action) string {
+			_, shielding := w.actorEnclosure(a)
+			ch, reason := transmissionChannel(w.Catalog, a, w.actorEffectiveTags(a), shielding, x)
+			if reason != "" || ch.Broadcast {
+				return reason
+			}
+			target := w.actor(x.TargetID)
+			if target == nil || target.Dead {
+				return "unknown or dead channel recipient"
+			}
+			if !w.communicationRangeAllows(a, *target, ch.RangeKm) {
+				return "recipient is outside the channel range or its distance cannot be verified"
+			}
+			return ""
+		},
 		tick:          w.Tick,
 		actor:         a,
 		catalog:       w.Catalog,
@@ -341,8 +409,13 @@ func (w *World) buildActionCheckEnv(a Actor) actionCheckEnv {
 			if b == nil || b.ID == a.ID || !SamePlace(a, *b) {
 				return actionPeerView{}, false
 			}
+			var kinship, patronage string
+			if relations != nil {
+				kinship, patronage = personalRelationship(a.ID, b.ID, relations.Kinship[a.ID], relations.Kinship[b.ID])
+			}
 			return actionPeerView{
 				ID:              b.ID,
+				CanArrest:       w.ActorCapabilities(*b)["arrest"],
 				Dead:            b.Dead,
 				Health:          b.Health,
 				DiseaseID:       b.DiseaseID,
@@ -350,6 +423,8 @@ func (w *World) buildActionCheckEnv(a Actor) actionCheckEnv {
 				Sleeping:        b.Task != nil && (b.Task.Action.Kind == "sleep" || b.Task.Dormant),
 				Tags:            w.neighborEffectiveTags(*b),
 				FactionRelation: w.actorFactionRelation(a, *b),
+				KinshipToSelf:   kinship,
+				PatronageToSelf: patronage,
 			}, true
 		},
 		offer: func(offerID int64) (Offer, bool) {
@@ -368,10 +443,13 @@ func (w *World) buildActionCheckEnv(a Actor) actionCheckEnv {
 			return w.offerSettlementBlockReason(*buyer, offer)
 		},
 		recipeBlockReason: func(r Recipe) string {
-			return w.productionStartBlockReason(a, r)
+			return recipeBlockReason(w.Catalog, w.Map, curHouse, a, r, w.productionStartBlockReason(a, r), w.availableDistrictResource(a.Location, r.ResourcePool), w.FacilityProductionBonusPct(a))
 		},
 		actionSpecBlockReason: func(x Action, spec ActionSpec) string {
-			return w.ActionSpecBlockReason(a, x, spec)
+			if reason := w.ActionSpecBlockReason(a, x, spec); reason != "" {
+				return reason
+			}
+			return w.declarativeTargetFailure(a, &x, spec)
 		},
 		isEmbargoed: func(itemID string) bool {
 			return w.IsItemEmbargoedAt(a.Location, a.VenueID, itemID)
@@ -397,7 +475,7 @@ func (w *World) buildActionCheckEnv(a Actor) actionCheckEnv {
 		},
 		hasActiveLoan:       hasActiveLoan,
 		hasOpenWrongfulLead: len(ActorKnownWrongfulLeads(a)) > 0,
-		districtController:  w.ensureRelations().DistrictController(a.Location),
+		districtController:  relations.DistrictController(a.Location),
 		canBribeSecretWitness: func(targetID, secretID string) bool {
 			for _, s := range w.Secrets {
 				if s.OwnerID == a.ID && !s.Exposed && ActorHasTag(s.WitnessedBy, targetID) &&
@@ -409,7 +487,7 @@ func (w *World) buildActionCheckEnv(a Actor) actionCheckEnv {
 		},
 		activeWorldEvent: func(instanceID string) (ActiveWorldEvent, bool) {
 			for _, we := range w.perceivedActiveWorldEvents(a) {
-				if we.InstanceID == instanceID {
+				if (instanceID == "" || we.InstanceID == instanceID) && we.Category == "artifact_emergence" && we.DistrictID == a.Location && we.ClaimedBy == "" {
 					return we, true
 				}
 			}
@@ -425,7 +503,7 @@ func (w *World) buildActionCheckEnv(a Actor) actionCheckEnv {
 		},
 		actorPartyID: myPartyID,
 		leadsFaction: func(factionID string) bool {
-			return w.ensureRelations().FactionLeader[factionID] == a.ID
+			return relations != nil && relations.FactionLeader[factionID] == a.ID
 		},
 		diplomacyBetween: func(facA, facB string) (FactionDiplomacy, bool) {
 			for _, d := range w.perceivedFactionDiplomacy(a) {
@@ -466,14 +544,109 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 	if blocked, reason := lawChecker.IsActionBlockedByWorldLaw(a, x); blocked {
 		return BlockAction(reason)
 	}
-	if err := ValidateCitation(a.Memories, x.BasisEventID, x.Statement); err != nil {
-		return BlockAction(err.Error())
+	isReply := x.Kind == "speak" && x.Statement != nil && x.Statement.Topic == ConversationReply
+	if !isReply {
+		if err := ValidateCitation(a.Memories, x.BasisEventID, x.Statement); err != nil {
+			return BlockAction(err.Error())
+		}
+	}
+	if x.WorkOrderID != "" {
+		order, ok := env.catalog.WorkOrder(x.WorkOrderID)
+		if !ok || !order.applies(a, x, env.worldMap) {
+			return BlockAction("the action does not match the posted work")
+		}
 	}
 
+	var rate actionWorkRate
+	if builtinActionMetadataIndex[x.Kind].referenceEnergy > 0 {
+		work := x
+		switch x.Kind {
+		case "accept":
+			if offer, ok := env.offer(x.OfferID); ok {
+				work.Item, work.Quantity = offer.Item, offer.Quantity
+			}
+		case "fulfill_agreement":
+			work = withAgreementCargo(x, env.agreements)
+		}
+		targetNearby := true
+		if x.Kind == "teach_knowledge" && x.TechID != "" && x.Channel != "" {
+			_, targetNearby = env.peer(x.TargetID)
+		}
+		var ticks int
+		rate, ticks = env.catalog.actionWork(work, a, targetNearby)
+		if energy := rate.energyAfter(ticks); a.Energy < energy {
+			return BlockAction(fmt.Sprintf("insufficient energy for %s: needs %d, has %d", x.Kind, energy, a.Energy))
+		}
+	}
+	result := checkActionDetails(env, x, actorID, isReply)
+	result.workRate = rate
+	return result
+}
+
+func checkActionDetails(env actionCheckEnv, x Action, actorID string, isReply bool) ActionCheckResult {
+	a := env.actor
 	envProfile := env.catalog.EffectiveEnvironment()
 
 	switch x.Kind {
+	case "market_buy", "market_sell":
+		if a.InsideHouse != "" || a.InTransit() || a.Location != x.Location || env.isEmbargoed(x.Item) || !env.marketLotAvailable(x) {
+			return BlockAction("the posted market lot is unavailable at this place")
+		}
+		if x.Kind == "market_buy" && a.Money < x.Price || x.Kind == "market_sell" && a.Items[x.Item] < x.Quantity {
+			return BlockAction("insufficient holdings for the posted market lot")
+		}
+		return AllowAction()
+	case "speak":
+		listener, ok := env.peer(x.TargetID)
+		if !ok || listener.Dead || listener.Jailed {
+			return BlockAction("listener is not nearby")
+		}
+		if listener.Sleeping {
+			return BlockAction("listener cannot hear speech")
+		}
+		if x.Text == "" {
+			return BlockAction("empty speech")
+		}
+		if isReply {
+			question, open := env.openQuestion(x.TargetID)
+			if !open || question.Source != x.TargetID || question.EventID != x.BasisEventID {
+				return BlockAction("the reply must answer an open question from its listener")
+			}
+		}
+		return AllowAction()
+
+	case "transmit_message":
+		if reason := env.checkTransmission(x); reason != "" {
+			return BlockAction(reason)
+		}
+		return AllowAction()
+
 	case "wait":
+		return AllowAction()
+
+	case "swear_bond":
+		b, ok := env.peer(x.TargetID)
+		if !ok || b.ID == a.ID || b.Dead || b.Jailed {
+			return BlockAction("target is not nearby")
+		}
+		if isPatronBond(x.Text) {
+			switch b.PatronageToSelf {
+			case "patron":
+				return BlockAction("patron bond already exists")
+			case "protege":
+				return BlockAction("reverse patronage already exists")
+			}
+		} else {
+			switch b.KinshipToSelf {
+			case "sworn":
+				return BlockAction("sworn bond already exists")
+			case "spouse", "family":
+				return BlockAction("existing kinship supersedes sworn bond")
+			}
+		}
+		if a.Money < bondGift(x) {
+			return BlockAction("insufficient coins for bond ceremony gift")
+		}
 		return AllowAction()
 
 	case "begin_rest":
@@ -500,7 +673,7 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		}
 		itemID := x.Item
 		if itemID == "" {
-			itemID = "food"
+			itemID = bestHeldFood(env.catalog, a)
 		}
 		spec, ok := env.catalog.Items[itemID]
 		if !ok || !spec.Edible {
@@ -509,7 +682,7 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		if a.Items[itemID] < 1 {
 			return BlockAction("no " + itemID + " to eat")
 		}
-		if !env.catalog.ActorAcceptsFood(a, spec) {
+		if form, exists := env.catalog.ActorFormSpec(a); exists && !form.MeetsMinFoodTier(spec) {
 			return BlockAction("actor form does not accept food: " + itemID)
 		}
 		return AllowAction()
@@ -519,8 +692,9 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 			return BlockAction("not thirsty")
 		}
 		if x.Item == "" {
-			if !env.isFreeWaterAvailable {
-				return BlockAction("no free water source at " + a.Location)
+			waterCheck := World{Catalog: env.catalog}
+			if !env.isFreeWaterAvailable && waterCheck.firstCarriedPotableItem(a) == "" {
+				return BlockAction("no potable water available")
 			}
 			return AllowAction()
 		}
@@ -635,7 +809,7 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		}
 		cost, ok := env.roadCost(x.Location)
 		if !ok {
-			return BlockAction("no passable road to " + x.Location)
+			return ActionCheckResult{BlockReason: "no passable road to " + x.Location, routeUnavailable: true}
 		}
 		if a.Energy < cost {
 			return BlockAction("insufficient energy to travel")
@@ -648,7 +822,7 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		}
 		cost, ok := env.venueRouteCost(x.Location, x.Channel)
 		if !ok {
-			return BlockAction("no passable venue route to " + x.Location)
+			return ActionCheckResult{BlockReason: "no passable venue route to " + x.Location, routeUnavailable: true}
 		}
 		if a.Energy < cost {
 			return BlockAction("insufficient energy to move venue")
@@ -673,9 +847,6 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		if h.Condition >= MaxCondition {
 			return BlockAction("house does not need repair")
 		}
-		if a.Energy < 8 {
-			return BlockAction("insufficient energy to repair house")
-		}
 		repairItem := envProfile.RepairItem
 		if repairItem != "" && a.Items[repairItem] < 1 {
 			return BlockAction("missing repair item: " + repairItem)
@@ -698,9 +869,6 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		}
 		if a.Money < 4*h.Level {
 			return BlockAction("insufficient coins to upgrade house")
-		}
-		if a.Energy < 12 {
-			return BlockAction("insufficient energy to upgrade house")
 		}
 		return AllowAction()
 
@@ -744,7 +912,7 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		if a.InsideHouse != "" {
 			return BlockAction("must be outdoors to hunt threat")
 		}
-		if a.Energy < 10 || a.Health < 50 || env.tick < a.RestUntil {
+		if a.Health < 50 || env.tick < a.RestUntil {
 			return BlockAction("not fit to hunt threat")
 		}
 		if env.districtState == nil || env.districtState.ThreatActivity[x.TargetID] <= 5 {
@@ -785,9 +953,6 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 	case "claim_world_event":
 		if a.InsideHouse != "" {
 			return BlockAction("must be outdoors to claim world event")
-		}
-		if a.Energy < 8 {
-			return BlockAction("insufficient energy to claim world event")
 		}
 		we, ok := env.activeWorldEvent(x.TargetID)
 		if !ok {
@@ -856,8 +1021,8 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		if !ok || b.Dead || b.Jailed || b.Health <= 0 {
 			return BlockAction("attack target is not nearby or valid")
 		}
-		if a.Energy < 6 || a.Health < 25 {
-			return BlockAction("insufficient energy or health to attack")
+		if a.Health < 25 {
+			return BlockAction("insufficient health to attack")
 		}
 		return AllowAction()
 
@@ -866,7 +1031,7 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		if !ok || b.Dead || b.Jailed || b.Sleeping {
 			return BlockAction("spar partner is unavailable")
 		}
-		if a.Health < 65 || b.Health < 65 || a.Energy < 6 || env.tick < a.RestUntil {
+		if a.Health < 65 || b.Health < 65 || env.tick < a.RestUntil {
 			return BlockAction("not fit to spar")
 		}
 		return AllowAction()
@@ -876,7 +1041,7 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		if !ok || b.Dead || b.Jailed {
 			return BlockAction("steal target is not nearby")
 		}
-		if a.Health < 45 || a.Energy < 5 || env.tick < a.RestUntil {
+		if a.Health < 45 || env.tick < a.RestUntil {
 			return BlockAction("not fit to steal")
 		}
 		return AllowAction()
@@ -886,7 +1051,7 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		if !ok || b.Dead || b.Jailed {
 			return BlockAction("raid target is not nearby")
 		}
-		if a.Health < 55 || a.Energy < 8 || env.tick < a.RestUntil {
+		if a.Health < 55 || env.tick < a.RestUntil {
 			return BlockAction("not fit to raid")
 		}
 		return AllowAction()
@@ -899,7 +1064,7 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		if !ok || b.Dead || b.Jailed {
 			return BlockAction("extortion target is not nearby")
 		}
-		if a.Health < 50 || a.Energy < 6 || env.tick < a.RestUntil {
+		if a.Health < 50 || env.tick < a.RestUntil {
 			return BlockAction("not fit to extort")
 		}
 		return AllowAction()
@@ -909,13 +1074,10 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		if !ok || b.Dead || b.Jailed || b.Sleeping {
 			return BlockAction("recipient cannot accept the bribe")
 		}
-		if a.Energy < 3 {
-			return BlockAction("insufficient energy")
-		}
 		if a.Money < 4 {
 			return BlockAction("insufficient coins to offer bribe")
 		}
-		isEnforcer := env.catalog.IsEnforcementTags(b.Tags)
+		isEnforcer := b.CanArrest || env.catalog.Capabilities(Actor{Tags: b.Tags})["arrest"]
 		if !isEnforcer && !env.canBribeSecretWitness(b.ID, x.Item) {
 			return BlockAction("recipient is neither an official nor a witness to the secret")
 		}
@@ -926,8 +1088,8 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		if !ok || b.Dead || b.Jailed || b.Health <= 0 {
 			return BlockAction("feud target is not nearby")
 		}
-		if a.Health < 25 || a.Energy < 6 {
-			return BlockAction("insufficient health or energy to avenge feud")
+		if a.Health < 25 {
+			return BlockAction("insufficient health to avenge feud")
 		}
 		return AllowAction()
 
@@ -944,9 +1106,6 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		}
 		if env.districtController == factionID {
 			return BlockAction("faction already controls district " + a.Location)
-		}
-		if a.Energy < 5 {
-			return BlockAction("insufficient energy to claim turf")
 		}
 		return AllowAction()
 
@@ -967,9 +1126,6 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		if env.localCorruption < env.corruptionFramingMin && !env.bribeShielded && a.IllicitGain <= 0 {
 			return BlockAction("local corruption is too low for scapegoat framing")
 		}
-		if a.Energy < 4 {
-			return BlockAction("insufficient energy to conduct court framing")
-		}
 		return AllowAction()
 
 	case "file_appeal":
@@ -981,9 +1137,6 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		}
 		if a.IllicitGain > 0 {
 			return BlockAction("corrupt official cannot adjudicate appeal")
-		}
-		if a.Energy < 4 {
-			return BlockAction("insufficient energy to file appeal")
 		}
 		if !env.hasOpenWrongfulLead {
 			return BlockAction("no known wrongful-conviction lead")
@@ -1001,13 +1154,10 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		if a.Skills[x.SkillID] >= sk.EffectiveMaxLevel() {
 			return BlockAction("skill already at max level: " + x.SkillID)
 		}
-		if a.Energy < 4 {
-			return BlockAction("insufficient energy to practice skill")
-		}
 		return AllowAction()
 
 	case "attempt_transition":
-		trans, ok := env.catalog.Transitions[x.TransitionID]
+		trans, ok := env.catalog.Transitions[resolveTransitionID(x)]
 		if !ok {
 			return BlockAction("unknown transition: " + x.TransitionID)
 		}
@@ -1032,15 +1182,21 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		}
 		return AllowAction()
 
+	case "adopt_facility":
+		if a.Energy < env.catalog.Techs[x.TechID].AdoptEnergyCost {
+			return BlockAction("insufficient energy to adopt facility " + x.TechID)
+		}
+		return AllowAction()
+
 	case "form_party":
+		if partyPurpose(x.Item) == "" {
+			return BlockAction("unknown party purpose: " + x.Item)
+		}
 		if a.InsideHouse != "" {
 			return BlockAction("must be outdoors to form party")
 		}
 		if env.actorPartyID != "" {
 			return BlockAction("already in a party")
-		}
-		if a.Energy < 3 {
-			return BlockAction("insufficient energy to form party")
 		}
 		return AllowAction()
 
@@ -1048,15 +1204,8 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		if env.actorPartyID != "" {
 			return BlockAction("already in a party")
 		}
-		if a.Energy < 2 {
-			return BlockAction("insufficient energy to join party")
-		}
-		pt, ok := env.partyByID(x.TargetID)
-		if !ok {
+		if _, ok := env.partyByID(x.TargetID); !ok {
 			return BlockAction("party not found: " + x.TargetID)
-		}
-		if len(pt.MemberIDs) >= 6 {
-			return BlockAction("party is full")
 		}
 		return AllowAction()
 
@@ -1070,9 +1219,6 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		if env.actorPartyID == "" {
 			return BlockAction("not in a party")
 		}
-		if a.Energy < 6 {
-			return BlockAction("insufficient energy to betray party")
-		}
 		b, ok := env.peer(x.TargetID)
 		if !ok || b.Dead || b.Jailed {
 			return BlockAction("party betrayal target is not nearby")
@@ -1082,9 +1228,6 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 	case "propose_alliance":
 		if !env.leadsFaction(x.FactionID) {
 			return BlockAction("actor does not lead faction: " + x.FactionID)
-		}
-		if a.Energy < 4 {
-			return BlockAction("insufficient energy to propose alliance")
 		}
 		if rel, hasRel := env.diplomacyBetween(x.FactionID, x.TargetID); hasRel {
 			if rel.Stance == "at_war" {
@@ -1110,9 +1253,6 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		if !env.leadsFaction(x.FactionID) {
 			return BlockAction("actor does not lead faction: " + x.FactionID)
 		}
-		if a.Energy < 6 {
-			return BlockAction("insufficient energy to declare war")
-		}
 		if rel, hasRel := env.diplomacyBetween(x.FactionID, x.TargetID); hasRel {
 			if rel.Stance == "at_war" {
 				return BlockAction("already at war")
@@ -1126,9 +1266,6 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 	case "make_peace":
 		if !env.leadsFaction(x.FactionID) {
 			return BlockAction("actor does not lead faction: " + x.FactionID)
-		}
-		if a.Energy < 4 {
-			return BlockAction("insufficient energy to negotiate peace")
 		}
 		rel, hasRel := env.diplomacyBetween(x.FactionID, x.TargetID)
 		if !hasRel || rel.Stance != "at_war" {
@@ -1151,6 +1288,22 @@ func checkActionShared(env actionCheckEnv, x Action, actorID string) ActionCheck
 		}
 		return AllowAction()
 	}
+}
+
+func isPatronBond(mode string) bool {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "patron", "mentor", "adopt", "disciple":
+		return true
+	default:
+		return false
+	}
+}
+
+func bondGift(x Action) int {
+	if x.Price > 0 {
+		return x.Price
+	}
+	return max(0, x.Quantity)
 }
 
 func actorHasAnyTag(tags []string, candidates []string) bool {

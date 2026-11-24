@@ -22,8 +22,8 @@ func TestViewUnknownActorDoesNotPanicAndParityWithIndexed(t *testing.T) {
 
 func TestBuiltinActionRegistryCompletenessAndDynamicSpecs(t *testing.T) {
 	builtins := BuiltinActionMetadata()
-	if len(builtins) != 89 {
-		t.Fatalf("expected 89 built-in action metadata entries, got %d", len(builtins))
+	if len(builtins) != 91 {
+		t.Fatalf("expected 91 built-in action metadata entries, got %d", len(builtins))
 	}
 	seen := make(map[string]bool, len(builtins))
 	for _, m := range builtins {

@@ -85,6 +85,13 @@ func (c *PopulationCohort) seedResidents(population, issued int) {
 
 // InitCohortResidents reserves existing personal IDs before allocating the starting census.
 func (w *World) InitCohortResidents() error {
+	cohortIDs := make(map[string]bool, len(w.Cohorts))
+	for _, c := range w.Cohorts {
+		if cohortIDs[c.ID] {
+			return fmt.Errorf("duplicate cohort id %q: saved references to this group are ambiguous", c.ID)
+		}
+		cohortIDs[c.ID] = true
+	}
 	issued := map[string]int{}
 	var occupied []ResidentBand
 	reserveActor := func(id string) {
@@ -133,7 +140,8 @@ func (w *World) InitCohortResidents() error {
 	}
 	for i := range w.Cohorts {
 		c := &w.Cohorts[i]
-		pop := w.anonymousCohort(*c).Population
+		anonymous := w.anonymousCohort(*c)
+		pop := anonymous.Population
 		if err := c.ValidateHungerBalance(); err != nil {
 			return err
 		}
@@ -144,6 +152,11 @@ func (w *World) InitCohortResidents() error {
 				return fmt.Errorf("cohort %s starting resident IDs overflow", c.ID)
 			}
 			c.seedResidents(pop, last)
+			wound := func(b *ResidentBand) { setResidentBandHealthBounded(b, MaxHealth-1) }
+			c.updateResidentBandState(anonymous.Wounded, func(b ResidentBand) bool { return b.Health == MaxHealth }, wound)
+			c.updateResidentBandState(anonymous.WoundedSick, func(b ResidentBand) bool { return b.Health < MaxHealth }, func(b *ResidentBand) { b.Sick = true })
+			c.updateResidentBandState(anonymous.Sick-anonymous.WoundedSick, func(b ResidentBand) bool { return b.Health == MaxHealth }, func(b *ResidentBand) { b.Sick = true })
+			c.updateResidentBandState(anonymous.Jailed, func(b ResidentBand) bool { return !b.Jailed }, func(b *ResidentBand) { b.Jailed = true })
 			continue
 		}
 		remaining := pop
@@ -217,35 +230,31 @@ func (c *PopulationCohort) popHealthyFreeResident() ResidentBand {
 	return out
 }
 
-// moveResidents removes a deterministic prefix. A nil destination retires the IDs
-// and returns any personally held ResidentBand.Items back into c.ItemPool so
-// item conservation holds across all non-starvation cohort deaths.
-func (c *PopulationCohort) moveResidents(to *PopulationCohort, count int) (hunger int64) {
-	for count > 0 {
-		b := c.Residents[0]
-		b.Count = min(b.Count, count)
-		if to != nil {
-			to.Residents = appendResidentBand(to.Residents, b)
-		} else if len(b.Items) > 0 && b.Count > 0 {
-			if c.ItemPool == nil {
-				c.ItemPool = map[string]int64{}
-			}
-			for itemID, qty := range b.Items {
-				if qty > 0 {
-					c.ItemPool[itemID] += int64(qty) * int64(b.Count)
-				}
-			}
+func (c *PopulationCohort) takeResidents(count int, eligible func(ResidentBand) bool) []ResidentBand {
+	var kept, removed []ResidentBand
+	for _, b := range c.Residents {
+		if count > 0 && eligible(b) {
+			part := b
+			part.Count = min(b.Count, count)
+			removed = appendResidentBand(removed, part)
+			b.First += part.Count
+			b.Count -= part.Count
+			count -= part.Count
 		}
-		hunger += int64(b.Hunger) * int64(b.Count)
-		c.Residents[0].First += b.Count
-		c.Residents[0].Count -= b.Count
-		if c.Residents[0].Count == 0 {
-			c.Residents = c.Residents[1:]
-		}
-		count -= b.Count
+		kept = appendResidentBand(kept, b)
 	}
-	if len(c.Residents) == 0 {
-		c.Residents = nil
+	c.Residents = kept
+	return removed
+}
+
+func healthyFreeResident(b ResidentBand) bool {
+	return b.Health == MaxHealth && !b.Jailed && !b.Sick
+}
+
+func (c *PopulationCohort) moveResidents(to *PopulationCohort, count int) (hunger int64) {
+	for _, b := range c.takeResidents(count, healthyFreeResident) {
+		to.Residents = appendResidentBand(to.Residents, b)
+		hunger += int64(b.Hunger) * int64(b.Count)
 	}
 	return hunger
 }

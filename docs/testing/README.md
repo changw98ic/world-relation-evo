@@ -40,41 +40,36 @@ WRE_TEST_DATABASE_URL="$DATABASE_URL" \
 
 本次还实际执行了全仓 `go test -race -tags integration -json -count=1 ./...`。其中包含真实 PostgreSQL：**91 个顶层测试、102 个子用例全部通过，0 个跳过**。覆盖跨 SQL 批次的事务撤销、独立会话的世界锁、检查点首步日志、跨世界隔离，以及查询失败不能显示为空历史。
 
-## 真实模型完整流程
+## PostgreSQL 重启与重放
 
-在项目根目录配置 `.env` 或环境变量中的 `WRE_JEV_KEY` 和 `DATABASE_URL`。测试使用这些明确配置的外部服务（模拟运行只调用 Jev 决策模型，不再调用内容模型）。
+设置 `DATABASE_URL` 后运行：
 
 ```sh
 go test -tags live ./cmd/wre \
-  -run '^TestLiveModelWorkflowRecordsEvidenceAcrossDatabaseRestart$' \
-  -count=1 -v -timeout 30m
+  -run '^TestLiveRuleWorkflowRecordsEvidenceAcrossDatabaseRestart$' -count=1 -v
 ```
 
-可以把 `WRE_LIVE_ARTIFACT_DIR` 指向一个尚未存在、父目录已存在的目录。未指定时，测试创建临时目录并打印位置，测试结束后保留证据。`30m` 是这次测试进程的执行预算，不是模型服务的性能承诺，也不是应用限制。
-
-这个测试编译并启动真实程序。场景来自 `mortal_watershed` 的 9 个活跃人物，移除匿名人口，使每次活跃人物决策都调用 Jev。第一次运行 16 步，退出；第二次从 PostgreSQL 恢复，再运行 16 步。检查点间隔为 24，最后从数据库的第 24 步检查点重放到第 32 步，比较完整导出状态。
-
-缺配置或外部调用失败会失败。只有真实返回、持久化、重启、重放都完成，才记录流程完成。行为审查结果另外保存；测试不要求审查列表为空。
-
-本次已实跑通过：254 次 Jev 响应、115 次内容模型响应、32 步保存、两次模拟进程、数据库重放状态逐字节一致。共观测 8 个模拟小时。它不覆盖全年、百万人口、其他两个题材、进程崩溃或数据库故障恢复。
+测试启动两个实际模拟进程。第一个保存 16 步，第二个从同一数据库恢复并再运行
+16 步。最后从第 24 步检查点重放到第 32 步，逐字节比较最终状态。
+可用 `WRE_LIVE_ARTIFACT_DIR` 指定一个尚未存在的证据目录。
 
 ## 完整记录与审查
 
 普通运行也可以保存证据。每次使用新的目录：
 
 ```sh
-go run ./cmd/wre -offline-run -decider rules -steps 4 -pace 0 -quiet \
+go run ./cmd/wre -offline-run -steps 4 -pace 0 -quiet \
   -trace-dir /tmp/wre-evidence-new-run
 
 go run ./cmd/wre audit-trace -trace-dir /tmp/wre-evidence-new-run \
   > /tmp/wre-evidence-review.json
 ```
 
-真实模型模式同样支持 `-trace-dir`。记录包括原始模型请求与返回正文、人物当时的感知、完整候选、选择、生成后的动作、每步结算前后世界、事件、持久化确认和错误。HTTP 认证头、配置密钥及带认证信息的地址不作为记录字段写入。
+记录包括人物当时的感知、候选、需求贡献、选择、继续或修复的理由、世界结算、事实事件和持久化结果。
 
 `initial.json`、`trace.ndjson` 和 `final.json` 是运行证据。`audit-trace` 从证据生成报告；报告包含动作时间线、实际后状态、发现的问题和证据序号。未发生结算时，后状态为 `null`。缺结束记录、坏 JSON、写入失败或外部错误都不能变成“成功且没有数据”。
 
-审查器检查候选身份、内容模型是否改了动作、引用是否属于人物实际持有的记忆、当面讲话范围、动作与结算是否一致、个人负持仓、零产出完成事件等。零产出先列为需要调查，不用未经校准的阈值直接判定所有情形违法。
+审查器检查候选身份、准备执行的动作是否等于已选动作、引用是否属于人物实际持有的记忆、当面讲话范围、动作与结算是否一致、个人负持仓、零产出完成事件等。零产出先列为需要调查，不用未经校准的阈值直接判定所有情形违法。
 
 `correctness` 始终是 `not_established`，即“尚未证明模拟正确”。报告没有发现问题，也必须继续读取人物时间线与原始返回。人物可能连续说出“已经查仓、已经修堤”，实际动作却只有讲话；这种问题不能只靠协议检查识别。
 

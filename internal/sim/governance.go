@@ -13,7 +13,6 @@ type GovernanceSpec struct {
 	TransitCustomsPermille   int    `json:"transit_customs_permille,omitempty"`
 	DailyPollTaxPermille     int    `json:"daily_poll_tax_permille,omitempty"`
 	SubsistenceReservePerCap int    `json:"subsistence_reserve_per_cap,omitempty"`
-	CivicStipendPerCap       int    `json:"civic_stipend_per_cap,omitempty"`
 	TaxSkimBasePermille      int    `json:"tax_skim_base_permille,omitempty"`
 	EmbezzleBasePermille     int    `json:"embezzle_base_permille,omitempty"`
 	AuditThreshold           int    `json:"audit_threshold,omitempty"`
@@ -32,7 +31,6 @@ func DefaultGovernanceSpec() GovernanceSpec {
 		TransitCustomsPermille:   55,  // 5.5% cross-district waterway/pass octroi duty (漕关船钞与过境厘金)
 		DailyPollTaxPermille:     24,  // 2.4%/day household, land & guild surplus tax above subsistence floor (夏秋丁户田赋)
 		SubsistenceReservePerCap: 8,   // 8 coins/capita untaxed household livelihood buffer
-		CivicStipendPerCap:       3,   // 3 coins/capita/day nominal public-service stipend
 		TaxSkimBasePermille:      135, // 13.5% baseline tax-collection skimming before reaching treasury (征税截留)
 		EmbezzleBasePermille:     110, // 11.0% baseline payroll/relief embezzlement by corrupt apparatus (克扣饷赈)
 		AuditThreshold:           34,  // district corruption index (0..100) triggering censorate anti-corruption purge
@@ -53,7 +51,6 @@ func (c Catalog) EffectiveGovernance() GovernanceSpec {
 	g.TransitCustomsPermille = resolveSpecNumber(g.TransitCustomsPermille, def.TransitCustomsPermille, g.ExplicitZero || g.explicitFields["transit_customs_permille"])
 	g.DailyPollTaxPermille = resolveSpecNumber(g.DailyPollTaxPermille, def.DailyPollTaxPermille, g.ExplicitZero || g.explicitFields["daily_poll_tax_permille"])
 	g.SubsistenceReservePerCap = resolveSpecNumber(g.SubsistenceReservePerCap, def.SubsistenceReservePerCap, g.ExplicitZero || g.explicitFields["subsistence_reserve_per_cap"])
-	g.CivicStipendPerCap = resolveSpecNumber(g.CivicStipendPerCap, def.CivicStipendPerCap, g.ExplicitZero || g.explicitFields["civic_stipend_per_cap"])
 	g.TaxSkimBasePermille = resolveSpecNumber(g.TaxSkimBasePermille, def.TaxSkimBasePermille, g.ExplicitZero || g.explicitFields["tax_skim_base_permille"])
 	g.EmbezzleBasePermille = resolveSpecNumber(g.EmbezzleBasePermille, def.EmbezzleBasePermille, g.ExplicitZero || g.explicitFields["embezzle_base_permille"])
 	g.AuditThreshold = resolveSpecNumber(g.AuditThreshold, def.AuditThreshold, g.ExplicitZero || g.explicitFields["audit_threshold"])
@@ -114,17 +111,32 @@ func (w *World) creditTreasury(amount int64, category string) {
 	}
 }
 
+// spendableTreasury excludes fees that still belong to unfinished tasks.
+func (w *World) spendableTreasury() int64 {
+	available := w.PublicTreasury
+	reserve := func(actors []Actor) {
+		for _, a := range actors {
+			if a.Task != nil && a.Task.PrepaidTreasury {
+				available -= min(available, max(0, a.Task.PrepaidCurrencies["coins"]))
+				available -= min(available, max(0, a.Task.PrepaidCurrencies[""]))
+			}
+		}
+	}
+	reserve(w.Actors)
+	for _, c := range w.Cohorts {
+		reserve(c.Members)
+	}
+	return available
+}
+
 func (w *World) debitTreasury(amount int64, category string) int64 {
 	if amount <= 0 {
 		return 0
 	}
 	w.ensureTreasuryLedger()
-	if w.PublicTreasury <= 0 {
+	paid := min(amount, w.spendableTreasury())
+	if paid <= 0 {
 		return 0
-	}
-	paid := amount
-	if paid > w.PublicTreasury {
-		paid = w.PublicTreasury
 	}
 	w.PublicTreasury -= paid
 	switch category {
@@ -267,7 +279,7 @@ func (w *World) collectTaxWithSkim(districtID string, grossTax int64) (netTreasu
 		}
 		skimmed = (grossTax * int64(skimPermille)) / 1000
 		if skimmed > 0 {
-			collector.MoneyPool += skimmed
+			w.addCohortCurrency(collector, "coins", skimmed)
 			collector.IllicitWealth += skimmed
 			w.TreasuryLedger.TaxSkimmed += skimmed
 		}
@@ -342,7 +354,7 @@ func (w *World) stepCohortDailyTaxation() []Event {
 			continue
 		}
 
-		c.MoneyPool -= totalDue
+		w.addCohortCurrency(c, "coins", -(totalDue))
 		var netT, skimmed int64
 		if targetPolity != nil {
 			targetPolity.Ledger.TaxAssessedGross += assessed
@@ -359,21 +371,21 @@ func (w *World) stepCohortDailyTaxation() []Event {
 				}
 				skimmed = (assessed * int64(skimPermille)) / 1000
 				if skimmed > 0 {
-					collector.MoneyPool += skimmed
+					w.addCohortCurrency(collector, "coins", skimmed)
 					collector.IllicitWealth += skimmed
 					targetPolity.Ledger.TaxSkimmed += skimmed
 				}
 			}
 			netT = assessed - skimmed
 			if netT > 0 {
-				targetPolity.Treasury += netT
+				w.addPolityCurrency(targetPolity, "coins", netT)
 				targetPolity.Ledger.TaxToTreasury += netT
 			}
 		} else {
 			netT, skimmed = w.collectTaxWithSkim(c.District, assessed)
 		}
 		if surcharge > 0 && collector != nil {
-			collector.MoneyPool += surcharge
+			w.addCohortCurrency(collector, "coins", surcharge)
 			collector.IllicitWealth += surcharge
 			if targetPolity != nil {
 				targetPolity.Ledger.TaxSurcharge += surcharge
@@ -382,7 +394,7 @@ func (w *World) stepCohortDailyTaxation() []Event {
 			}
 		} else if surcharge > 0 {
 			if targetPolity != nil {
-				targetPolity.Treasury += surcharge
+				w.addPolityCurrency(targetPolity, "coins", surcharge)
 				targetPolity.Ledger.TaxToTreasury += surcharge
 			} else {
 				w.creditTreasury(surcharge, "tax")
@@ -554,7 +566,7 @@ func (w *World) stepCohortProtectionRackets() []Event {
 			continue
 		}
 
-		roll := int(worldHash(w.ID, w.Tick, "racket:"+primaryGang.ID+":"+victim.ID) % 1000)
+		roll := int(w.settlementRandom(w.Tick, "racket:"+primaryGang.ID+":"+victim.ID) % 1000)
 		// ~16% chance a guild refuses extortion and triggers stall-smashing / Martial Hall escort clash!
 		if roll < 160 {
 			enforcers := maxInt(4, minInt(48, gangForce/35))
@@ -564,8 +576,8 @@ func (w *World) stepCohortProtectionRackets() []Event {
 				seizedCoins = victim.MoneyPool / 40
 			}
 			if seizedCoins > 0 {
-				victim.MoneyPool -= seizedCoins
-				primaryGang.MoneyPool += seizedCoins
+				w.addCohortCurrency(victim, "coins", -(seizedCoins))
+				w.addCohortCurrency(primaryGang, "coins", seizedCoins)
 			}
 			// Smash/seize a small batch of shop stock
 			var smashedItem string
@@ -632,13 +644,13 @@ func (w *World) stepCohortProtectionRackets() []Event {
 		}
 
 		// Peaceful protection-fee compliance ("交例钱保平安")
-		victim.MoneyPool -= demand
+		w.addCohortCurrency(victim, "coins", -(demand))
 		if bossGang != nil && bossGang.ID != primaryGang.ID {
 			bossCut := demand / 4
-			bossGang.MoneyPool += bossCut
-			primaryGang.MoneyPool += (demand - bossCut)
+			w.addCohortCurrency(bossGang, "coins", bossCut)
+			w.addCohortCurrency(primaryGang, "coins", (demand - bossCut))
 		} else {
-			primaryGang.MoneyPool += demand
+			w.addCohortCurrency(primaryGang, "coins", demand)
 		}
 		victim.ProtectedUntilTick = w.Tick + TicksPerDay
 		stallBatches := maxInt64(1, int64(victim.Population)/250)
@@ -719,8 +731,8 @@ func (w *World) stepCohortBriberyAndCollusion() []Event {
 			continue
 		}
 
-		outlaw.MoneyPool -= bribe
-		lawTarget.MoneyPool += bribe
+		w.addCohortCurrency(outlaw, "coins", -(bribe))
+		w.addCohortCurrency(lawTarget, "coins", bribe)
 		lawTarget.IllicitWealth += bribe
 
 		// Collusion effects: 18-hour patrol tip-off shield + corruption increase + early back-door jail release
@@ -824,7 +836,7 @@ func (w *World) stepCohortAntiCorruptionAudit() []Event {
 		if seize > target.MoneyPool {
 			seize = target.MoneyPool
 		}
-		target.MoneyPool -= seize
+		w.addCohortCurrency(target, "coins", -(seize))
 		if seize >= target.IllicitWealth {
 			target.IllicitWealth = 0
 		} else {

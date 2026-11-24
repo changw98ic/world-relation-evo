@@ -88,6 +88,10 @@ func LoadExpansionRecords(optionsDir string) ([]ActorExpansionRecord, *WorldExpa
 		if err := json.Unmarshal(raw, &rec); err != nil {
 			return nil, nil, fmt.Errorf("parse actor record %s: %w", actorPath, err)
 		}
+		if rec.ActorID != brief.ActorID || rec.WorldID != summary.WorldID || rec.Dossier.World.ID != summary.WorldID || rec.Dossier.World.HorizonDays != summary.HorizonDays {
+			return nil, nil, fmt.Errorf("actor record %s does not match the actor, world and planning horizon in %s", actorPath, summaryPath)
+		}
+		rec.Catalog.fillOmittedWindows(summary.HorizonDays)
 		records = append(records, rec)
 	}
 	if len(records) == 0 {
@@ -292,8 +296,8 @@ func scoreOptionPair(recA *ActorExpansionRecord, optA ExpandedOption, recB *Acto
 	var reasons []string
 
 	// 1. Temporal overlap (up to 16 pts).
-	spanA := max(1, normWindow(optA.DayWindow)[1]-normWindow(optA.DayWindow)[0]+1)
-	spanB := max(1, normWindow(optB.DayWindow)[1]-normWindow(optB.DayWindow)[0]+1)
+	spanA := optA.DayWindow[1] - optA.DayWindow[0] + 1
+	spanB := optB.DayWindow[1] - optB.DayWindow[0] + 1
 	minSpan := min(spanA, spanB)
 	overlapPts := min(16, 4+(overlap*12)/minSpan)
 	score += overlapPts
@@ -519,7 +523,7 @@ func toOptionRef(rec *ActorExpansionRecord, opt ExpandedOption) ScenarioOptionRe
 		OptionID:            opt.ID,
 		Category:            opt.Category,
 		Title:               opt.Title,
-		DayWindow:           normWindow(opt.DayWindow),
+		DayWindow:           opt.DayWindow,
 		Priority:            opt.Priority,
 		EngineKind:          opt.Action.EngineKind,
 		RecipeID:            opt.Action.RecipeID,
@@ -574,22 +578,9 @@ func priorityWeight(p string) int {
 	}
 }
 
-func normWindow(w [2]int) [2]int {
-	a, b := w[0], w[1]
-	if a <= 0 {
-		a = 1
-	}
-	if b < a {
-		b = a
-	}
-	return [2]int{a, b}
-}
-
 func intersectDayWindow(w1, w2 [2]int) ([2]int, int) {
-	a := normWindow(w1)
-	b := normWindow(w2)
-	lo := max(a[0], b[0])
-	hi := min(a[1], b[1])
+	lo := max(w1[0], w2[0])
+	hi := min(w1[1], w2[1])
 	if hi < lo {
 		return [2]int{}, 0
 	}
@@ -649,15 +640,4 @@ func sortedActorSetKey(ids ...string) string {
 	cp := append([]string(nil), ids...)
 	sort.Strings(cp)
 	return strings.Join(cp, "|")
-}
-
-// ScenarioTriggerSignature produces a stable canonical key from a scenario's
-// trigger options so cached DS responses can be safely reused across re-ranking.
-func ScenarioTriggerSignature(s CombinationScenario) string {
-	keys := make([]string, 0, len(s.TriggerOptions))
-	for _, t := range s.TriggerOptions {
-		keys = append(keys, t.ActorID+":"+t.OptionID)
-	}
-	sort.Strings(keys)
-	return strings.Join(keys, "+")
 }

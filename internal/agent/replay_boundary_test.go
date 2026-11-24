@@ -2,89 +2,33 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/changw98ic/world-relation-evo/internal/sim"
 )
 
-// This uses a local Jev protocol endpoint to prove replay never requests a new
-// decision. It is not a real-provider end-to-end test.
-func TestLocalProtocolRecordingReplaysFromNonzeroTickWithoutProviderCalls(t *testing.T) {
-	var choices atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/systemone" {
-			t.Error("unexpected local protocol endpoint")
-			rw.WriteHeader(404)
-			return
-		}
-		choices.Add(1)
-		var request struct {
-			Questions map[string]struct {
-				Criteria map[string]string `json:"criteria"`
-			} `json:"questions"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Error(err)
-			rw.WriteHeader(400)
-			return
-		}
-		selected := ""
-		for id, label := range request.Questions["decision"].Criteria {
-			_, raw, found := strings.Cut(label, "; system-defined action: ")
-			if !found {
-				continue
-			}
-			var a sim.Action
-			if err := json.Unmarshal([]byte(raw), &a); err != nil {
-				t.Error(err)
-				rw.WriteHeader(400)
-				return
-			}
-			if a.Kind == "speak" {
-				selected = id
-				break
-			}
-		}
-		if selected == "" {
-			t.Error("fixture has no local speech candidate")
-			rw.WriteHeader(400)
-			return
-		}
-		_ = json.NewEncoder(rw).Encode(map[string]any{"answers": map[string]any{"decision": map[string]string{"type": "choice", "choice": selected}}})
-	}))
-	defer server.Close()
+func TestRecordedPlanningReplaysFromNonzeroTick(t *testing.T) {
 	w := boundaryWorld()
 	w.Tick = 37
 	w.Actors = w.Actors[:2]
 	checkpoint := []byte(boundaryJSON(t, w))
-	pipeline := Pipeline{Selector: Jev{Endpoint: server.URL + "/systemone", APIKey: "fixture", Client: server.Client()}}
+	planner := Planner{}
 	var logs []sim.TickDecisionLog
 	var originalEvents []sim.Event
 	for i := 0; i < 2; i++ {
-		events, log, err := w.StepRecorded(context.Background(), pipeline)
+		events, log, err := w.StepRecorded(context.Background(), planner)
 		if err != nil {
 			t.Fatal(err)
 		}
 		logs = append(logs, log)
 		originalEvents = append(originalEvents, events...)
 	}
-	if logs[0].Tick != 37 || len(logs[0].Decisions) != 2 || choices.Load() == 0 {
-		t.Fatal("the recording did not exercise the decision provider adapter at the checkpoint tick")
+	if logs[0].Tick != 37 || len(logs[0].Decisions) != 2 {
+		t.Fatal("planning was not recorded at the checkpoint tick")
 	}
-	beforeChoices := choices.Load()
-	server.Close()
 	replayed, events, err := sim.ReplayFromCheckpoint(checkpoint, logs, w.Tick)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if choices.Load() != beforeChoices {
-		t.Fatal("replay made new model requests")
 	}
 	if boundaryJSON(t, replayed) != boundaryJSON(t, w) || boundaryJSON(t, events) != boundaryJSON(t, originalEvents) {
 		t.Fatal("replay changed recorded state, dialogue, or event order")
@@ -134,15 +78,10 @@ func TestRecordedAndReplayedDecisionsOwnTheirNestedClaimsAndContractTerms(t *tes
 	}
 }
 
-func TestLocalProviderCancellationRemainsAnError(t *testing.T) {
-	var requests atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) { requests.Add(1); _, _ = fmt.Fprint(rw, `{}`) }))
-	defer server.Close()
+func TestPlannerReportsCancelledDecision(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	view := boundaryWorld().View("alice")
-	_, choiceErr := (Jev{Endpoint: server.URL, APIKey: "fixture", Client: server.Client()}).Select(ctx, view, []Option{{ID: "wait", Action: sim.Action{Kind: "wait"}}})
-	if choiceErr == nil || requests.Load() != 0 {
-		t.Fatal("cancelled requests succeeded or reached a provider")
+	if _, err := (Planner{}).Decide(ctx, boundaryWorld().View("alice")); err != context.Canceled {
+		t.Fatalf("expected cancellation, got %v", err)
 	}
 }

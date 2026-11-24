@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -14,46 +13,19 @@ import (
 )
 
 func loadEventsFromFile(path string) ([]sim.Event, error) {
-	raw, err := os.ReadFile(path)
+	events, err := loadJSONRecords[sim.Event](path)
 	if err != nil {
 		return nil, err
 	}
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 {
-		return nil, nil
+	for i, event := range events {
+		if err := validateSimulationEvent(event); err != nil {
+			return nil, fmt.Errorf("%s event %d: %w", path, i+1, err)
+		}
 	}
-	if trimmed[0] == '[' {
-		var evs []sim.Event
-		if err := json.Unmarshal(trimmed, &evs); err != nil {
-			return nil, fmt.Errorf("decode events JSON array: %w", err)
-		}
-		for i, event := range evs {
-			if err := validateChronicleEvent(event); err != nil {
-				return nil, fmt.Errorf("event array entry %d: %w", i+1, err)
-			}
-		}
-		return evs, nil
-	}
-	// NDJSON fallback
-	var evs []sim.Event
-	for idx, line := range strings.Split(string(trimmed), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		var ev sim.Event
-		if err := json.Unmarshal([]byte(line), &ev); err != nil {
-			return nil, fmt.Errorf("decode NDJSON event line %d: %w", idx+1, err)
-		}
-		if err := validateChronicleEvent(ev); err != nil {
-			return nil, fmt.Errorf("event line %d: %w", idx+1, err)
-		}
-		evs = append(evs, ev)
-	}
-	return evs, nil
+	return events, nil
 }
 
-func validateChronicleEvent(event sim.Event) error {
+func validateSimulationEvent(event sim.Event) error {
 	if event.ID <= 0 || strings.TrimSpace(event.Kind) == "" || event.Kind == "tick_settled" {
 		return fmt.Errorf("expected a simulation event with a positive id and valid kind, got id=%d kind=%q", event.ID, event.Kind)
 	}

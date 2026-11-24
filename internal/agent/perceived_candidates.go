@@ -130,7 +130,10 @@ func mediationActions(p sim.Perception) []sim.Action {
 			default:
 				continue
 			}
-			price = sim.SafeInt64ToInt(feud.MediationCoins)
+			price = int(feud.MediationCoins)
+			if int64(price) != feud.MediationCoins {
+				continue
+			}
 		}
 		actions = append(actions, sim.Action{Kind: "mediate_feud", Text: feud.ID, TargetID: feud.OffenderID, Price: price})
 	}

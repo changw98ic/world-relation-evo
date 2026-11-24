@@ -11,6 +11,9 @@ func (choice foodWorkChoice) Decide(_ context.Context, p Perception) (Action, er
 	if p.Self.Thirst >= 2 {
 		return Action{Kind: "drink", Item: "water"}, nil
 	}
+	if p.Self.Energy == 0 {
+		return Action{Kind: "sleep"}, nil
+	}
 	if choice.work && p.Self.Hunger > 0 {
 		if p.Self.Items["grain"] > 0 {
 			return Action{Kind: "eat", Item: "grain"}, nil

@@ -1,13 +1,11 @@
 package optiongen
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -45,17 +43,10 @@ type ScenarioResponseCatalog struct {
 
 // ScenarioResponseRecord stores the full audit trail for one scenario's DS call.
 type ScenarioResponseRecord struct {
-	WorldID          string                  `json:"world_id"`
-	Scenario         CombinationScenario     `json:"scenario"`
-	Model            string                  `json:"model"`
-	Endpoint         string                  `json:"endpoint"`
-	RequestedAt      time.Time               `json:"requested_at"`
-	DurationMS       int64                   `json:"duration_ms"`
-	PromptTokens     int                     `json:"prompt_tokens,omitempty"`
-	CompletionTokens int                     `json:"completion_tokens,omitempty"`
-	TotalTokens      int                     `json:"total_tokens,omitempty"`
-	Catalog          ScenarioResponseCatalog `json:"catalog"`
-	RawResponse      string                  `json:"raw_response"`
+	generationOutput
+	WorldID  string                  `json:"world_id"`
+	Scenario CombinationScenario     `json:"scenario"`
+	Catalog  ScenarioResponseCatalog `json:"catalog"`
 }
 
 // ActorResponseIndex aggregates all reactive counter-options that belong to one actor
@@ -283,24 +274,15 @@ func BuildResponseSystemPrompt(world WorldContextSummary, scenario CombinationSc
 	)
 }
 
-// ExpandScenarioResponses sends one DS request for a single CombinationScenario
-// and returns the full ScenarioResponseRecord.
-func (c Client) ExpandScenarioResponses(
+func (c Client) expandScenarioResponses(
 	ctx context.Context,
 	world WorldContextSummary,
 	scenario CombinationScenario,
 	actionKinds []string,
 	rosterBrief []map[string]string,
-) (ScenarioResponseRecord, error) {
-	url, err := c.chatEndpoint()
-	if err != nil {
-		return ScenarioResponseRecord{}, err
-	}
-	model := strings.TrimSpace(c.Model)
-	if model == "" {
-		return ScenarioResponseRecord{}, errors.New("WRE_MODEL (model) is required")
-	}
-
+	path string,
+	resume bool,
+) (ScenarioResponseRecord, bool, error) {
 	payload := map[string]any{
 		"world_id":            world.ID,
 		"horizon_days":        world.HorizonDays,
@@ -310,122 +292,29 @@ func (c Client) ExpandScenarioResponses(
 	}
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
-		return ScenarioResponseRecord{}, fmt.Errorf("marshal scenario payload %s: %w", scenario.ID, err)
+		return ScenarioResponseRecord{}, false, fmt.Errorf("marshal scenario payload: %w", err)
 	}
-
-	maxTokens := c.MaxTokens
-	if maxTokens <= 0 {
-		maxTokens = 16384
+	prompt := generationPrompt{
+		system: BuildResponseSystemPrompt(world, scenario, actionKinds),
+		user: fmt.Sprintf(
+			"以下是高概率跨角色组合局面 %s（综合发生概率 %d/100，时间窗第 %d–%d 天，碰撞类型：%s）的完整上下文。请严格使用贴合本世界观的简体中文人话（严禁英文变量或内部编号），为每一位涉事角色生成 2 到 3 条差异化应对选项（JSON）：\n\n%s",
+			scenario.ID, scenario.LikelihoodScore, scenario.DayWindow[0], scenario.DayWindow[1], scenario.CollisionType, payloadJSON,
+		),
+		maxTokens:   16384,
+		temperature: 0.4,
 	}
-	temp := c.Temperature
-	if temp <= 0 {
-		temp = 0.4
-	}
-
-	sysPrompt := BuildResponseSystemPrompt(world, scenario, actionKinds)
-	userPrompt := fmt.Sprintf(
-		"以下是高概率跨角色组合局面 %s（综合发生概率 %d/100，时间窗第 %d–%d 天，碰撞类型：%s）的完整上下文。请严格使用贴合本世界观的简体中文人话（严禁英文变量或内部编号），为每一位涉事角色生成 2 到 3 条差异化应对选项（JSON）：\n\n%s",
-		scenario.ID, scenario.LikelihoodScore, scenario.DayWindow[0], scenario.DayWindow[1], scenario.CollisionType, string(payloadJSON),
-	)
-
-	reqBody := map[string]any{
-		"model": model,
-		"messages": []map[string]string{
-			{"role": "system", "content": sysPrompt},
-			{"role": "user", "content": userPrompt},
-		},
-		"temperature":     temp,
-		"max_tokens":      maxTokens,
-		"response_format": map[string]string{"type": "json_object"},
-	}
-	if effort := strings.TrimSpace(c.ReasoningEffort); effort != "" {
-		reqBody["reasoning_effort"] = effort
-	}
-	rawReq, err := json.Marshal(reqBody)
-	if err != nil {
-		return ScenarioResponseRecord{}, err
-	}
-
-	httpClient := c.HTTPClient
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 10 * time.Minute}
-	}
-
-	started := time.Now().UTC()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(rawReq))
-	if err != nil {
-		return ScenarioResponseRecord{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if strings.TrimSpace(c.APIKey) != "" {
-		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(c.APIKey))
-	}
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return ScenarioResponseRecord{}, fmt.Errorf("request ds for %s: %w", scenario.ID, err)
-	}
-	defer resp.Body.Close()
-
-	rawResp, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return ScenarioResponseRecord{}, fmt.Errorf("read ds response for %s: %w", scenario.ID, err)
-	}
-	durationMS := time.Since(started).Milliseconds()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		snippet := string(rawResp)
-		if len(snippet) > 400 {
-			snippet = snippet[:400] + "..."
+	return generateRecord(ctx, c, path, resume, prompt, func(out generationOutput) (ScenarioResponseRecord, error) {
+		catalog, err := decodeResponseCatalog(out.RawResponse, scenario)
+		if err != nil {
+			return ScenarioResponseRecord{}, err
 		}
-		return ScenarioResponseRecord{}, fmt.Errorf("ds http %d for %s: %s", resp.StatusCode, scenario.ID, snippet)
-	}
-
-	var envelope struct {
-		Choices []struct {
-			FinishReason string `json:"finish_reason"`
-			Message      struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-		Usage struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
-		} `json:"usage"`
-	}
-	if err := json.Unmarshal(rawResp, &envelope); err != nil {
-		return ScenarioResponseRecord{}, fmt.Errorf("decode ds envelope for %s: %w", scenario.ID, err)
-	}
-	if len(envelope.Choices) == 0 {
-		return ScenarioResponseRecord{}, fmt.Errorf("ds returned empty choices for %s", scenario.ID)
-	}
-
-	content := envelope.Choices[0].Message.Content
-	cat, err := decodeResponseCatalog(content, scenario)
-	if err != nil {
-		tail := content
-		if len(tail) > 240 {
-			tail = "..." + tail[len(tail)-240:]
-		}
-		return ScenarioResponseRecord{}, fmt.Errorf("parse ds responses for %s (finish_reason=%s len=%d tokens=%d/%d): %w | tail=%q",
-			scenario.ID, envelope.Choices[0].FinishReason, len(content),
-			envelope.Usage.PromptTokens, envelope.Usage.CompletionTokens, err, tail)
-	}
-
-	return ScenarioResponseRecord{
-		WorldID:          world.ID,
-		Scenario:         scenario,
-		Model:            model,
-		Endpoint:         url,
-		RequestedAt:      started,
-		DurationMS:       durationMS,
-		PromptTokens:     envelope.Usage.PromptTokens,
-		CompletionTokens: envelope.Usage.CompletionTokens,
-		TotalTokens:      envelope.Usage.TotalTokens,
-		Catalog:          cat,
-		RawResponse:      content,
-	}, nil
+		return ScenarioResponseRecord{
+			generationOutput: out,
+			WorldID:          world.ID,
+			Scenario:         scenario,
+			Catalog:          catalog,
+		}, nil
+	})
 }
 
 func decodeResponseCatalog(raw string, scenario CombinationScenario) (ScenarioResponseCatalog, error) {
@@ -442,6 +331,8 @@ func decodeResponseCatalog(raw string, scenario CombinationScenario) (ScenarioRe
 	}
 	if cat.ScenarioID == "" {
 		cat.ScenarioID = scenario.ID
+	} else if cat.ScenarioID != scenario.ID {
+		return ScenarioResponseCatalog{}, fmt.Errorf("response scenario %q differs from requested scenario %q", cat.ScenarioID, scenario.ID)
 	}
 	if cat.ScenarioTitle == "" {
 		cat.ScenarioTitle = scenario.Title
@@ -478,6 +369,10 @@ func ExpandResponses(ctx context.Context, records []ActorExpansionRecord, client
 	if strings.TrimSpace(cfg.OutDir) == "" {
 		return nil, fmt.Errorf("output directory is required")
 	}
+	endpointURL, err := client.chatEndpoint()
+	if err != nil {
+		return nil, err
+	}
 
 	scenariosDir := filepath.Join(cfg.OutDir, "scenarios")
 	byActorDir := filepath.Join(cfg.OutDir, "by_actor")
@@ -492,6 +387,10 @@ func ExpandResponses(ctx context.Context, records []ActorExpansionRecord, client
 	actionKinds := records[0].Dossier.EngineActionKinds
 	rosterBrief := make([]map[string]string, 0, len(records))
 	for _, r := range records {
+		if r.Dossier.World.ID != worldCtx.ID || r.Dossier.World.HorizonDays != worldCtx.HorizonDays {
+			return nil, fmt.Errorf("actor %s was generated for world %q over %d days; expected world %q over %d days",
+				r.ActorID, r.Dossier.World.ID, r.Dossier.World.HorizonDays, worldCtx.ID, worldCtx.HorizonDays)
+		}
 		rosterBrief = append(rosterBrief, map[string]string{
 			"id":       r.ActorID,
 			"name":     r.ActorName,
@@ -504,17 +403,9 @@ func ExpandResponses(ctx context.Context, records []ActorExpansionRecord, client
 	if len(scenarios) == 0 {
 		return nil, fmt.Errorf("no high-likelihood cross-actor combinations discovered")
 	}
-	if err := writeJSONFile(filepath.Join(cfg.OutDir, "combinations.json"), scenarios); err != nil {
-		return nil, err
-	}
-
-	cachedBySig := map[string]ScenarioResponseRecord{}
-	if cfg.Resume {
-		cachedBySig = loadCachedScenarioResponses(scenariosDir)
-	}
-
 	started := time.Now().UTC()
 	respRecords := make([]ScenarioResponseRecord, len(scenarios))
+	requested := make([]bool, len(scenarios))
 	errs := make([]error, len(scenarios))
 
 	sem := make(chan struct{}, cfg.Concurrency)
@@ -527,21 +418,6 @@ func ExpandResponses(ctx context.Context, records []ActorExpansionRecord, client
 			defer wg.Done()
 
 			outPath := filepath.Join(scenariosDir, s.ID+".json")
-			if cfg.Resume {
-				if existing, ok := cachedBySig[ScenarioTriggerSignature(s)]; ok {
-					existing.Scenario = s
-					existing.Catalog.ScenarioID = s.ID
-					_ = writeJSONFile(outPath, existing)
-					respRecords[idx] = existing
-					if cfg.Progress != nil {
-						logMu.Lock()
-						fmt.Fprintf(cfg.Progress, "[%d/%d] resumed %s (%s): %d responses (matched signature)\n",
-							idx+1, len(scenarios), s.ID, s.Title, len(existing.Catalog.Responses))
-						logMu.Unlock()
-					}
-					return
-				}
-			}
 
 			select {
 			case sem <- struct{}{}:
@@ -551,14 +427,7 @@ func ExpandResponses(ctx context.Context, records []ActorExpansionRecord, client
 				return
 			}
 
-			if cfg.Progress != nil {
-				logMu.Lock()
-				fmt.Fprintf(cfg.Progress, "[%d/%d] requesting ds for %s (score=%d, %s: %s)...\n",
-					idx+1, len(scenarios), s.ID, s.LikelihoodScore, s.CollisionType, s.Title)
-				logMu.Unlock()
-			}
-
-			rec, err := client.ExpandScenarioResponses(ctx, worldCtx, s, actionKinds, rosterBrief)
+			rec, sent, err := client.expandScenarioResponses(ctx, worldCtx, s, actionKinds, rosterBrief, outPath, cfg.Resume)
 			if err != nil {
 				errs[idx] = err
 				if cfg.Progress != nil {
@@ -568,16 +437,17 @@ func ExpandResponses(ctx context.Context, records []ActorExpansionRecord, client
 				}
 				return
 			}
-			if err := writeJSONFile(outPath, rec); err != nil {
-				errs[idx] = err
-				return
-			}
 			respRecords[idx] = rec
+			requested[idx] = sent
 
 			if cfg.Progress != nil {
+				status := "resumed"
+				if sent {
+					status = "generated"
+				}
 				logMu.Lock()
-				fmt.Fprintf(cfg.Progress, "[%d/%d] done %s: %d responses, %d tokens, %dms -> %s\n",
-					idx+1, len(scenarios), s.ID, len(rec.Catalog.Responses), rec.TotalTokens, rec.DurationMS, outPath)
+				fmt.Fprintf(cfg.Progress, "[%d/%d] %s %s: %d responses -> %s\n",
+					idx+1, len(scenarios), status, s.ID, len(rec.Catalog.Responses), outPath)
 				logMu.Unlock()
 			}
 		}(i, scn)
@@ -586,20 +456,24 @@ func ExpandResponses(ctx context.Context, records []ActorExpansionRecord, client
 
 	for i, err := range errs {
 		if err != nil {
-			return nil, fmt.Errorf("scenario %s failed: %w", scenarios[i].ID, err)
+			errs[i] = fmt.Errorf("scenario %s failed: %w", scenarios[i].ID, err)
 		}
 	}
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
+	if err := writeJSONFile(filepath.Join(cfg.OutDir, "combinations.json"), scenarios); err != nil {
+		return nil, err
+	}
 
-	endpointURL, _ := client.chatEndpoint()
 	summary := &WorldResponseSummary{
 		WorldID:        worldCtx.ID,
 		OptionsDir:     cfg.OptionsDir,
-		Model:          client.Model,
+		Model:          strings.TrimSpace(client.Model),
 		Endpoint:       endpointURL,
 		StartedAt:      started,
 		CompletedAt:    time.Now().UTC(),
 		TotalScenarios: len(scenarios),
-		TotalRequests:  len(scenarios),
 		ByStance:       map[string]int{},
 		ByCollision:    map[string]int{},
 		Scenarios:      make([]ScenarioResponseBrief, 0, len(scenarios)),
@@ -616,7 +490,10 @@ func ExpandResponses(ctx context.Context, records []ActorExpansionRecord, client
 		}
 	}
 
-	for _, rec := range respRecords {
+	for i, rec := range respRecords {
+		if requested[i] {
+			summary.TotalRequests++
+		}
 		byStance := map[string]int{}
 		groupedByActor := map[string][]CounterOption{}
 		for _, rsp := range rec.Catalog.Responses {
@@ -691,39 +568,13 @@ func ExpandResponses(ctx context.Context, records []ActorExpansionRecord, client
 	return summary, nil
 }
 
-func loadCachedScenarioResponses(scenariosDir string) map[string]ScenarioResponseRecord {
-	out := map[string]ScenarioResponseRecord{}
-	entries, err := os.ReadDir(scenariosDir)
-	if err != nil {
-		return out
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
-			continue
-		}
-		raw, err := os.ReadFile(filepath.Join(scenariosDir, entry.Name()))
-		if err != nil {
-			continue
-		}
-		var rec ScenarioResponseRecord
-		if err := json.Unmarshal(raw, &rec); err != nil || len(rec.Catalog.Responses) == 0 {
-			continue
-		}
-		sig := ScenarioTriggerSignature(rec.Scenario)
-		if sig != "" {
-			out[sig] = rec
-		}
-	}
-	return out
-}
-
 func renderResponseOverviewMarkdown(s *WorldResponseSummary, records []ScenarioResponseRecord) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s — 高概率选项组合碰撞与应对总览\n\n", s.WorldID)
 	fmt.Fprintf(&b, "- 模型：`%s`\n", s.Model)
-	fmt.Fprintf(&b, "- 高概率组合局面数 / DS 请求数：`%d` / `%d`\n", s.TotalScenarios, s.TotalRequests)
+	fmt.Fprintf(&b, "- 高概率组合局面数 / 本次模型请求数：`%d` / `%d`\n", s.TotalScenarios, s.TotalRequests)
 	fmt.Fprintf(&b, "- 生成应对选项总数：`%d`\n", s.TotalResponses)
-	fmt.Fprintf(&b, "- 总 Token 消耗：`%d`\n\n", s.TotalTokens)
+	fmt.Fprintf(&b, "- 产物累计 Token：`%d`\n\n", s.TotalTokens)
 
 	b.WriteString("| 局面 ID | 碰撞类型 | 概率评分 | 时间窗 | 涉事角色 | 局面标题 | 应对数 |\n")
 	b.WriteString("| --- | --- | ---: | --- | --- | --- | ---: |\n")

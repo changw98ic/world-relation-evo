@@ -13,6 +13,23 @@ const (
 	MaxCondition = 100
 )
 
+// Sixteen waking hours cost 32 energy before work and travel, bringing
+// a fully rested actor close to the standard 65-point rest target.
+const AwakeEnergyIntervalTicks = TicksPerHour / 2
+
+func (a Actor) EnergyAfterAwakeTicks(ticks int64) (energy int, remainder int64) {
+	elapsed := a.AwakeEnergyRemainder + ticks
+	return max(0, a.Energy-int(elapsed/AwakeEnergyIntervalTicks)), elapsed % AwakeEnergyIntervalTicks
+}
+
+func (a Actor) SleepHealsAt(tick int64, sheltered bool) bool {
+	interval := int64(2 * TicksPerHour)
+	if sheltered {
+		interval = TicksPerHour
+	}
+	return a.Health < MaxHealth && !a.Dead && a.Hunger <= 2 && tick%interval == 0
+}
+
 type HouseWearRule struct {
 	IntervalTicks int64  `json:"interval_ticks"`
 	ConditionLoss int    `json:"condition_loss"`
@@ -240,4 +257,13 @@ func SleepWindowAligned(trait string, hour int) bool {
 	default:
 		return hour >= 22 || hour < 6
 	}
+}
+
+func (a Actor) NextSleepWindowChange(tick int64) int64 {
+	aligned := SleepWindowAligned(a.SleepTrait, ClockAt(tick).Hour)
+	at := (tick/TicksPerHour + 1) * TicksPerHour
+	for SleepWindowAligned(a.SleepTrait, ClockAt(at).Hour) == aligned {
+		at += TicksPerHour
+	}
+	return at
 }

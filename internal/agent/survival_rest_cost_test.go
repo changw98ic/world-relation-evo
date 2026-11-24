@@ -56,11 +56,11 @@ func TestUrgentRestUsesTheActualCostOfLocalForaging(t *testing.T) {
 				t.Fatalf("food available here for %d, energy %d: got %+v", c.cost, c.energy, x)
 			}
 			boundaryApply(t, w, a.ID, x)
-			if w.Actors[0].Energy != c.energy-c.cost {
-				t.Fatal("did not settle the declared cost")
-			}
 			for w.Actors[0].Task != nil {
 				w.Advance(a.ID)
+			}
+			if w.Actors[0].Energy != c.energy-c.cost {
+				t.Fatal("did not settle the declared cost")
 			}
 			if w.Actors[0].Items["food"] != 1 {
 				t.Fatal("onsite work did not produce its actual ration")

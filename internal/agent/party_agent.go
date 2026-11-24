@@ -84,7 +84,7 @@ func addPartyOptions(p sim.Perception, allowed map[string]bool, add func(string,
 		}
 		if allowed["join_party"] && a.Energy >= 2 && a.Health >= 55 {
 			for _, party := range p.Parties {
-				if len(party.MemberIDs) >= 6 || a.Trust[party.LeaderID] < -1 {
+				if a.Trust[party.LeaderID] < -1 {
 					continue
 				}
 				add(fmt.Sprintf("Join %s (%s, %d members)", party.Name, party.Purpose, len(party.MemberIDs)),
@@ -126,7 +126,7 @@ func planPartyAction(p sim.Perception, consider func(sim.Action) bool) bool {
 	if myParty == nil {
 		// Join an existing trusted co-located party first.
 		for _, party := range p.Parties {
-			if len(party.MemberIDs) < 6 && a.Trust[party.LeaderID] >= 0 {
+			if a.Trust[party.LeaderID] >= 0 {
 				if consider(sim.Action{Kind: "join_party", TargetID: party.ID}) {
 					return true
 				}

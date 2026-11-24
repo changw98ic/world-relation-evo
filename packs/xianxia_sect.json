@@ -150,6 +150,31 @@
     }
   },
   "catalog": {
+    "planning": {
+      "horizon_ticks": 96,
+      "inertia_margin": 0.05,
+      "offer_acceptance_prior": 0.35,
+      "needs": [
+        {"measure": "nutrition", "target": 2, "scale": 4, "base_weight": 3},
+        {"measure": "hydration", "target": 0, "scale": 3, "base_weight": 2},
+        {"measure": "energy", "target": 65, "scale": 40, "base_weight": 2},
+        {"measure": "health", "target": 100, "scale": 40, "base_weight": 2},
+        {"measure": "hygiene", "target": 0, "scale": 5, "base_weight": 0.4},
+        {"measure": "provisions", "target": 8, "scale": 8, "base_weight": 1},
+        {"measure": "money", "target": 40, "scale": 40, "base_weight": 1.2},
+        {"measure": "housing", "target": 80, "scale": 50, "base_weight": 1.4},
+        {"measure": "stock", "target": 2, "scale": 2, "base_weight": 0.6},
+        {"measure": "progress", "target": 1, "scale": 1, "base_weight": 0.7},
+        {"measure": "obligation", "target": 1, "scale": 1, "base_weight": 2},
+        {"measure": "relationship", "target": 20, "scale": 40, "base_weight": 0.15},
+        {"measure": "skill", "target": 5, "scale": 5, "base_weight": 0.4},
+        {"measure": "knowledge", "target": 1, "scale": 1, "base_weight": 0.45},
+        {"measure": "safety", "target": 0, "scale": 10, "base_weight": 1},
+        {"measure": "state_slot", "subject": "qi", "target": 80, "scale": 50, "base_weight": 1},
+        {"measure": "state_slot", "subject": "cultivation", "target": 10000, "scale": 4000, "base_weight": 0.5},
+        {"measure": "power_tier", "target": 4, "scale": 3, "base_weight": 1.5}
+      ]
+    },
     "tag_actions": {
       "resident": [
         "equip",
@@ -486,7 +511,6 @@
       "source": "world setting: stone sect halls have a 100-year natural renewal scale; disaster damage is modeled separately"
     },
     "production": {
-      "default_field_area_m2": 1000,
       "field_area_per_batch_m2": 400,
       "field_area_per_farmer_m2": 1200,
       "field_source": "青灵药谷外门灵田单批种植面积设定",
@@ -685,16 +709,14 @@
           "market"
         ],
         "max_condition": 100,
-        "decay_per_day": 2,
-        "repair_energy": 8
+        "decay_per_day": 2
       },
       "spirit_aqueduct": {
         "id": "spirit_aqueduct",
         "name": "青灵引泉渠",
         "node_feature": "farmland",
         "max_condition": 100,
-        "decay_per_day": 2,
-        "repair_energy": 8
+        "decay_per_day": 2
       }
     },
     "rituals": [
@@ -707,21 +729,14 @@
         "money_cost": 5,
         "inputs": {
           "spirit_herb": 1
-        },
-        "cooldown_ticks": 288,
-        "sanitation_boost": 8,
-        "corruption_drop": 6
+        }
       }
     ],
     "diseases": [
       {
         "id": "qi_deviation",
         "name": "灵气紊乱",
-        "base_risk_permille": 4,
-        "sanitation_threshold": 50,
-        "health_drain_per_day": 6,
-        "energy_drain_per_day": 8,
-        "contagious": false
+        "health_drain_per_day": 6
       }
     ],
     "locomotion_modes": {
@@ -882,16 +897,12 @@
       "array_refinement": {
         "id": "array_refinement",
         "name": "聚灵阵脉提纯诀",
-        "domain": "alchemy_array",
-        "research_ticks": 6,
-        "energy_cost": 12
+        "research_ticks": 6
       },
       "sword_intent": {
         "id": "sword_intent",
         "name": "青霜剑意秘录",
-        "domain": "sword_dao",
-        "research_ticks": 6,
-        "energy_cost": 12
+        "research_ticks": 6
       }
     },
     "items": {
@@ -2146,7 +2157,6 @@
       {
         "id": "azure_cloud_sect",
         "name": "青云宗",
-        "kind": "sect",
         "seat_district_id": "sect_summit",
         "seat_venue_id": "grand_dao_hall",
         "treasury": 220,
@@ -2157,7 +2167,6 @@
       {
         "id": "jade_sword_peak",
         "name": "玉剑峰",
-        "kind": "peak",
         "de_jure_parent_id": "azure_cloud_sect",
         "de_facto_controller_id": "azure_cloud_sect",
         "seat_district_id": "sword_peak",
@@ -2167,7 +2176,6 @@
       {
         "id": "spirit_valley_market",
         "name": "云麓灵市",
-        "kind": "bazaar",
         "de_jure_parent_id": "azure_cloud_sect",
         "de_facto_controller_id": "azure_cloud_sect",
         "seat_district_id": "valley_bazaar",

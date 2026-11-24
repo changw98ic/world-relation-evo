@@ -9,6 +9,13 @@ type TradeTerms struct {
 	Currency string `json:"currency"`
 }
 
+func (o Offer) causalRoot() int64 {
+	if o.RootEventID != 0 {
+		return o.RootEventID
+	}
+	return o.ID
+}
+
 func (o Offer) ProposerID() string {
 	if o.ProposedBy != "" {
 		return o.ProposedBy
@@ -112,10 +119,18 @@ func (w *World) counterOffer(tx *WorldTx, a *Actor, x Action) []Event {
 		if reason := w.buyerItemBlockReason(*buyer, x.Item, currency); reason != "" {
 			return fail(reason)
 		}
-		e := tx.record(a, valid, "trade_counteroffered", map[string]any{"text": fmt.Sprintf("%s proposes %d %s for %d %s in reply to offer %d", a.Name, valid.Quantity, valid.Item, valid.Price, currency, previous.ID), "previous_offer_id": previous.ID}, other)
 		next := previous
-		next.ID, next.PreviousID, next.ProposedBy = e.ID, previous.ID, a.ID
+		next.ID, next.PreviousID, next.ProposedBy = w.NextID, previous.ID, a.ID
 		next.Quantity, next.Price, next.Currency = valid.Quantity, valid.Price, valid.Currency
+		next.District, next.Venue, next.House = a.Location, a.VenueID, a.InsideHouse
+		e := tx.record(a, valid, "trade_counteroffered", map[string]any{
+			"text":              fmt.Sprintf("%s proposes %d %s for %d %s in reply to offer %d", a.Name, valid.Quantity, valid.Item, valid.Price, currency, previous.ID),
+			"previous_offer_id": previous.ID,
+			"cause_event_id":    previous.ID,
+			"root_event_id":     previous.causalRoot(),
+			"trade":             next,
+		}, other)
+		next.RootEventID = e.causalRoot()
 		w.Offers[i] = next
 		return []Event{e}
 	}

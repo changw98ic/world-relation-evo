@@ -117,6 +117,9 @@ type ActiveRevolt struct {
 	RebelCohortID  string `json:"rebel_cohort_id"`
 	SourceCohortID string `json:"source_cohort_id"`
 	StartedTick    int64  `json:"started_tick"`
+	StartedEventID int64  `json:"started_event_id,omitempty"`
+	AmnestyEventID int64  `json:"amnesty_event_id,omitempty"`
+	AmnestyRootID  int64  `json:"amnesty_root_event_id,omitempty"`
 	PeakPop        int    `json:"peak_pop"`
 	Status         string `json:"status"` // "active", "suppressed", "amnestied"
 	ResolvedTick   int64  `json:"resolved_tick,omitempty"`
@@ -378,15 +381,11 @@ func (w *World) applyJusticeActionTx(tx *WorldTx, jr *JusticeRevoltState, a *Act
 		if localCorr < spec.CorruptionFramingThreshold && !bribeShielded && a.IllicitGain <= 0 {
 			return fail("local corruption is too low for scapegoat framing")
 		}
-		if a.Energy < 4 {
-			return fail("insufficient energy to conduct court framing")
-		}
-		tx.setEnergy(a, a.Energy-4, x.Kind)
 
 		observers := append([]*Actor{b}, w.awakeSamePlaceObservers(*a, a.ID, b.ID)...)
 		b.Task = nil
 		tx.MoveActor(b, b.Location, b.VenueID, "")
-		b.JailedUntil = w.Tick + spec.TrialSentenceTicks
+		tx.setSentence(b, w.Tick+spec.TrialSentenceTicks)
 		tx.MutateTrust(b, a.ID, -5)
 
 		w.addDistrictCorruption(a.Location, 4)
@@ -438,9 +437,6 @@ func (w *World) applyJusticeActionTx(tx *WorldTx, jr *JusticeRevoltState, a *Act
 		}
 		if a.IllicitGain > 0 {
 			return fail("corrupt official cannot adjudicate appeal")
-		}
-		if a.Energy < 4 {
-			return fail("insufficient energy to file appeal")
 		}
 		if x.TargetID == "" && x.BasisEventID == 0 {
 			return fail("appeal must specify a known wrongful-conviction target or basis event")
@@ -496,7 +492,6 @@ func (w *World) applyJusticeActionTx(tx *WorldTx, jr *JusticeRevoltState, a *Act
 		if cc.IsCohort && !w.courtPartiesPresent(*cc) {
 			return fail("court parties must be present in the case district for release and enforcement")
 		}
-		tx.setEnergy(a, a.Energy-4, x.Kind)
 		if x.TargetID == "" {
 			x.TargetID = cc.SuspectID
 		}
@@ -515,27 +510,29 @@ func (w *World) applyJusticeActionTx(tx *WorldTx, jr *JusticeRevoltState, a *Act
 
 		if !cc.IsCohort {
 			if victim := w.actor(cc.SuspectID); victim != nil && !victim.Dead {
-				if victim.JailedUntil > w.Tick {
-					victim.JailedUntil = 0
+				tx.trackStoredActor(victim.ID)
+				if victim.JailedUntil > 0 {
+					tx.setSentence(victim, 0)
 					released = 1
 				}
-				reliefCoins = w.debitTreasury(spec.AppealCompensationCoins, "relief")
+				reliefCoins = tx.debitTreasury(spec.AppealCompensationCoins, "relief")
 				tx.moveCurrency(victim, "coins", reliefCoins, "treasury", x.Kind)
 				tx.MutateTrust(victim, a.ID, 4)
 				observers = append(observers, victim)
 			}
 			if mag := w.actor(cc.MagistrateID); mag != nil && !mag.Dead && mag.ID != a.ID {
+				tx.trackStoredActor(mag.ID)
 				if mag.IllicitGain > 0 && mag.Money > 0 {
 					seize := minInt(mag.IllicitGain, mag.Money)
 					tx.moveCurrency(mag, "coins", -int64(seize), "treasury", x.Kind)
 					mag.IllicitGain -= seize
 					confiscatedCoins = int64(seize)
-					w.creditTreasury(confiscatedCoins, "confiscated")
+					tx.creditTreasury(confiscatedCoins, "confiscated")
 				}
 				if mag.JailedUntil <= w.Tick {
 					mag.Task = nil
 					tx.MoveActor(mag, mag.Location, mag.VenueID, "")
-					mag.JailedUntil = w.Tick + spec.TrialSentenceTicks
+					tx.setSentence(mag, w.Tick+spec.TrialSentenceTicks)
 					jailedFramer = 1
 				}
 				observers = append(observers, mag)
@@ -545,19 +542,19 @@ func (w *World) applyJusticeActionTx(tx *WorldTx, jr *JusticeRevoltState, a *Act
 				if cc.JailedCount > 0 && victimCohort.Jailed > 0 {
 					released = w.releaseCohortJailed(victimCohort, cc.JailedCount)
 				}
-				reliefCoins = w.debitTreasury(int64(maxInt(1, released))*3, "relief")
-				victimCohort.MoneyPool += reliefCoins
+				reliefCoins = tx.debitTreasury(int64(maxInt(1, released))*3, "relief")
+				w.addCohortCurrency(victimCohort, "coins", reliefCoins)
 				tx.recordTransfer("transfer_currency", "treasury", victimCohort.ID, "coins", -reliefCoins, x.Kind)
 			}
 			if magCohort := w.findCohortByID(cc.MagistrateID); magCohort != nil && magCohort.EffectivePopulation() >= 1 {
 				if magCohort.IllicitWealth > 0 && magCohort.MoneyPool > 0 {
 					seize := minInt64(magCohort.MoneyPool, minInt64(magCohort.IllicitWealth, int64(maxInt(1, released))*4))
 					if seize > 0 {
-						magCohort.MoneyPool -= seize
+						w.addCohortCurrency(magCohort, "coins", -(seize))
 						tx.recordTransfer("transfer_currency", magCohort.ID, "treasury", "coins", -seize, x.Kind)
 						magCohort.IllicitWealth -= seize
 						confiscatedCoins = seize
-						w.creditTreasury(seize, "confiscated")
+						tx.creditTreasury(seize, "confiscated")
 					}
 				}
 				_, _, jailedFramer = w.applyCohortCasualtiesWithCause(magCohort, 0, 0, minInt(4, maxInt(1, released/2)), "combat")
@@ -956,50 +953,24 @@ func (w *World) stepMacroAppeals(jr *JusticeRevoltState, spec JusticeRevoltSpec)
 		var reliefCoins int64
 		var confiscatedCoins int64
 
-		if !cc.IsCohort {
-			if victim := w.actor(cc.SuspectID); victim != nil && !victim.Dead {
-				if victim.JailedUntil > w.Tick {
-					victim.JailedUntil = 0
-					released = 1
-				}
-				reliefCoins = w.debitTreasury(spec.AppealCompensationCoins, "relief")
-				w.adjustActorCurrency(victim, "coins", reliefCoins, false)
+		if victimCohort := w.findCohortByID(cc.SuspectID); victimCohort != nil && victimCohort.Population > 0 {
+			if cc.JailedCount > 0 && victimCohort.Jailed > 0 {
+				released = w.releaseCohortJailed(victimCohort, cc.JailedCount)
 			}
-			if mag := w.actor(cc.MagistrateID); mag != nil && !mag.Dead {
-				if mag.IllicitGain > 0 && mag.Money > 0 {
-					seize := minInt(mag.IllicitGain, mag.Money)
-					w.adjustActorCurrency(mag, "coins", -int64(seize), false)
-					mag.IllicitGain -= seize
-					confiscatedCoins = int64(seize)
-					w.creditTreasury(confiscatedCoins, "confiscated")
-				}
-				if mag.JailedUntil <= w.Tick {
-					mag.Task = nil
-					mag.InsideHouse = ""
-					mag.JailedUntil = w.Tick + spec.TrialSentenceTicks
-					jailedFramer = 1
+			reliefCoins = w.debitTreasury(int64(maxInt(1, released))*3, "relief")
+			w.addCohortCurrency(victimCohort, "coins", reliefCoins)
+		}
+		if magCohort := w.findCohortByID(cc.MagistrateID); magCohort != nil && magCohort.EffectivePopulation() >= 1 {
+			if magCohort.IllicitWealth > 0 && magCohort.MoneyPool > 0 {
+				seize := minInt64(magCohort.MoneyPool, minInt64(magCohort.IllicitWealth, int64(maxInt(1, released))*4))
+				if seize > 0 {
+					w.addCohortCurrency(magCohort, "coins", -seize)
+					magCohort.IllicitWealth -= seize
+					confiscatedCoins = seize
+					w.creditTreasury(seize, "confiscated")
 				}
 			}
-		} else {
-			if victimCohort := w.findCohortByID(cc.SuspectID); victimCohort != nil && victimCohort.Population > 0 {
-				if cc.JailedCount > 0 && victimCohort.Jailed > 0 {
-					released = w.releaseCohortJailed(victimCohort, cc.JailedCount)
-				}
-				reliefCoins = w.debitTreasury(int64(maxInt(1, released))*3, "relief")
-				victimCohort.MoneyPool += reliefCoins
-			}
-			if magCohort := w.findCohortByID(cc.MagistrateID); magCohort != nil && magCohort.EffectivePopulation() >= 1 {
-				if magCohort.IllicitWealth > 0 && magCohort.MoneyPool > 0 {
-					seize := minInt64(magCohort.MoneyPool, minInt64(magCohort.IllicitWealth, int64(maxInt(1, released))*4))
-					if seize > 0 {
-						magCohort.MoneyPool -= seize
-						magCohort.IllicitWealth -= seize
-						confiscatedCoins = seize
-						w.creditTreasury(seize, "confiscated")
-					}
-				}
-				_, _, jailedFramer = w.applyCohortCasualtiesWithCause(magCohort, 0, 0, minInt(4, maxInt(1, released/2)), "combat")
-			}
+			_, _, jailedFramer = w.applyCohortCasualtiesWithCause(magCohort, 0, 0, minInt(4, maxInt(1, released/2)), "combat")
 		}
 
 		w.addDistrictCorruption(cc.District, -8)
@@ -1222,14 +1193,8 @@ func (w *World) triggerGranaryRiot(jr *JusticeRevoltState, spec JusticeRevoltSpe
 			want := maxInt64(4, minInt64(int64(hungry.Population), surplus/3))
 			movedFood = minInt64(want, donor.ItemPool[foodItem])
 			if movedFood > 0 {
-				donor.ItemPool[foodItem] -= movedFood
-				if donor.ItemPool[foodItem] <= 0 {
-					delete(donor.ItemPool, foodItem)
-				}
-				if hungry.ItemPool == nil {
-					hungry.ItemPool = map[string]int64{}
-				}
-				hungry.ItemPool[foodItem] += movedFood
+				w.adjustCohortItem(donor, foodItem, -movedFood, false)
+				w.adjustCohortItem(hungry, foodItem, movedFood, false)
 				w.relieveCohortHunger(hungry, 1)
 			}
 		}
@@ -1335,7 +1300,7 @@ func (w *World) triggerPopularUprising(jr *JusticeRevoltState, spec JusticeRevol
 	if coinShare > src.MoneyPool {
 		coinShare = src.MoneyPool
 	}
-	src.MoneyPool -= coinShare
+	w.addCohortCurrency(src, "coins", -(coinShare))
 
 	rebelItems := map[string]int64{}
 	for itemID, qty := range src.ItemPool {
@@ -1344,10 +1309,7 @@ func (w *World) triggerPopularUprising(jr *JusticeRevoltState, spec JusticeRevol
 		}
 		share := (qty * int64(moved)) / int64(srcPopBefore)
 		if share > 0 {
-			src.ItemPool[itemID] -= share
-			if src.ItemPool[itemID] <= 0 {
-				delete(src.ItemPool, itemID)
-			}
+			w.adjustCohortItem(src, itemID, -(share), false)
 			rebelItems[itemID] = share
 		}
 	}
@@ -1383,6 +1345,7 @@ func (w *World) triggerPopularUprising(jr *JusticeRevoltState, spec JusticeRevol
 		RebelCohortID:  rebelCohortID,
 		SourceCohortID: src.ID,
 		StartedTick:    w.Tick,
+		StartedEventID: w.NextID,
 		PeakPop:        moved,
 		Status:         "active",
 	})
@@ -1403,6 +1366,7 @@ func (w *World) triggerPopularUprising(jr *JusticeRevoltState, spec JusticeRevol
 			"converted_adults":  moved,
 			"coins_transferred": coinShare,
 			"grievance":         grievance,
+			"root_event_id":     w.NextID,
 		},
 	}
 	w.NextID++
@@ -1465,7 +1429,7 @@ func (w *World) stepPacificationAndAmnesty(jr *JusticeRevoltState, spec JusticeR
 		lawW, lawD, _ := w.applyCohortCasualtiesWithCause(garrison, maxInt(1, rebForce/8), rebForce/36, 0, "combat")
 
 		bounty := w.debitTreasury(int64(maxInt(1, rebJ+rebD))*4, "bounty")
-		garrison.MoneyPool += bounty
+		w.addCohortCurrency(garrison, "coins", bounty)
 
 		if reb.EffectivePopulation() < 2 {
 			r.Status = "suppressed"
@@ -1490,6 +1454,8 @@ func (w *World) stepPacificationAndAmnesty(jr *JusticeRevoltState, spec JusticeR
 				"jailed":           rebJ,
 				"bounty_coins":     bounty,
 				"remaining_rebels": reb.EffectivePopulation(),
+				"cause_event_id":   r.StartedEventID,
+				"root_event_id":    r.StartedEventID,
 			},
 		}
 		w.NextID++
@@ -1499,9 +1465,11 @@ func (w *World) stepPacificationAndAmnesty(jr *JusticeRevoltState, spec JusticeR
 	// 2. Sovereign Amnesty & Tax-Relief Decree when instability or grievance peaks
 	if w.Tick-jr.LastAmnestyTick >= spec.AmnestyCooldownTicks {
 		shouldAmnesty := false
+		var revoltCause int64
 		for _, r := range jr.ActiveRevolts {
 			if r.Status == "active" || (r.Status == "suppressed" && w.Tick-r.ResolvedTick < spec.AmnestyCooldownTicks) {
 				shouldAmnesty = true
+				revoltCause = r.StartedEventID
 				break
 			}
 		}
@@ -1526,7 +1494,7 @@ func (w *World) stepPacificationAndAmnesty(jr *JusticeRevoltState, spec JusticeR
 		}
 
 		if shouldAmnesty {
-			events = append(events, w.executeDynasticAmnesty(jr, spec)...)
+			events = append(events, w.executeDynasticAmnesty(jr, spec, revoltCause)...)
 		}
 	}
 
@@ -1544,7 +1512,7 @@ func (w *World) stepPacificationAndAmnesty(jr *JusticeRevoltState, spec JusticeR
 	return events
 }
 
-func (w *World) executeDynasticAmnesty(jr *JusticeRevoltState, spec JusticeRevoltSpec) []Event {
+func (w *World) executeDynasticAmnesty(jr *JusticeRevoltState, spec JusticeRevoltSpec, cause int64) []Event {
 	jr.LastAmnestyTick = w.Tick
 	var events []Event
 
@@ -1582,31 +1550,55 @@ func (w *World) executeDynasticAmnesty(jr *JusticeRevoltState, spec JusticeRevol
 				break
 			}
 		}
+		var released int
 		if !isOutlaw {
-			totalReleased += w.releaseCohortJailed(c, c.Jailed)
+			released = w.releaseCohortJailed(c, c.Jailed)
 		} else if isRebel {
-			totalReleased += w.releaseCohortJailed(c, maxInt(1, c.Jailed/2))
+			anonymous := w.anonymousCohort(*c)
+			released = w.releaseCohortJailed(c, maxInt(1, anonymous.Jailed/2))
 		}
+		totalReleased += released
+		jr.settleCohortRelease(c.ID, released, w.Tick, "dynastic_amnesty")
 	}
 
-	// Pardon wrongfully convicted or non-outlaw jailed focal actors
-	for i := range w.Actors {
-		a := &w.Actors[i]
+	pardoned := map[string]bool{}
+	pardon := func(a *Actor) {
 		if a.Dead || a.JailedUntil <= w.Tick {
-			continue
+			return
 		}
 		aTags := a.IdentityTags()
 		if !ActorHasTag(aTags, spec.OutlawTag) && !w.Catalog.IsOutlawTags(aTags) {
-			a.JailedUntil = 0
+			(*WorldTx)(nil).setSentence(a, 0)
+			pardoned[a.ID] = true
 			totalReleased++
 		}
 	}
-	// Mark open wrongful court cases whose victims were pardoned as overturned
+	for i := range w.Actors {
+		pardon(&w.Actors[i])
+	}
+	for i := range w.Cohorts {
+		c := &w.Cohorts[i]
+		if c.Jailed > 0 && len(c.Members) > 0 {
+			before := append([]Actor(nil), c.Members...)
+			for j := range c.Members {
+				pardon(&c.Members[j])
+			}
+			w.reconcileCohortMemberChanges(c, before)
+		}
+	}
 	for i := range jr.CourtCases {
-		if jr.CourtCases[i].Status == "convicted" && jr.CourtCases[i].Wrongful {
-			jr.CourtCases[i].Status = "overturned"
-			jr.CourtCases[i].AppealByID = "dynastic_amnesty"
-			jr.CourtCases[i].ResolvedTick = w.Tick
+		cc := &jr.CourtCases[i]
+		if !cc.IsCohort && pardoned[cc.SuspectID] {
+			switch cc.Status {
+			case "convicted", "upheld":
+				cc.Status, cc.ResolvedTick = "pardoned", w.Tick
+				if cc.Wrongful {
+					cc.Status = "overturned"
+				}
+				cc.AppealByID = "dynastic_amnesty"
+			case "arrested":
+				cc.Status, cc.ResolvedTick = "released", w.Tick
+			}
 		}
 	}
 
@@ -1629,13 +1621,17 @@ func (w *World) executeDynasticAmnesty(jr *JusticeRevoltState, spec JusticeRevol
 			if perCohort > 0 {
 				for _, c := range needy {
 					paid := w.debitTreasury(perCohort, "relief")
-					c.MoneyPool += paid
+					w.addCohortCurrency(c, "coins", paid)
 					totalReliefPaid += paid
 				}
 			}
 		}
 	}
 
+	root := cause
+	if root == 0 {
+		root = w.NextID
+	}
 	amnestyEv := Event{
 		ID:      w.NextID,
 		Tick:    w.Tick,
@@ -1647,6 +1643,8 @@ func (w *World) executeDynasticAmnesty(jr *JusticeRevoltState, spec JusticeRevol
 			"released":           totalReleased,
 			"relief_coins":       totalReliefPaid,
 			"districts_relieved": relievedCount,
+			"cause_event_id":     cause,
+			"root_event_id":      root,
 		},
 	}
 	w.NextID++
@@ -1660,6 +1658,7 @@ func (w *World) executeDynasticAmnesty(jr *JusticeRevoltState, spec JusticeRevol
 		}
 		r.Status = "amnestied"
 		r.ResolvedTick = w.Tick
+		r.AmnestyEventID, r.AmnestyRootID = amnestyEv.ID, root
 		events = append(events, w.reintegrateRebels(jr, spec, r)...)
 	}
 
@@ -1749,13 +1748,10 @@ func (w *World) reintegrateRebels(jr *JusticeRevoltState, spec JusticeRevoltSpec
 		coinShare = reb.MoneyPool
 	}
 	if coinShare > 0 {
-		reb.MoneyPool -= coinShare
-		dst.MoneyPool += coinShare
+		w.addCohortCurrency(reb, "coins", -(coinShare))
+		w.addCohortCurrency(dst, "coins", coinShare)
 	}
 
-	if dst.ItemPool == nil && len(reb.ItemPool) > 0 {
-		dst.ItemPool = map[string]int64{}
-	}
 	for itemID, qty := range reb.ItemPool {
 		if qty <= 0 {
 			continue
@@ -1765,11 +1761,8 @@ func (w *World) reintegrateRebels(jr *JusticeRevoltState, spec JusticeRevoltSpec
 			share = (qty * int64(moved)) / int64(popBefore)
 		}
 		if share > 0 {
-			reb.ItemPool[itemID] -= share
-			if reb.ItemPool[itemID] <= 0 {
-				delete(reb.ItemPool, itemID)
-			}
-			dst.ItemPool[itemID] += share
+			w.adjustCohortItem(reb, itemID, -(share), false)
+			w.adjustCohortItem(dst, itemID, share, false)
 		}
 	}
 
@@ -1788,6 +1781,8 @@ func (w *World) reintegrateRebels(jr *JusticeRevoltState, spec JusticeRevoltSpec
 			"target_cohort":       dst.ID,
 			"reintegrated_adults": moved,
 			"coins_transferred":   coinShare,
+			"cause_event_id":      r.AmnestyEventID,
+			"root_event_id":       r.AmnestyRootID,
 		},
 	}
 	w.NextID++
@@ -1867,7 +1862,7 @@ func (w *World) openPersonalCase(tx *WorldTx, a, suspect *Actor, x Action) []Eve
 	if !institutions.EnforcementEnabled() && !institutions.OversightEnabled() {
 		return fail("courts are disabled in this world")
 	}
-	if suspect == nil || suspect.Dead || a.IllicitGain > 0 || a.Energy < 4 {
+	if suspect == nil || suspect.Dead || a.IllicitGain > 0 {
 		return fail("case requires a living suspect and an available officer")
 	}
 	m, ok := w.caseEvidence(*a, suspect.ID, x.BasisEventID)
@@ -1889,7 +1884,6 @@ func (w *World) openPersonalCase(tx *WorldTx, a, suspect *Actor, x Action) []Eve
 	}
 	jr := w.ensureJusticeRevolt()
 	jr.ensureInitialized()
-	tx.setEnergy(a, a.Energy-4, x.Kind)
 	x.BasisEventID = m.EventID
 	cc := CourtCase{ID: jr.NextCaseID, Tick: w.Tick, District: district, Kind: "criminal_trial",
 		MagistrateID: a.ID, SuspectID: suspect.ID, Status: "wanted", BasisEventID: m.EventID, WarrantEventID: w.NextID,
@@ -1925,7 +1919,7 @@ func (w *World) tryPersonalCase(tx *WorldTx, a, suspect *Actor, x Action) []Even
 		x.Kind == "hold_trial" && !institutions.EnforcementEnabled() {
 		return fail("the required court institution is disabled in this world")
 	}
-	if suspect == nil || suspect.ID == a.ID || suspect.Dead || !SamePlace(*a, *suspect) || a.IllicitGain > 0 || a.Energy < 6 {
+	if suspect == nil || suspect.ID == a.ID || suspect.Dead || !SamePlace(*a, *suspect) || a.IllicitGain > 0 {
 		return fail("hearing requires a nearby suspect and an available oversight officer")
 	}
 	cc := w.personalCase(a.Location, suspect.ID, "arrested")
@@ -1937,14 +1931,13 @@ func (w *World) tryPersonalCase(tx *WorldTx, a, suspect *Actor, x Action) []Even
 			return fail("cited evidence does not belong to this case")
 		}
 	}
-	tx.setEnergy(a, a.Energy-6, x.Kind)
 	seized := minInt(suspect.Money, minInt(suspect.IllicitGain, cc.Proceeds))
 	tx.moveCurrency(suspect, "coins", -int64(seized), "treasury", x.Kind)
 	suspect.IllicitGain -= seized
-	w.creditTreasury(int64(seized), "confiscated")
+	tx.creditTreasury(int64(seized), "confiscated")
 	w.addDistrictCorruption(a.Location, -8)
 	spec := w.effectiveJusticeSpec(w.JusticeRevolt)
-	suspect.JailedUntil = w.Tick + spec.TrialSentenceTicks
+	tx.setSentence(suspect, w.Tick+spec.TrialSentenceTicks)
 	cc.Status, cc.ResolvedTick, cc.JailedUntilTick = "convicted", w.Tick, suspect.JailedUntil
 	var revoked []string
 	for _, faction := range w.Factions {
@@ -2003,12 +1996,12 @@ func (w *World) mayUseSecretEvidence(a Actor, m Memory) bool {
 	return true
 }
 
-func (w *World) settleCohortRelease(cohortID string, count int) {
-	if w.JusticeRevolt == nil {
+func (jr *JusticeRevoltState) settleCohortRelease(cohortID string, count int, tick int64, amnesty string) {
+	if jr == nil {
 		return
 	}
-	for i := range w.JusticeRevolt.CourtCases {
-		cc := &w.JusticeRevolt.CourtCases[i]
+	for i := range jr.CourtCases {
+		cc := &jr.CourtCases[i]
 		if count == 0 {
 			break
 		}
@@ -2017,7 +2010,13 @@ func (w *World) settleCohortRelease(cohortID string, count int) {
 			cc.JailedCount -= released
 			count -= released
 			if cc.JailedCount == 0 {
-				cc.Status, cc.ResolvedTick = "served", w.Tick
+				cc.Status, cc.ResolvedTick = "served", tick
+				if amnesty != "" {
+					cc.Status, cc.AppealByID = "pardoned", amnesty
+					if cc.Wrongful {
+						cc.Status = "overturned"
+					}
+				}
 			}
 		}
 	}

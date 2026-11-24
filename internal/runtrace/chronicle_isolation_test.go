@@ -147,3 +147,20 @@ func TestP6ChronicleIsolationDisguiseUnverifiedClaimsAndReadOnlySnapshot(t *test
 		t.Fatalf("Analyze silently ignored unknown unprefixed entry kind; expected error")
 	}
 }
+
+func TestChroniclePreservesCausalIDsAndRejectsFractionalIDs(t *testing.T) {
+	var event sim.Event
+	if err := json.Unmarshal([]byte(`{"id":9007199254740994,"payload":{"root_event_id":9007199254740993}}`), &event); err != nil {
+		t.Fatal(err)
+	}
+	if root := eventRootID(event); root != 9007199254740993 {
+		t.Fatalf("root event ID changed: %d", root)
+	}
+	if err := json.Unmarshal([]byte(`{"id":2,"payload":{"root_event_id":1.9}}`), &event); err == nil {
+		t.Fatal("accepted a fractional event ID")
+	}
+	relay := sim.Event{Kind: "speech", Payload: map[string]any{"fact_event_id": int64(0), "witness_id": "original_speaker"}}
+	if !isUnverifiedNarrativeEvent(relay) {
+		t.Fatal("knowing the source of a relay does not verify its claim")
+	}
+}

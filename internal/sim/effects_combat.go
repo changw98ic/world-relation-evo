@@ -643,7 +643,7 @@ func (w *World) stepActiveEffects() []Event {
 				continue
 			}
 			if eff.SustainEnergyPerTick > 0 {
-				sustainer.Energy -= eff.SustainEnergyPerTick
+				setActorEnergy(sustainer, sustainer.Energy-eff.SustainEnergyPerTick)
 			}
 			if len(eff.SustainSlotPerTick) > 0 {
 				for slot, cost := range eff.SustainSlotPerTick {
@@ -694,7 +694,8 @@ func (w *World) addActorStateSlot(a *Actor, slotID string, delta int) {
 		return
 	}
 	spec, hasSpec := w.Catalog.StateSlots[slotID]
-	next := clampSlotValue(a.StateSlots[slotID]+delta, spec, hasSpec)
+	value, _ := w.Catalog.StateSlotValue(*a, slotID)
+	next := clampSlotValue(value+delta, spec, hasSpec)
 	setActorSlotValue(a, slotID, next)
 }
 
@@ -703,7 +704,8 @@ func (w *World) interruptTaskOnDamage(tx *WorldTx, b *Actor, cause string, sourc
 		return nil
 	}
 	if b.Task.Dormant {
-		act := b.Task.Action
+		task := *b.Task
+		act := task.Action
 		b.Task = nil
 		data := map[string]any{
 			"text":        fmt.Sprintf("%s's dormant %s was interrupted by %s", b.Name, act.Kind, cause),
@@ -712,9 +714,11 @@ func (w *World) interruptTaskOnDamage(tx *WorldTx, b *Actor, cause string, sourc
 		}
 		if len(source) > 0 {
 			data["cause_event_id"] = source[0].ID
-			data["root_event_id"] = payloadInt64(source[0].Payload, "root_event_id")
+			data["root_event_id"] = source[0].causalRoot()
 		}
-		return []Event{w.recordWithTx(tx, b, act, "dormant_interrupted", data)}
+		events := []Event{w.recordWithTx(tx, b, act, "dormant_interrupted", data)}
+		task.recordWork(events)
+		return events
 	}
 	if b.Task.Action.Kind == "sleep" {
 		b.Task = nil
@@ -723,7 +727,6 @@ func (w *World) interruptTaskOnDamage(tx *WorldTx, b *Actor, cause string, sourc
 }
 
 func (w *World) deductDeclarativeCosts(tx *WorldTx, a *Actor, spec ActionSpec, reason string) {
-	tx.setEnergy(a, a.Energy-spec.EnergyCost, reason)
 	costs := declarativeCurrencyCosts(spec)
 	for _, curID := range sortedProductionKeys(costs) {
 		amt := costs[curID]
@@ -732,7 +735,7 @@ func (w *World) deductDeclarativeCosts(tx *WorldTx, a *Actor, spec ActionSpec, r
 		}
 		if (curID == "" || curID == "coins") && len(w.Cohorts) > 0 {
 			tx.moveCurrency(a, curID, -amt, "treasury", reason)
-			w.creditTreasury(amt, "fee")
+			tx.creditTreasury(amt, "fee")
 		} else {
 			tx.MintOrBurnCurrency(a, curID, -amt, reason)
 		}
@@ -933,16 +936,40 @@ func CheckActionSpecPrerequisites(ctx ActionSpecContext, spec ActionSpec) string
 	if ok, reason := ActorMeetsDeclarativeCosts(a, spec); !ok {
 		return reason
 	}
-	if spec.TransitionID != "" {
-		trans, ok := ctx.Catalog.Transitions[spec.TransitionID]
-		if !ok {
-			return "unknown transition: " + spec.TransitionID
+	return declarativeTransitionBlockReason(a, ctx.Catalog, spec, true)
+}
+
+// Check the transition against the inventory and slots it will actually see.
+func declarativeTransitionBlockReason(a Actor, catalog Catalog, spec ActionSpec, deductCosts bool) string {
+	if spec.TransitionID == "" {
+		return ""
+	}
+	trans, ok := catalog.Transitions[spec.TransitionID]
+	if !ok {
+		return "unknown transition: " + spec.TransitionID
+	}
+	a.Items = cloneIntMap(a.Items)
+	if a.Items == nil {
+		a.Items = map[string]int{}
+	}
+	a.StateSlots = cloneIntMap(a.StateSlots)
+	if deductCosts {
+		for item, cost := range spec.ItemCosts {
+			a.Items[item] -= cost
 		}
-		if reason := transitionRequirementReasonForActor(a, trans); reason != "" {
-			return reason
+		for id, cost := range spec.SlotCosts {
+			slot, known := catalog.StateSlots[id]
+			setActorSlotValue(&a, id, clampSlotValue(a.StateSlots[id]-cost, slot, known))
 		}
 	}
-	return ""
+	for item, gain := range spec.ItemGains {
+		a.Items[item] += gain
+	}
+	for id, gain := range spec.SlotGains {
+		slot, known := catalog.StateSlots[id]
+		setActorSlotValue(&a, id, clampSlotValue(a.StateSlots[id]+gain, slot, known))
+	}
+	return transitionRequirementReasonForActor(a, trans)
 }
 
 // ActionSpecBlockReason returns a non-empty reason if actor `a` cannot execute `spec` in `w`.
@@ -996,16 +1023,15 @@ func (p Perception) ActionSpecBlockReason(spec ActionSpec) string {
 }
 
 func (w *World) applyDeclarativeAction(tx *WorldTx, a *Actor, x Action, spec ActionSpec) []Event {
-	emitFail := func(reason string) []Event {
-		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
-	}
-	if reason := w.ActionSpecBlockReason(*a, x, spec); reason != "" {
-		return emitFail(reason)
-	}
-
-	// Validate target before deducting costs.
-	if reason := w.declarativeTargetFailure(*a, &x, spec); reason != "" {
-		return emitFail(reason)
+	switch spec.TargetKind {
+	case "venue":
+		if x.Location == "" {
+			x.Location = a.VenueID
+		}
+	case "district":
+		if x.Location == "" {
+			x.Location = a.Location
+		}
 	}
 
 	w.deductDeclarativeCosts(tx, a, spec, x.Kind)
@@ -1044,8 +1070,9 @@ func (w *World) applyDeclarativeAction(tx *WorldTx, a *Actor, x Action, spec Act
 		PrepaidTreasury:   prepaidTreasury,
 		PrepaidItems:      prepaidItems,
 	}
+	tx.startTaskWork(a, &task, spec.EnergyCost)
 	if task.Remaining <= 0 {
-		return w.finishDeclarativeAction(tx, a, task, spec)
+		return w.finishDeclarativeAction(tx, a, task, spec, false)
 	}
 	a.Task = &task
 	kind := "task_started"
@@ -1060,14 +1087,25 @@ func (w *World) applyDeclarativeAction(tx *WorldTx, a *Actor, x Action, spec Act
 	})}
 }
 
-func (w *World) finishDeclarativeAction(tx *WorldTx, a *Actor, t Task, spec ActionSpec) []Event {
+func (w *World) finishDeclarativeAction(tx *WorldTx, a *Actor, t Task, spec ActionSpec, previouslyPaid bool) []Event {
 	x := t.Action
+	fail := func(reason string) []Event {
+		if previouslyPaid {
+			w.refundTaskPrepayments(tx, a, t)
+		}
+		return actionFail(tx, a, x, reason)
+	}
 	if blocked, reason := w.IsActionBlockedByWorldLaw(*a, x); blocked {
-		w.refundTaskPrepayments(tx, a, t)
-		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return fail(reason)
 	}
 	if reason := w.declarativeTargetFailure(*a, &x, spec); reason != "" {
-		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
+		return fail(reason)
+	}
+	if reason := declarativeTransitionBlockReason(*a, w.Catalog, spec, false); reason != "" {
+		return fail(reason)
+	}
+	if len(spec.WorldLawDelta) > 0 && !spec.AllowRewriteWorldLaw {
+		return fail("action is not authorized to rewrite fundamental world laws")
 	}
 	var events []Event
 
@@ -1245,12 +1283,11 @@ func (w *World) finishDeclarativeAction(tx *WorldTx, a *Actor, t Task, spec Acti
 			if targetVenue == "" {
 				targetVenue = a.VenueID
 			}
-			var hitCount, totalDmg int
-			var deathEvs []Event
-			for i := range w.Actors {
-				b := &w.Actors[i]
-				if b.Dead || b.ID == a.ID || b.VenueID != targetVenue {
-					continue
+			var totalDmg int
+			var hitActors []*Actor
+			hit := func(b *Actor) {
+				if b.Dead || b.ID == a.ID || b.InTransit() || b.VenueID != targetVenue {
+					return
 				}
 				dmg, _, _, broken := w.resolveMultiDimCombatHit(*a, b, atk, x)
 				events = append(events, broken...)
@@ -1259,23 +1296,37 @@ func (w *World) finishDeclarativeAction(tx *WorldTx, a *Actor, t Task, spec Acti
 						dmg = b.Health
 					}
 					tx.adjustHealth(b, -dmg, 0, x.Kind)
-					var interruptEvs []Event
-					if b.Health > 0 {
-						interruptEvs = w.interruptTaskOnDamage(tx, b, "combat")
-					}
-					hitCount++
+					hitActors = append(hitActors, b)
 					totalDmg += dmg
-					deathEvs = append(deathEvs, interruptEvs...)
-					deathEvs = append(deathEvs, w.markDeadIfZeroWithTx(tx, b, a, x, "combat")...)
 				}
 			}
-			events = append(events, tx.record(a, x, "action_resolved", map[string]any{
-				"text":        fmt.Sprintf("%s unleashed %s across %s (%d targets hit, %d total damage)", a.Name, spec.Name, targetVenue, hitCount, totalDmg),
+			for i := range w.Actors {
+				hit(&w.Actors[i])
+			}
+			for i := range w.Cohorts {
+				c := &w.Cohorts[i]
+				if len(c.Members) == 0 {
+					continue
+				}
+				tx.trackCohort(c)
+				for j := range c.Members {
+					hit(&c.Members[j])
+				}
+			}
+			strike := tx.record(a, x, "action_resolved", map[string]any{
+				"text":        fmt.Sprintf("%s unleashed %s across %s (%d targets hit, %d total damage)", a.Name, spec.Name, targetVenue, len(hitActors), totalDmg),
 				"action_spec": spec.ID,
-				"targets_hit": hitCount,
+				"targets_hit": len(hitActors),
 				"damage":      totalDmg,
-			}))
-			events = append(events, deathEvs...)
+			})
+			events = append(events, strike)
+			for _, b := range hitActors {
+				if b.Health > 0 {
+					events = append(events, w.interruptTaskOnDamage(tx, b, "combat", strike)...)
+				} else {
+					events = append(events, w.markDeadIfZeroWithTx(tx, b, a, x, "combat", strike)...)
+				}
+			}
 		} else if b := w.actor(x.TargetID); b != nil && !b.Dead {
 			dmg, absorbed, immune, broken := w.resolveMultiDimCombatHit(*a, b, atk, x)
 			events = append(events, broken...)
@@ -1283,10 +1334,6 @@ func (w *World) finishDeclarativeAction(tx *WorldTx, a *Actor, t Task, spec Acti
 				dmg = b.Health
 			}
 			tx.adjustHealth(b, -dmg, 0, x.Kind)
-			var interruptEvs []Event
-			if dmg > 0 && b.Health > 0 {
-				interruptEvs = w.interruptTaskOnDamage(tx, b, "combat")
-			}
 			tx.MutateTrust(b, a.ID, -2)
 			atkEv := tx.record(a, x, "attacked", map[string]any{
 				"text":           fmt.Sprintf("%s struck %s with %s (%d damage, %d absorbed, immune=%v)", a.Name, b.Name, spec.Name, dmg, absorbed, immune),
@@ -1296,8 +1343,7 @@ func (w *World) finishDeclarativeAction(tx *WorldTx, a *Actor, t Task, spec Acti
 				"immune_blocked": immune,
 			}, b)
 			events = append(events, atkEv)
-			events = append(events, interruptEvs...)
-			events = append(events, w.markDeadIfZeroWithTx(tx, b, a, x, "combat", atkEv)...)
+			events = append(events, w.finishMeleeHit(tx, a, b, x, dmg, "combat", atkEv)...)
 		}
 	}
 
@@ -1395,21 +1441,15 @@ func (w *World) applyEquip(tx *WorldTx, a *Actor, x Action) []Event {
 		return fail(reason)
 	}
 	spec := w.Catalog.Items[x.Item]
-	if a.Equipped == nil {
-		a.Equipped = map[string]string{}
-	}
 	prev := a.Equipped[spec.EquipSlot]
 	if prev == x.Item {
 		return fail(x.Item + " is already equipped in " + spec.EquipSlot)
-	}
-	if a.Items == nil {
-		a.Items = map[string]int{}
 	}
 	tx.moveItem(a, x.Item, -1, spec.EquipSlot, x.Kind)
 	if prev != "" {
 		tx.moveItem(a, prev, 1, spec.EquipSlot, x.Kind)
 	}
-	a.Equipped[spec.EquipSlot] = x.Item
+	tx.setEquipped(a, spec.EquipSlot, x.Item)
 	return []Event{tx.record(a, x, "item_equipped", map[string]any{
 		"text":          fmt.Sprintf("%s equipped %s into %s", a.Name, x.Item, spec.EquipSlot),
 		"item":          x.Item,
@@ -1430,13 +1470,7 @@ func (w *World) applyUnequip(tx *WorldTx, a *Actor, x Action) []Event {
 		return fail("no item equipped in slot")
 	}
 	itemID := a.Equipped[slot]
-	delete(a.Equipped, slot)
-	if len(a.Equipped) == 0 {
-		a.Equipped = nil
-	}
-	if a.Items == nil {
-		a.Items = map[string]int{}
-	}
+	tx.setEquipped(a, slot, "")
 	tx.moveItem(a, itemID, 1, slot, x.Kind)
 	return []Event{tx.record(a, x, "item_unequipped", map[string]any{
 		"text":       fmt.Sprintf("%s unequipped %s from %s", a.Name, itemID, slot),

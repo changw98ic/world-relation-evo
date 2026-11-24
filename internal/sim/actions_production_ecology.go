@@ -49,15 +49,20 @@ func handleCraftAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
 	if !ok {
 		return actionFail(tx, a, x, "unknown recipe: "+x.RecipeID)
 	}
-	if reason := recipeBlockReason(w.Catalog, w.Map, w.house(a.InsideHouse), *a, r, w.productionStartBlockReason(*a, r), w.availableDistrictResource(a.Location, r.ResourcePool)); reason != "" {
-		return actionFail(tx, a, x, reason)
+	var yield int
+	var funded int64
+	if r.Growth == nil {
+		whole, batch := w.previewNonBiologicalYield("actor", a.ID, a.Location, r)
+		yield, funded = int(whole), batch
+		if whole < 0 || int64(yield) != whole {
+			return actionFail(tx, a, x, "crafted output cannot fit in the actor's inventory")
+		}
 	}
 	fieldID, _ := w.fieldAvailable("actor", a.ID, a.Location, a.VenueID, r)
 	if r.ResourcePool != "" {
 		draw := int64(maxInt(1, r.ResourceDraw))
 		w.drawDistrictResource(a.Location, r.ResourcePool, draw)
 	}
-	tx.setEnergy(a, a.Energy-r.EnergyCost, x.Kind)
 	var prepaidCurrencies map[string]int64
 	prepaidTreasury := false
 	if r.MoneyCost > 0 {
@@ -65,7 +70,7 @@ func handleCraftAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
 		if len(w.Cohorts) > 0 {
 			prepaidTreasury = true
 			tx.moveCurrency(a, "coins", -int64(r.MoneyCost), "treasury", x.Kind)
-			w.creditTreasury(int64(r.MoneyCost), "fee")
+			tx.creditTreasury(int64(r.MoneyCost), "fee")
 		} else {
 			tx.MintOrBurnCurrency(a, "coins", -int64(r.MoneyCost), x.Kind)
 		}
@@ -89,11 +94,8 @@ func handleCraftAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
 		prepaidItems[r.BonusInput]++
 		tx.ProduceOrConsumeItem(a, r.BonusInput, -1, x.Kind)
 	}
-	yield := w.Catalog.RecipeYield(*a, r, bonus)
-	var funded int64
-	if r.Growth == nil {
-		whole, batch := w.previewNonBiologicalYield("actor", a.ID, a.Location, r)
-		yield, funded = SafeInt64ToInt(whole), batch
+	if r.Growth != nil {
+		yield = w.Catalog.RecipeYield(*a, r, bonus)
 	}
 	w.wearProductionTool(tx, "actor", a.ID, r, 1)
 	ticks := r.Ticks
@@ -109,13 +111,16 @@ func handleCraftAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
 		PrepaidTreasury:   prepaidTreasury,
 		PrepaidItems:      prepaidItems,
 	}
+	tx.startTaskWork(a, &task, r.EnergyCost)
 	w.advanceCraftingWork(a, &task)
 	if task.Remaining <= 0 {
+		task.PrepaidCurrencies, task.PrepaidItems = nil, nil
 		return w.finishTaskWithTx(tx, a, task)
 	}
 	a.Task = &task
+	expectedTicks, _ := r.WorkEstimate(w.FacilityProductionBonusPct(*a))
 	return []Event{tx.record(a, x, "task_started", map[string]any{
-		"text":            fmt.Sprintf("%s started %s (expected %d %s, %d ticks)", a.Name, r.ID, yield, r.OutputItem, ticks),
+		"text":            fmt.Sprintf("%s started %s (expected %d %s, %d ticks)", a.Name, r.ID, yield, r.OutputItem, expectedTicks),
 		"recipe_id":       r.ID,
 		"expected_yield":  yield,
 		"remaining_ticks": task.Remaining,
@@ -151,12 +156,12 @@ func handleMaintainInfraAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
 			return actionFail(tx, a, x, fmt.Sprintf("maintaining %s requires %d %s", spec.ID, inQty, inItem))
 		}
 	}
-	tx.setEnergy(a, a.Energy-spec.BuildEnergy, x.Kind)
 	for _, inItem := range sortedProductionKeys(spec.BuildInputs) {
 		inQty := spec.BuildInputs[inItem]
 		tx.ProduceOrConsumeItem(a, inItem, -inQty, x.Kind)
 	}
 	task := Task{Action: x, TotalTicks: 3, Remaining: 2, StartedTick: w.Tick}
+	tx.startTaskWork(a, &task, spec.BuildEnergy)
 	a.Task = &task
 	return []Event{tx.record(a, x, "task_started", map[string]any{
 		"text":            fmt.Sprintf("%s started reinforcing %s in %s (3 ticks)", a.Name, spec.Name, a.Location),
@@ -172,9 +177,6 @@ func handleHuntThreatAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
 	}
 	if a.InsideHouse != "" {
 		return actionFail(tx, a, x, "step outside before hunting wild threats")
-	}
-	if a.Energy < 10 {
-		return actionFail(tx, a, x, "insufficient energy to hunt threat")
 	}
 	if a.Health < 50 || w.Tick < a.RestUntil {
 		return actionFail(tx, a, x, "hunter is injured or recuperating")
@@ -198,7 +200,6 @@ func handleHuntThreatAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
 		return actionFail(tx, a, x, "no active threat above threshold in "+a.Location)
 	}
 	x.TargetID = chosenID
-	tx.setEnergy(a, a.Energy-10, x.Kind)
 	task := Task{Action: x, TotalTicks: 3, Remaining: 2, StartedTick: w.Tick}
 	a.Task = &task
 	return []Event{tx.record(a, x, "task_started", map[string]any{
@@ -244,7 +245,6 @@ func handlePerformRitualAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
 			return actionFail(tx, a, x, fmt.Sprintf("ritual %s requires %d %s", rit.ID, inQty, inItem))
 		}
 	}
-	tx.setEnergy(a, a.Energy-rit.EnergyCost, x.Kind)
 	if rit.MoneyCost > 0 {
 		if len(w.Cohorts) > 0 {
 			tx.moveCurrency(a, "coins", -int64(rit.MoneyCost), "treasury", x.Kind)
@@ -262,6 +262,7 @@ func handlePerformRitualAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
 		ticks = 1
 	}
 	task := Task{Action: x, TotalTicks: ticks, Remaining: ticks - 1, StartedTick: w.Tick}
+	tx.startTaskWork(a, &task, rit.EnergyCost)
 	if task.Remaining <= 0 {
 		return w.finishTaskWithTx(tx, a, task)
 	}

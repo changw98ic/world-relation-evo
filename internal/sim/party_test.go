@@ -8,6 +8,19 @@ import (
 	"testing"
 )
 
+func TestPartyPurposeRequiresARecognizedValueWhenProvided(t *testing.T) {
+	w := lawWorld()
+	w.Catalog.TagActions["person"] = append(w.Catalog.TagActions["person"], "form_party")
+	lawRejected(t, w.Apply("a", Action{Kind: "form_party", Item: "escrot"}))
+	if len(w.Parties) != 0 {
+		t.Fatal("unknown purpose created a party")
+	}
+	lawOK(t, w.Apply("a", Action{Kind: "form_party"}))
+	if len(w.Parties) != 1 || w.Parties[0].Purpose != "expedition" {
+		t.Fatalf("omitted purpose should create an expedition: %+v", w.Parties)
+	}
+}
+
 func TestPartyFormationLootSplitBetrayalAndReplay(t *testing.T) {
 	w := Village("party-test")
 	d0 := w.Map.Districts[0].ID

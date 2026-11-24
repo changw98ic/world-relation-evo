@@ -41,7 +41,8 @@ func TestBlueprintPreservesExplicitZeroAndFalse(t *testing.T) {
 			{"id": "pauper", "name": "Pauper", "role": "wanderer", "location": "d1", "money": 0, "age_years": 0}
 		],
 		"world_events": [
-			{"id": "manual_only_event", "name": "Manual Event", "category": "artifact_emergence", "prob_permille_per_day": 0, "duration_days": 3}
+			{"id": "manual_only_event", "name": "Manual Event", "category": "artifact_emergence", "prob_permille_per_day": 0, "duration_days": 0, "intensity": 0},
+			{"id": "event_with_defaults", "name": "Omitted Settings", "category": "artifact_emergence"}
 		]
 	}`
 	bp, err := DecodeBlueprint(strings.NewReader(raw))
@@ -80,6 +81,10 @@ func TestBlueprintPreservesExplicitZeroAndFalse(t *testing.T) {
 	if wp.Catalog.WorldEvents[0].ProbPermillePerDay != 0 {
 		t.Fatalf("expected explicit prob_permille_per_day=0 to be preserved, got %d", wp.Catalog.WorldEvents[0].ProbPermillePerDay)
 	}
+	explicit, omitted := wp.Catalog.WorldEvents[0], wp.Catalog.WorldEvents[1]
+	if explicit.DurationTicks != 0 || explicit.Intensity != 0 || omitted.DurationTicks != 5*sim.TicksPerDay || omitted.Intensity != 70 {
+		t.Fatalf("blueprint event times and intensities: %+v", wp.Catalog.WorldEvents)
+	}
 	// Genre-neutral ASCII defaults (no hardcoded Chinese nouns on English scifi blueprint).
 	if wp.Environment.CurrencyName != "coins" || wp.Environment.ActorNoun != "actor" || wp.Houses[0].Name != "Pauper Quarters" {
 		t.Fatalf("expected genre-neutral ASCII defaults, got currency=%q noun=%q house=%q",
@@ -111,7 +116,8 @@ func TestBlock4ZeroValueFidelityEffectiveSpecsEcologyAndAgeless(t *testing.T) {
 		t.Fatalf("SpotlightRumorSpec ExplicitZero overwritten: %+v", sr)
 	}
 
-	// 2. SchemaVersion >= 2 respects Ecology.Enabled=false and Lifecycle.Ageless=true.
+	// Ecology.Enabled=false and Lifecycle.Ageless=true are explicit configuration.
+	enabled := false
 	wp := &WorldPack{
 		SchemaVersion: 2,
 		ID:            "v2-zero-pack",
@@ -123,7 +129,7 @@ func TestBlock4ZeroValueFidelityEffectiveSpecsEcologyAndAgeless(t *testing.T) {
 		},
 		Map:     sim.WorldMap{Districts: []sim.District{{ID: "d1", Name: "D1"}}},
 		Actors:  []sim.Actor{{ID: "a1", Name: "A1", Location: "d1", Health: 100, Energy: 100}},
-		Ecology: &sim.EcologySpec{Enabled: false},
+		Ecology: &sim.EcologySpec{Enabled: &enabled},
 	}
 	w, err := wp.Instantiate("v2-test")
 	if err != nil {
@@ -134,6 +140,60 @@ func TestBlock4ZeroValueFidelityEffectiveSpecsEcologyAndAgeless(t *testing.T) {
 	}
 	if len(w.DistrictStates) != 0 {
 		t.Fatalf("expected v2 Ecology.Enabled=false to skip InitEcology, got %d DistrictStates", len(w.DistrictStates))
+	}
+}
+
+func TestWorldPackValidatesNamedFieldsAndPreservesDeclaredValues(t *testing.T) {
+	const base = `{"id":"config-test","map":{"districts":[{"id":"place"}]},"actors":[]`
+	for _, tc := range []struct{ settings, field string }{
+		{`,"governance":{"daily_poll_tax_permillle":0}`, "daily_poll_tax_permillle"},
+		{`,"market_credit":{"daily_loan_interest_permille":-1}`, "daily_loan_interest_permille"},
+		{`,"market_credit":{"max_tenant_share_permille":1001}`, "max_tenant_share_permille"},
+		{`,"catalog":{"world_events":[{"id":"instant","category":"terrain_shift","duration_ticks":-1}]}`, "duration_ticks"},
+	} {
+		if _, err := Decode(strings.NewReader(base + tc.settings + "}")); err == nil || !strings.Contains(err.Error(), tc.field) {
+			t.Errorf("expected error for %s, got %v", tc.settings, err)
+		}
+	}
+	for _, share := range []string{"980", "1000"} {
+		raw := base + `,"market_credit":{"max_tenant_share_permille":` + share + `},
+			"environment":{"forum_features":[],"enforcement_tags":[],"oversight_tags":[],"outlaw_tags":[]},
+			"catalog":{"world_events":[{"id":"instant","category":"terrain_shift","duration_ticks":0,"intensity":0},
+			{"id":"default","category":"terrain_shift"}]}}`
+		p, err := Decode(strings.NewReader(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		w, err := p.Instantiate("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot, err := json.Marshal(w)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w, err = sim.DecodeWorldSnapshot(snapshot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		env := w.Catalog.EffectiveEnvironment()
+		for _, tags := range [][]string{env.ForumFeatures, env.EnforcementTags, env.OversightTags, env.OutlawTags} {
+			if tags == nil || len(tags) != 0 {
+				t.Fatalf("expected explicit empty lists after snapshot, got %+v", env)
+			}
+		}
+		if got, want := w.MarketCredit.Spec.MaxTenantSharePermille, p.MarketCredit.MaxTenantSharePermille; got != want {
+			t.Fatalf("tenant share = %d, want %d", got, want)
+		}
+		w.TriggerWorldEvent("instant", "place")
+		w.TriggerWorldEvent("default", "place")
+		if len(w.ActiveWorldEvents) != 2 {
+			t.Fatalf("expected both configured events: %+v", w.ActiveWorldEvents)
+		}
+		instant, normal := w.ActiveWorldEvents[0], w.ActiveWorldEvents[1]
+		if instant.Intensity != 0 || instant.StartedTick != instant.ExpiresTick || normal.Intensity != 55 || normal.ExpiresTick-normal.StartedTick != 3*sim.TicksPerDay {
+			t.Fatalf("expected explicit zeros and omitted defaults: %+v", w.ActiveWorldEvents)
+		}
 	}
 }
 
@@ -212,5 +272,30 @@ func checkPartialNumericZeroSpecs(t *testing.T, w *sim.World) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s should override just one field. Got %v, want %v", test.zeroKey, got, want)
 		}
+	}
+}
+
+func TestWorldPackDistinguishesDisabledEcologyAndExplicitLifecycleZero(t *testing.T) {
+	const raw = `{"schema_version":2,"id":"zero-policies","catalog":{"calendar":{"seasons":[]},"lifecycle":{"annual_birth_permille":0,"max_expectancy":0}},"map":{"districts":[{"id":"a"},{"id":"b"}]},"actors":[],"ecology":{"enabled":false,"district_states":{"a":{"sanitation":0},"b":{"weather":"clear"}}}}`
+	p, err := Decode(strings.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := p.Instantiate("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(w.DistrictStates) > 0 || w.Catalog.Lifecycle.AnnualBirthPermille != 0 ||
+		w.Catalog.Lifecycle.MaxExpectancy != 0 || !w.Catalog.Lifecycle.Ageless ||
+		w.Catalog.Calendar.Seasons == nil || len(w.Catalog.Calendar.Seasons) != 0 {
+		t.Fatalf("instantiation changed explicit overrides: %+v", w.Catalog)
+	}
+	*p.Ecology.Enabled = true
+	w, err = p.Instantiate("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.DistrictStates["a"].Sanitation != 0 || w.DistrictStates["b"].Sanitation == 0 {
+		t.Fatalf("omitted sanitation and explicit zero were treated identically: %+v", w.DistrictStates)
 	}
 }

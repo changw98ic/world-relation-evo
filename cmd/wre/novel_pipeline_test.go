@@ -119,7 +119,6 @@ func TestEndToEndNovelOutlineCLISkillPipeline(t *testing.T) {
 	// 3. Stage 1 offline run using built-in BaseRulebook + lightweight overlay (2 days = 192 ticks).
 	runCLI(
 		"-offline-run", "-pack", packPath,
-		"-decider", "rulebook", "-rulebook", "builtin", "-rulebook-overlay", overlayPath,
 		"-seed", "42", "-steps", "192", "-pace", "0s", "-quiet",
 		"-out-state", s1State, "-out-events", s1Events,
 	)
@@ -166,8 +165,7 @@ func TestEndToEndNovelOutlineCLISkillPipeline(t *testing.T) {
 	// 5. Stage 2 offline resume from patched snapshot (2 more days = 192 ticks).
 	runCLI(
 		"-offline-run", "-state-in", s1Patched,
-		"-decider", "rulebook", "-rulebook", "builtin", "-rulebook-overlay", overlayPath,
-		"-seed", "43", "-steps", "192", "-pace", "0s", "-quiet",
+		"-steps", "192", "-pace", "0s", "-quiet",
 		"-out-state", s2State, "-out-events", s2Events,
 	)
 

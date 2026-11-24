@@ -1,9 +1,41 @@
 package sim
 
 import (
+	"math"
 	"reflect"
 	"testing"
 )
+
+func TestCraftOutputFitsInventoryOrReturnsPrepaidMaterials(t *testing.T) {
+	for _, full := range []bool{false, true} {
+		w := lawWorld()
+		actor := &w.Actors[0]
+		actor.Items["board"] = math.MaxInt - 1
+		if full {
+			actor.Items["board"]++
+		}
+		actor.Items["wood"] = 3
+		lawOK(t, w.Apply(actor.ID, Action{Kind: "craft", RecipeID: "board"}))
+		w.Tick++
+		w.Advance(actor.ID)
+		w.Tick++
+		events := w.Advance(actor.ID)
+		if full {
+			lawRejected(t, events)
+			if actor.Items["wood"] != 3 {
+				t.Fatal("failed craft did not refund the prepaid wood")
+			}
+		} else {
+			lawOK(t, events)
+			if len(events) == 0 || events[0].Kind != "crafted" || actor.Items["wood"] != 0 {
+				t.Fatalf("craft at the integer limit did not complete: %+v", events)
+			}
+		}
+		if actor.Items["board"] != math.MaxInt {
+			t.Fatalf("craft left an incorrect stock: %d", actor.Items["board"])
+		}
+	}
+}
 
 func TestWorldTxPrimitivesConservationAndDeathHook(t *testing.T) {
 	w := Village("p2-tx-primitives")
@@ -125,8 +157,8 @@ func TestAtomicityFixesClaimTurfAndMediateFeudAndDeclarativeSelfKill(t *testing.
 	}
 
 	// 4. PostTickPhaseNames exposes deterministic runtime pipeline.
-	if names := w.PostTickPhaseNames(); len(names) != 25 {
-		t.Fatalf("expected 25 explicit post-tick phases, got %d: %v", len(names), names)
+	if names := w.PostTickPhaseNames(); len(names) != 26 {
+		t.Fatalf("expected 26 explicit post-tick phases, got %d: %v", len(names), names)
 	}
 }
 
@@ -148,14 +180,20 @@ func TestActionExecutorRecordsTradeMutationsAndConservesLedger(t *testing.T) {
 	for _, m := range result.Mutations {
 		recorded[m.Primitive]++
 	}
-	for primitive, want := range map[string]int{"transfer_item": 1, "transfer_currency": 1, "mutate_trust": 2, "record_memory": 2} {
+	for primitive, want := range map[string]int{"transfer_item": 1, "transfer_currency": 1, "mutate_trust": 0, "record_memory": 2} {
 		if got := recorded[primitive]; got != want {
 			t.Errorf("%s recorded %d times, want %d: %+v", primitive, got, want, result.Mutations)
 		}
 	}
 	if buyer.Money != 0 || seller.Money != 7 || buyer.Items["wood"] != 3 || seller.Items["wood"] != 0 ||
-		seller.Trust[buyer.ID] != 1 || buyer.Trust[seller.ID] != 1 {
+		seller.Trust[buyer.ID] != 0 || buyer.Trust[seller.ID] != 0 {
 		t.Fatalf("unexpected trade balances or trust: seller=%+v buyer=%+v", seller, buyer)
+	}
+	for _, participant := range []*Actor{seller, buyer} {
+		receipt := participant.Memories[len(participant.Memories)-1].Trade
+		if receipt == nil || receipt.Price != 7 || receipt.Quantity != 3 || receipt.Item != "wood" {
+			t.Fatalf("%s is missing the actual trade terms: %+v", participant.ID, receipt)
+		}
 	}
 	if err := w.VerifyLedgerConservation(); err != nil {
 		t.Fatal(err)
@@ -197,7 +235,7 @@ func TestActionExecutorRecordsSubsystemMutations(t *testing.T) {
 			id := w.Continuity.Agreements[0].ID
 			lawOK(t, w.Apply("b", Action{Kind: "accept_agreement", TargetID: "a", AgreementID: id}))
 			return "a", Action{TargetID: "b", AgreementID: id}
-		}, []string{"transfer_currency", "transfer_item", "mutate_trust", "record_memory"}},
+		}, []string{"transfer_currency", "transfer_item", "record_memory"}},
 		{"gf_exchange", "gf_exchanged", func(_ *testing.T, w *World) (string, Action) {
 			w.Actors[0].Money, w.Actors[0].Health, w.Actors[0].Energy = 8, 90, 80
 			w.Actors[0].Items["wood"] = 2
@@ -395,5 +433,262 @@ func TestExportedSubsystemActionsMatchWorldApply(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+func TestWorldTxRollbackAtomicityAcrossAllPrimitives(t *testing.T) {
+	w := Village("tx-rollback-atomicity")
+	a := &w.Actors[0]
+	b := &w.Actors[1]
+	a.Money = 30
+	b.Money = 12
+	a.Currencies = map[string]int64{"spirit_stone": 5}
+	b.Currencies = nil
+	a.Items = map[string]int{"food": 4}
+	b.Items = nil
+	a.Trust = nil
+	b.Trust = nil
+	a.Energy = 60
+	a.Health = 90
+	b.Health = 80
+	a.Location = "square"
+	b.Location = "square"
+	w.Offers = []Offer{{ID: 1, Seller: b.ID, Buyer: a.ID, Item: "wood", Quantity: 1, Price: 2}}
+	w.InitLedgerAudit()
+
+	beforeA := CloneActor(*a)
+	beforeB := CloneActor(*b)
+	beforeOffers := append([]Offer(nil), w.Offers...)
+	beforeNextID := w.NextID
+	beforeAuditCoins := w.LedgerAudit.Currencies["coins"]
+	beforeAuditFood := w.LedgerAudit.Items["food"]
+	beforeDeaths := len(w.DeathsByCause)
+
+	customDomainCounter := 10
+
+	tx := w.BeginTx(a.ID, ActionIntent{Action: Action{Kind: "attack", TargetID: b.ID}})
+	if !tx.TransferCurrency(a, b, "coins", 10, "step1") {
+		t.Fatal("coin transfer failed")
+	}
+	if !tx.TransferCurrency(a, b, "spirit_stone", 5, "step2") {
+		t.Fatal("custom currency transfer failed")
+	}
+	if !tx.MintOrBurnCurrency(a, "coins", 7, "step3") {
+		t.Fatal("mint failed")
+	}
+	if !tx.TransferItem(a, b, "food", 4, "step4") {
+		t.Fatal("item transfer failed")
+	}
+	if !tx.ProduceOrConsumeItem(b, "food", -2, "step5") {
+		t.Fatal("item consume failed")
+	}
+	tx.MoveActor(a, "river", "", "")
+	tx.MutateTrust(b, a.ID, -5)
+	tx.RecordMemory(a, Memory{Kind: "temp_mem", Tick: w.Tick, EventID: 99, Source: a.ID, Text: "transient"})
+	customDomainCounter = 99
+	tx.OnRollback(func() { customDomainCounter = 10 })
+
+	// Even a lethal MutateVitals mid-transaction must revert completely on Rollback.
+	deathEvs := tx.MutateVitals(b, a, Action{Kind: "attack", TargetID: b.ID}, -MaxHealth, -15, "combat")
+	if !b.Dead || len(deathEvs) == 0 {
+		t.Fatalf("expected lethal MutateVitals before rollback, dead=%v evs=%d", b.Dead, len(deathEvs))
+	}
+
+	// Simulate mid-flight failure: rollback entire transaction.
+	if !tx.Rollback() {
+		t.Fatal("expected Rollback to return true")
+	}
+	if !tx.IsRolledBack() || tx.Rollback() {
+		t.Fatal("expected Rollback to be idempotent and report IsRolledBack=true")
+	}
+	if tx.TransferCurrency(a, b, "coins", 1, "post-rollback") {
+		t.Fatal("mutations after Rollback must be rejected")
+	}
+	if res := tx.Commit(); res.Succeeded {
+		t.Fatalf("Commit after Rollback must not succeed: %+v", res)
+	}
+
+	if customDomainCounter != 10 {
+		t.Fatalf("custom OnRollback hook did not restore state: got %d, want 10", customDomainCounter)
+	}
+	if !reflect.DeepEqual(*a, beforeA) {
+		t.Fatalf("actor A not restored after Rollback:\ngot:  %+v\nwant: %+v", *a, beforeA)
+	}
+	if !reflect.DeepEqual(*b, beforeB) {
+		t.Fatalf("actor B not restored after Rollback:\ngot:  %+v\nwant: %+v", *b, beforeB)
+	}
+	if !reflect.DeepEqual(w.Offers, beforeOffers) {
+		t.Fatalf("offers not restored: got %+v, want %+v", w.Offers, beforeOffers)
+	}
+	if w.NextID != beforeNextID {
+		t.Fatalf("NextID not restored: got %d, want %d", w.NextID, beforeNextID)
+	}
+	if len(w.DeathsByCause) != beforeDeaths {
+		t.Fatalf("DeathsByCause not restored: %+v", w.DeathsByCause)
+	}
+	if w.LedgerAudit.Currencies["coins"] != beforeAuditCoins {
+		t.Fatalf("LedgerAudit coins not restored: got %+v, want %+v", w.LedgerAudit.Currencies["coins"], beforeAuditCoins)
+	}
+	if w.LedgerAudit.Items["food"] != beforeAuditFood {
+		t.Fatalf("LedgerAudit food not restored: got %+v, want %+v", w.LedgerAudit.Items["food"], beforeAuditFood)
+	}
+	if err := w.VerifyLedgerConservation(); err != nil {
+		t.Fatalf("ledger conservation violated after Rollback: %v", err)
+	}
+}
+
+func TestWorldTxAutoRollbackOnActionFailed(t *testing.T) {
+	w := Village("tx-action-failed-rollback")
+	a := &w.Actors[0]
+	b := &w.Actors[1]
+	a.Money = 20
+	b.Money = 5
+	a.Items = map[string]int{"wood": 3}
+	b.Items = map[string]int{}
+	a.Energy = 50
+	a.Health = 80
+	a.Location = "square"
+	a.Trust = map[string]int{}
+	w.InitLedgerAudit()
+
+	beforeMoneyA, beforeMoneyB := a.Money, b.Money
+	beforeWoodA, beforeWoodB := a.Items["wood"], b.Items["wood"]
+	beforeEnergy, beforeHealth := a.Energy, a.Health
+	beforeLoc := a.Location
+	beforeMemCount := len(a.Memories)
+	domainFlag := false
+
+	tx := w.BeginTx(a.ID, ActionIntent{Action: Action{Kind: "offer", TargetID: b.ID}})
+	tx.TransferCurrency(a, b, "coins", 10, "partial")
+	tx.TransferItem(a, b, "wood", 2, "partial")
+	tx.setEnergy(a, 40, "partial")
+	tx.adjustHealth(a, -10, 0, "partial")
+	tx.MoveActor(a, "river", "", "")
+	tx.MutateTrust(a, b.ID, 5)
+	domainFlag = true
+	tx.OnRollback(func() { domainFlag = false })
+
+	// Handler aborts mid-way with action_failed.
+	res := tx.commitEvents(actionFail(tx, a, Action{Kind: "offer", TargetID: b.ID}, "mid-way failure"))
+	if res.Succeeded {
+		t.Fatalf("expected action_failed to report Succeeded=false: %+v", res)
+	}
+	if len(res.Events) != 1 || res.Events[0].Kind != "action_failed" {
+		t.Fatalf("expected single action_failed event, got %+v", res.Events)
+	}
+	if a.Money != beforeMoneyA || b.Money != beforeMoneyB {
+		t.Fatalf("coins leaked after action_failed: a=%d b=%d", a.Money, b.Money)
+	}
+	if a.Items["wood"] != beforeWoodA || b.Items["wood"] != beforeWoodB {
+		t.Fatalf("items leaked after action_failed: a=%d b=%d", a.Items["wood"], b.Items["wood"])
+	}
+	if a.Energy != beforeEnergy || a.Health != beforeHealth || a.Location != beforeLoc {
+		t.Fatalf("vitals/location leaked after action_failed: energy=%d health=%d loc=%s", a.Energy, a.Health, a.Location)
+	}
+	if a.Trust[b.ID] != 0 {
+		t.Fatalf("trust leaked after action_failed: %d", a.Trust[b.ID])
+	}
+	if domainFlag {
+		t.Fatal("OnRollback hook did not run on action_failed")
+	}
+	if len(a.Memories) != beforeMemCount+1 || a.Memories[len(a.Memories)-1].Kind != "action_failed" {
+		t.Fatalf("expected only action_failed memory to be recorded, got %+v", a.Memories)
+	}
+	if err := w.VerifyLedgerConservation(); err != nil {
+		t.Fatalf("ledger conservation violated after action_failed rollback: %v", err)
+	}
+}
+
+func TestCompoundActionValidatesCombinedItemCost(t *testing.T) {
+	w := lawWorld()
+	a := &w.Actors[0]
+	a.Items["wood"] = 1
+	w.Catalog.Transitions = map[string]TransitionSpec{"shift": {
+		ID: "shift", ItemCosts: map[string]int{"wood": 1}, BaseSuccessPermille: 1000,
+	}}
+	w.Catalog.ActionSpecs = map[string]ActionSpec{"compound": {
+		ID: "compound", GrantedByTags: []string{"person"},
+		ItemCosts: map[string]int{"wood": 1}, ItemGains: map[string]int{"food": 1}, TransitionID: "shift",
+	}}
+	action := Action{Kind: "compound"}
+	if w.CheckAction(a.ID, action).Allowed {
+		t.Fatal("the same item was counted twice toward the costs")
+	}
+	beforeFood := a.Items["food"]
+	lawRejected(t, w.Apply(a.ID, action))
+	if a.Items["wood"] != 1 || a.Items["food"] != beforeFood {
+		t.Fatalf("rejected action changed inventory: %v", a.Items)
+	}
+
+	a.Items["wood"]++
+	if !w.CheckAction(a.ID, action).Allowed {
+		t.Fatal("exact combined cost should qualify")
+	}
+	lawOK(t, w.Apply(a.ID, action))
+	if a.Items["wood"] != 0 || a.Items["food"] != beforeFood+1 {
+		t.Fatalf("valid compound action failed to settle: %v", a.Items)
+	}
+}
+
+func TestFailedTransactionPublishesOnlyFailure(t *testing.T) {
+	w := lawWorld()
+	a, b := &w.Actors[0], &w.Actors[1]
+	firstID := w.NextID
+	x := Action{Kind: "speak", TargetID: b.ID, Text: "draft"}
+	tx := w.BeginTx(a.ID, ActionIntent{Action: x})
+	draft := tx.record(a, x, "speech", map[string]any{"text": x.Text}, b)
+	evs := append([]Event{draft}, actionFail(tx, a, x, "rejected")...)
+	result := tx.commitEvents(evs)
+	if result.Succeeded || len(result.Events) != 1 || result.Events[0].ID != firstID ||
+		len(a.Memories) != 1 || a.Memories[0].Kind != "action_failed" || len(b.Memories) != 0 {
+		t.Fatalf("uncommitted event escaped: result=%+v memories=%+v", result, a.Memories)
+	}
+	if w.Continuity != nil && len(w.Continuity.DialogueByActor) != 0 {
+		t.Fatal("uncommitted speech remained in the dialogue")
+	}
+	events := w.Apply(a.ID, x)
+	if len(events) != 1 || events[0].ID != firstID+1 {
+		t.Fatalf("the failure reused an event ID: %+v", events)
+	}
+}
+
+func TestTransferCurrencyChecksReceivingBalance(t *testing.T) {
+	w := lawWorld()
+	a, b := &w.Actors[0], &w.Actors[1]
+	maximum := int(^uint(0) >> 1)
+	a.Money, b.Money = 2, maximum-1
+	tx := w.BeginTx(a.ID, ActionIntent{})
+	if !tx.TransferCurrency(a, b, "coins", 1, "test") || b.Money != maximum || a.Money != 1 {
+		t.Fatal("transfer to the maximum representable balance failed")
+	}
+	if tx.TransferCurrency(a, b, "coins", 1, "test") || b.Money != maximum || a.Money != 1 {
+		t.Fatal("overflowing transfer changed a balance")
+	}
+}
+
+func TestTreasuryKeepsPendingTaskRefundAvailable(t *testing.T) {
+	w := lawWorld()
+	a, b := &w.Actors[0], &w.Actors[1]
+	a.Money = 7
+	w.Cohorts = []PopulationCohort{{ID: "public", District: a.Location}}
+	w.PublicTreasury = 2
+	w.Catalog.ActionSpecs = map[string]ActionSpec{"prepare": {
+		ID: "prepare", GrantedByTags: []string{"person"}, TargetKind: "actor", Ticks: 2, MoneyCost: 7,
+	}}
+	w.InitLedgerAudit()
+	x := Action{Kind: "prepare", TargetID: b.ID}
+	lawOK(t, w.Apply(a.ID, x))
+	if paid := w.debitTreasury(9, "bounty"); paid != 2 {
+		t.Fatalf("spendable balance was %d, expected 2", paid)
+	} else {
+		b.Money += int(paid)
+	}
+	b.Location = "away"
+	lawRejected(t, w.Advance(a.ID))
+	if a.Money != 7 || w.PublicTreasury != 0 {
+		t.Fatalf("prepayment refund failed: actor=%d treasury=%d", a.Money, w.PublicTreasury)
+	}
+	if err := w.VerifyLedgerConservation(); err != nil {
+		t.Fatal(err)
 	}
 }

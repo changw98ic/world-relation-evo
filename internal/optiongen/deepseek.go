@@ -1,16 +1,13 @@
 package optiongen
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"sort"
 	"strings"
-	"time"
 )
 
 // Client calls an OpenAI-compatible DeepSeek endpoint once per character to
@@ -225,146 +222,42 @@ func (c Client) chatEndpoint() (string, error) {
 	return base + "/chat/completions", nil
 }
 
-// ExpandActor sends exactly one request to DeepSeek for the given CharacterDossier
-// and returns the full ActorExpansionRecord.
-func (c Client) ExpandActor(ctx context.Context, dossier CharacterDossier) (ActorExpansionRecord, error) {
-	url, err := c.chatEndpoint()
-	if err != nil {
-		return ActorExpansionRecord{}, err
-	}
-	model := strings.TrimSpace(c.Model)
-	if model == "" {
-		return ActorExpansionRecord{}, errors.New("WRE_MODEL (model) is required")
-	}
-
+func (c Client) expandActor(ctx context.Context, dossier CharacterDossier, path string, resume bool) (ActorExpansionRecord, bool, error) {
 	horizon := dossier.World.HorizonDays
 	if horizon <= 0 {
 		horizon = 30
 	}
 	dossierJSON, err := json.Marshal(dossier)
 	if err != nil {
-		return ActorExpansionRecord{}, fmt.Errorf("marshal dossier for %s: %w", dossier.Actor.ID, err)
+		return ActorExpansionRecord{}, false, fmt.Errorf("marshal dossier: %w", err)
 	}
-
-	maxTokens := c.MaxTokens
-	if maxTokens <= 0 {
-		maxTokens = 32768
-	}
-	temp := c.Temperature
-	if temp <= 0 {
-		temp = 0.4
-	}
-
-	sysPrompt := BuildSystemPrompt(dossier)
 	actorNoun := dossier.World.Environment.ActorNoun
 	if actorNoun == "" {
 		actorNoun = "角色"
 	}
-	userPrompt := fmt.Sprintf(
-		"以下是角色 %s（%s，%s）的完整世界档案。请严格贴合本世界观并使用简体中文人话（严禁把吃喝睡休息列为选项，严禁在中文描述中夹杂英文变量名或内部选项编号），给出该%s在未来 %d 天内所有有决策价值的实质行为选项（JSON）：\n\n%s",
-		dossier.Actor.ID, dossier.Actor.Name, actorNoun, actorNoun, horizon, string(dossierJSON),
-	)
-
-	reqBody := map[string]any{
-		"model": model,
-		"messages": []map[string]string{
-			{"role": "system", "content": sysPrompt},
-			{"role": "user", "content": userPrompt},
-		},
-		"temperature":     temp,
-		"max_tokens":      maxTokens,
-		"response_format": map[string]string{"type": "json_object"},
+	prompt := generationPrompt{
+		system: BuildSystemPrompt(dossier),
+		user: fmt.Sprintf(
+			"以下是角色 %s（%s，%s）的完整世界档案。请严格贴合本世界观并使用简体中文人话（严禁把吃喝睡休息列为选项，严禁在中文描述中夹杂英文变量名或内部选项编号），给出该%s在未来 %d 天内所有有决策价值的实质行为选项（JSON）：\n\n%s",
+			dossier.Actor.ID, dossier.Actor.Name, actorNoun, actorNoun, horizon, dossierJSON,
+		),
+		maxTokens:   32768,
+		temperature: 0.4,
 	}
-	if effort := strings.TrimSpace(c.ReasoningEffort); effort != "" {
-		reqBody["reasoning_effort"] = effort
-	}
-	rawReq, err := json.Marshal(reqBody)
-	if err != nil {
-		return ActorExpansionRecord{}, err
-	}
-
-	httpClient := c.HTTPClient
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 10 * time.Minute}
-	}
-
-	started := time.Now().UTC()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(rawReq))
-	if err != nil {
-		return ActorExpansionRecord{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if strings.TrimSpace(c.APIKey) != "" {
-		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(c.APIKey))
-	}
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return ActorExpansionRecord{}, fmt.Errorf("request ds for %s: %w", dossier.Actor.ID, err)
-	}
-	defer resp.Body.Close()
-
-	rawResp, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return ActorExpansionRecord{}, fmt.Errorf("read ds response for %s: %w", dossier.Actor.ID, err)
-	}
-	durationMS := time.Since(started).Milliseconds()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		snippet := string(rawResp)
-		if len(snippet) > 400 {
-			snippet = snippet[:400] + "..."
+	return generateRecord(ctx, c, path, resume, prompt, func(out generationOutput) (ActorExpansionRecord, error) {
+		catalog, err := decodeOptionCatalog(out.RawResponse, dossier)
+		if err != nil {
+			return ActorExpansionRecord{}, err
 		}
-		return ActorExpansionRecord{}, fmt.Errorf("ds http %d for %s: %s", resp.StatusCode, dossier.Actor.ID, snippet)
-	}
-
-	var envelope struct {
-		Choices []struct {
-			FinishReason string `json:"finish_reason"`
-			Message      struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-		Usage struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
-		} `json:"usage"`
-	}
-	if err := json.Unmarshal(rawResp, &envelope); err != nil {
-		return ActorExpansionRecord{}, fmt.Errorf("decode ds envelope for %s: %w", dossier.Actor.ID, err)
-	}
-	if len(envelope.Choices) == 0 {
-		return ActorExpansionRecord{}, fmt.Errorf("ds returned empty choices for %s", dossier.Actor.ID)
-	}
-
-	content := envelope.Choices[0].Message.Content
-	catalog, err := decodeOptionCatalog(content, dossier)
-	if err != nil {
-		tail := content
-		if len(tail) > 240 {
-			tail = "..." + tail[len(tail)-240:]
-		}
-		return ActorExpansionRecord{}, fmt.Errorf("parse ds catalog for %s (finish_reason=%s len=%d tokens=%d/%d): %w | tail=%q",
-			dossier.Actor.ID, envelope.Choices[0].FinishReason, len(content),
-			envelope.Usage.PromptTokens, envelope.Usage.CompletionTokens, err, tail)
-	}
-
-	return ActorExpansionRecord{
-		WorldID:          dossier.World.ID,
-		ActorID:          dossier.Actor.ID,
-		ActorName:        dossier.Actor.Name,
-		Model:            model,
-		Endpoint:         url,
-		RequestedAt:      started,
-		DurationMS:       durationMS,
-		PromptTokens:     envelope.Usage.PromptTokens,
-		CompletionTokens: envelope.Usage.CompletionTokens,
-		TotalTokens:      envelope.Usage.TotalTokens,
-		Dossier:          dossier,
-		Catalog:          catalog,
-		RawResponse:      content,
-	}, nil
+		return ActorExpansionRecord{
+			generationOutput: out,
+			WorldID:          dossier.World.ID,
+			ActorID:          dossier.Actor.ID,
+			ActorName:        dossier.Actor.Name,
+			Dossier:          dossier,
+			Catalog:          catalog,
+		}, nil
+	})
 }
 
 func decodeOptionCatalog(raw string, dossier CharacterDossier) (ActorOptionCatalog, error) {
@@ -381,13 +274,18 @@ func decodeOptionCatalog(raw string, dossier CharacterDossier) (ActorOptionCatal
 	}
 	if cat.ActorID == "" {
 		cat.ActorID = dossier.Actor.ID
+	} else if cat.ActorID != dossier.Actor.ID {
+		return ActorOptionCatalog{}, fmt.Errorf("response actor %q differs from requested actor %q", cat.ActorID, dossier.Actor.ID)
 	}
 	if cat.ActorName == "" {
 		cat.ActorName = dossier.Actor.Name
 	}
-	if cat.HorizonDays <= 0 {
+	if cat.HorizonDays == 0 {
 		cat.HorizonDays = dossier.World.HorizonDays
+	} else if cat.HorizonDays != dossier.World.HorizonDays {
+		return ActorOptionCatalog{}, fmt.Errorf("response horizon %d days differs from requested %d days", cat.HorizonDays, dossier.World.HorizonDays)
 	}
+	cat.fillOmittedWindows(dossier.World.HorizonDays)
 	return cat, nil
 }
 

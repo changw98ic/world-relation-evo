@@ -1,6 +1,8 @@
 package sim
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"sort"
 )
@@ -15,8 +17,8 @@ type WorldEventSpec struct {
 	ProbPermillePerDay  int              `json:"prob_permille_per_day"`
 	MinTick             int64            `json:"min_tick,omitempty"`
 	CooldownTicks       int64            `json:"cooldown_ticks,omitempty"`
-	DurationTicks       int64            `json:"duration_ticks,omitempty"`
-	Intensity           int              `json:"intensity,omitempty"`
+	DurationTicks       int64            `json:"duration_ticks"`
+	Intensity           int              `json:"intensity"`
 	RewardItem          string           `json:"reward_item,omitempty"`
 	RewardQty           int              `json:"reward_qty,omitempty"`
 	RewardCoins         int              `json:"reward_coins,omitempty"`
@@ -29,6 +31,18 @@ type WorldEventSpec struct {
 	BountyBoost         int              `json:"bounty_boost,omitempty"`
 	CasualtyPermille    int              `json:"casualty_permille,omitempty"`
 	Damage              int              `json:"damage,omitempty"`
+}
+
+func (s *WorldEventSpec) UnmarshalJSON(data []byte) error {
+	type wire WorldEventSpec
+	decoded := wire{DurationTicks: 3 * TicksPerDay, Intensity: 55}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return err
+	}
+	*s = WorldEventSpec(decoded)
+	return nil
 }
 
 // ActiveWorldEvent tracks a live dynamic world event instance serialized on World for deterministic replay.
@@ -68,8 +82,18 @@ func cloneWorldEventSpec(s WorldEventSpec) WorldEventSpec {
 // isRouteSevered reports whether an active terrain_shift world event currently severs
 // routes of `medium` touching either endpoint unless the traveler's locomotion mode can fly over ("air").
 func (w *World) isRouteSevered(fromDist, toDist, medium, modeID string) (bool, string) {
+	if medium == "" {
+		medium = "road"
+	}
+	if event := w.routeClosure(fromDist, toDist, medium, modeID); event != nil {
+		return true, fmt.Sprintf("route (%s) between %s and %s is severed by %s", medium, fromDist, toDist, event.Name)
+	}
+	return false, ""
+}
+
+func (w *World) routeClosure(fromDist, toDist, medium, modeID string) *ActiveWorldEvent {
 	if len(w.ActiveWorldEvents) == 0 || fromDist == "" || toDist == "" {
-		return false, ""
+		return nil
 	}
 	if medium == "" {
 		medium = "road"
@@ -81,9 +105,10 @@ func (w *World) isRouteSevered(fromDist, toDist, medium, modeID string) (bool, s
 		}
 	}
 	if canFly {
-		return false, ""
+		return nil
 	}
-	for _, ev := range w.ActiveWorldEvents {
+	for i := range w.ActiveWorldEvents {
+		ev := &w.ActiveWorldEvents[i]
 		if w.Tick >= ev.ExpiresTick || ev.SeveredMedium == "" {
 			continue
 		}
@@ -91,10 +116,44 @@ func (w *World) isRouteSevered(fromDist, toDist, medium, modeID string) (bool, s
 			continue
 		}
 		if ev.SeveredMedium == medium || (ev.SeveredMedium == "road" && medium == "land") || (ev.SeveredMedium == "land" && medium == "road") {
-			return true, fmt.Sprintf("route (%s) between %s and %s is severed by %s", medium, fromDist, toDist, ev.Name)
+			return ev
 		}
 	}
-	return false, ""
+	return nil
+}
+
+// Route discovery comes from a firsthand attempt to traverse a blocked hop.
+func (w *World) observedRouteClosure(a Actor, x Action) *Observation {
+	district, medium := x.Location, ""
+	mode := x.Channel
+	if x.Kind == "move_venue" {
+		site, known := w.Map.VenueByID(x.Location)
+		route, connected := w.Map.VenueRouteBetween(a.VenueID, x.Location)
+		if !known || !connected {
+			return nil
+		}
+		district, medium = site.DistrictID, route.Medium
+		if mode == "" {
+			weather, visible := w.DistrictStates[a.Location]
+			var local *DistrictState
+			if visible {
+				local = &weather
+			}
+			_, _, used, passable := locomotionCostForActor(w.Catalog, local, w.actorWithEffectTags(a), route)
+			if !passable {
+				return nil
+			}
+			mode = used
+		}
+	} else if route, connected := w.Map.RoadBetween(a.Location, district); connected {
+		medium = route.Medium
+	} else {
+		return nil
+	}
+	if closure := w.routeClosure(a.Location, district, medium, mode); closure != nil {
+		return &Observation{Kind: "world_event", Modality: "eyewitness", SubjectID: closure.InstanceID, Location: a.Location}
+	}
+	return nil
 }
 
 // stepWorldEvents expires finished macro world events and evaluates daily triggers at 08:00.
@@ -143,7 +202,7 @@ func (w *World) stepWorldEvents() []Event {
 		if blocked {
 			continue
 		}
-		roll := int(worldHash(w.ID, w.Tick, "wev:"+spec.ID) % 1000)
+		roll := int(w.settlementRandom(w.Tick, "wev:"+spec.ID) % 1000)
 		if roll >= spec.ProbPermillePerDay {
 			continue
 		}
@@ -164,7 +223,7 @@ func (w *World) stepWorldEvents() []Event {
 			continue
 		}
 		sort.Strings(candidates)
-		pickIdx := int(worldHash(w.ID, w.Tick, "wev_dist:"+spec.ID) % uint64(len(candidates)))
+		pickIdx := int(w.settlementRandom(w.Tick, "wev_dist:"+spec.ID) % uint64(len(candidates)))
 		events = append(events, w.TriggerWorldEvent(spec.ID, candidates[pickIdx])...)
 		break // at most 1 major world event per day
 	}
@@ -188,14 +247,7 @@ func (w *World) TriggerWorldEvent(specID, districtID string) []Event {
 	if districtID == "" && len(w.Map.Districts) > 0 {
 		districtID = w.Map.Districts[0].ID
 	}
-	dur := spec.DurationTicks
-	if dur <= 0 {
-		dur = 3 * TicksPerDay
-	}
-	intensity := spec.Intensity
-	if intensity <= 0 {
-		intensity = 55
-	}
+	dur, intensity := spec.DurationTicks, spec.Intensity
 
 	instanceID := fmt.Sprintf("%s@%d:%d", spec.ID, w.Tick, w.NextID)
 	active := ActiveWorldEvent{
@@ -221,7 +273,17 @@ func (w *World) TriggerWorldEvent(specID, districtID string) []Event {
 		for di := range w.Map.Districts {
 			if w.Map.Districts[di].ID == districtID {
 				for _, feat := range spec.AddFeatures {
-					w.Map.Districts[di].Features = appendUnique(w.Map.Districts[di].Features, feat)
+					if ActorHasTag(w.Map.Districts[di].Features, feat) {
+						continue
+					}
+					w.Map.Districts[di].Features = append(w.Map.Districts[di].Features, feat)
+					if w.EventFeatures == nil {
+						w.EventFeatures = map[string]map[string]int64{}
+					}
+					if w.EventFeatures[districtID] == nil {
+						w.EventFeatures[districtID] = map[string]int64{}
+					}
+					w.EventFeatures[districtID][feat] = w.NextID
 				}
 				break
 			}
@@ -314,10 +376,9 @@ func (w *World) TriggerWorldEvent(specID, districtID string) []Event {
 			cause = "beast"
 		}
 		dmg := maxInt(6, spec.Damage)
-		for i := range w.Actors {
-			a := &w.Actors[i]
+		applyShock := func(a *Actor) {
 			if a.Dead || a.Location != districtID || a.InTransit() {
-				continue
+				return
 			}
 			mit := w.actorRiskMitigations(*a, "", "")
 			effDmg := maxInt(3, (dmg*(100-mit.tierDefPct))/100)
@@ -330,6 +391,20 @@ func (w *World) TriggerWorldEvent(specID, districtID string) []Event {
 				impactEvs[j].Payload["world_event_instance_id"] = instanceID
 			}
 			events = append(events, impactEvs...)
+		}
+		for i := range w.Actors {
+			applyShock(&w.Actors[i])
+		}
+		for i := range w.Cohorts {
+			c := &w.Cohorts[i]
+			if c.District != districtID || len(c.Members) == 0 {
+				continue
+			}
+			before := append([]Actor(nil), c.Members...)
+			for j := range c.Members {
+				applyShock(&c.Members[j])
+			}
+			w.reconcileCohortMemberChanges(c, before)
 		}
 		// Apply proportional shock casualties to co-district PopulationCohorts (cross-LOD parity).
 		for ci := range w.Cohorts {
@@ -482,9 +557,6 @@ func (w *World) applyClaimWorldEvent(tx *WorldTx, a *Actor, x Action) []Event {
 	if a.InsideHouse != "" {
 		return fail("must step outdoors to claim world event discovery")
 	}
-	if a.Energy < 8 {
-		return fail("insufficient energy to claim world event discovery")
-	}
 	var targetIdx = -1
 	known := map[string]bool{}
 	for _, event := range w.perceivedActiveWorldEvents(*a) {
@@ -510,7 +582,6 @@ func (w *World) applyClaimWorldEvent(tx *WorldTx, a *Actor, x Action) []Event {
 	if ev.RequiredPowerTier > 0 && w.Catalog.ActorPowerTier(*a) < ev.RequiredPowerTier {
 		return fail(fmt.Sprintf("requires power tier >= %d to claim %s", ev.RequiredPowerTier, ev.Name))
 	}
-	tx.setEnergy(a, a.Energy-8, x.Kind)
 	ev.ClaimedBy = a.ID
 	if ev.RewardItem != "" && ev.RewardQty > 0 {
 		tx.ProduceOrConsumeItem(a, ev.RewardItem, ev.RewardQty, x.Kind)

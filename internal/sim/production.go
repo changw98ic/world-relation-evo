@@ -330,10 +330,11 @@ func (p Perception) RecipeBlockReason(r Recipe) string {
 	if p.DistrictState != nil {
 		stock = p.DistrictState.AvailableResource(r.ResourcePool)
 	}
-	return recipeBlockReason(p.Catalog, p.Map, p.CurrentHouse, p.Self, r, p.ProductionBlockReasons[r.ID], stock)
+	return recipeBlockReason(p.Catalog, p.Map, p.CurrentHouse, p.Self, r, p.ProductionBlockReasons[r.ID], stock, p.CraftingSpeedBonusPct)
 }
 
-func recipeBlockReason(cat Catalog, worldMap WorldMap, house *House, a Actor, r Recipe, siteReason string, stock int64) string {
+func recipeBlockReason(cat Catalog, worldMap WorldMap, house *House, a Actor, r Recipe, siteReason string, stock int64, facilityBonusPct int) string {
+	_, r.EnergyCost = r.WorkEstimate(facilityBonusPct)
 	if ok, reason := CheckRecipe(cat, worldMap, house, a, r); !ok {
 		return reason
 	}

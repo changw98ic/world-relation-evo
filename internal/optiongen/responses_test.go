@@ -224,17 +224,19 @@ func TestMineHighLikelihoodCombinationsAndExpandResponsesEndToEnd(t *testing.T) 
 	defer server.Close()
 
 	outDir := t.TempDir()
-	summary, err := ExpandResponses(context.Background(), records, Client{
+	client := Client{
 		Endpoint:   server.URL + "/v1",
 		Model:      "deepseek-test",
 		APIKey:     "test-key",
 		HTTPClient: server.Client(),
-	}, ResponseExpandConfig{
+	}
+	cfg := ResponseExpandConfig{
 		OptionsDir:  "test-options-dir",
 		OutDir:      outDir,
 		TopN:        1,
 		Concurrency: 2,
-	})
+	}
+	summary, err := ExpandResponses(context.Background(), records, client, cfg)
 	if err != nil {
 		t.Fatalf("ExpandResponses failed: %v", err)
 	}
@@ -263,5 +265,16 @@ func TestMineHighLikelihoodCombinationsAndExpandResponsesEndToEnd(t *testing.T) 
 	}
 	if hanIdx.ScenarioCount != 1 || hanIdx.ResponseCount != 1 || hanIdx.Scenarios[0].Responses[0].Stance != "谈判妥协" {
 		t.Fatalf("unexpected by_actor index for han_xiao: %+v", hanIdx)
+	}
+	cfg.Resume = true
+	resumed, err := ExpandResponses(context.Background(), records, client, cfg)
+	if err != nil || calls.Load() != 1 || resumed.TotalRequests != 0 || resumed.TotalResponses != summary.TotalResponses {
+		t.Fatalf("identical scenario did not resume: calls=%d summary=%+v err=%v", calls.Load(), resumed, err)
+	}
+	for i := range records {
+		records[i].Dossier.World.HorizonDays++
+	}
+	if _, err := ExpandResponses(context.Background(), records, client, cfg); err == nil || !strings.Contains(err.Error(), "does not match the current request") || calls.Load() != 1 {
+		t.Fatalf("changed horizon accepted saved responses: calls=%d err=%v", calls.Load(), err)
 	}
 }

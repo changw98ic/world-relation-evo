@@ -137,3 +137,44 @@ func TestCohortCasualtiesAndRecuperationSyncResidentBands(t *testing.T) {
 		}
 	}
 }
+
+func TestCohortCasualtiesKeepCustodyAndInventoryOnTheCorrectResidents(t *testing.T) {
+	w := lawWorld()
+	w.Cohorts = []PopulationCohort{{
+		ID: "crew", District: "home", Population: 3, Adults: 3, Jailed: 1, ResidentSeq: 3,
+		Residents: []ResidentBand{
+			{Origin: "crew", First: 1, Count: 1, Health: MaxHealth, Jailed: true, Items: map[string]int{"wood": 2}},
+			{Origin: "crew", First: 2, Count: 1, Health: MaxHealth, Items: map[string]int{"wood": 1}},
+			{Origin: "crew", First: 3, Count: 1, Health: MaxHealth},
+		},
+	}}
+	c := &w.Cohorts[0]
+	w.InitLedgerAudit()
+	if _, deaths, _ := w.applyCohortCasualtiesWithCause(c, 0, 1, 0, "combat"); deaths != 1 {
+		t.Fatalf("combat deaths = %d, want 1", deaths)
+	}
+	if c.Jailed != 1 || !c.Residents[0].Jailed || c.Residents[0].First != 1 || c.ItemPool["wood"] != 1 {
+		t.Fatalf("combat chose the prisoner instead of a free participant: %+v", c)
+	}
+	if _, deaths, _ := w.applyCohortCasualtiesWithCause(c, 0, 1, 0, "disaster"); deaths != 1 {
+		t.Fatalf("disaster deaths = %d, want 1", deaths)
+	}
+	if c.Jailed != 0 || c.PendingJailedDeaths != 1 || c.ItemPool["wood"] != 3 || c.Residents[0].First != 3 {
+		t.Fatalf("prisoner death did not settle custody and inventory: %+v", c)
+	}
+	if err := w.VerifyLedgerConservation(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCohortPatrolEnergyUsesTheExactAvailableBalance(t *testing.T) {
+	w := lawWorld()
+	c := PopulationCohort{ID: "crew", Population: 2, AvgEnergy: 2}
+	w.Production.EnergyRemainder = map[string]int64{c.ID: 1}
+	if w.payEcologyPatrolEnergy(&c, 1, 4) || w.anonymousCohortEnergy(&c, 2) != 3 {
+		t.Fatal("unfunded patrol spent pooled energy")
+	}
+	if !w.payEcologyPatrolEnergy(&c, 1, 3) || w.anonymousCohortEnergy(&c, 2) != 0 {
+		t.Fatal("patrol could not spend exactly the available pooled energy")
+	}
+}

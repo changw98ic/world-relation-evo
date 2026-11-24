@@ -135,6 +135,7 @@ type SensorySpec struct {
 // encrypted_radio, public_pa, courier_beacon). Channel messages always record Channel + Statement
 // and never impersonate a first-hand eyewitness Observation.
 type CommChannelSpec struct {
+	DelayTicks       int64    `json:"delay_ticks,omitempty"`
 	ID               string   `json:"id"`
 	Name             string   `json:"name"`
 	GrantedByTags    []string `json:"granted_by_tags,omitempty"`
@@ -349,11 +350,11 @@ func (w *World) placeResident(a *Actor) {
 	}
 	if a.InsideHouse != "" {
 		if h := w.house(a.InsideHouse); h != nil && h.District == a.Location && h.VenueID != "" {
-			a.VenueID = h.VenueID
+			(*WorldTx)(nil).MoveActor(a, a.Location, h.VenueID, a.InsideHouse)
 			return
 		}
 	}
-	a.VenueID = w.Map.DefaultVenueForDistrict(a.Location)
+	(*WorldTx)(nil).MoveActor(a, a.Location, w.Map.DefaultVenueForDistrict(a.Location), a.InsideHouse)
 }
 
 func (m WorldMap) VenueOrDistrictHasFeature(venueID, districtID, feature string) bool {
@@ -1103,11 +1104,6 @@ func (w *World) TriggerGeoAnomaly(spec GeoAnomalySpec) []Event {
 		}
 	}
 
-	dur := spec.DurationTicks
-	if dur <= 0 {
-		dur = TicksPerDay
-	}
-
 	var events []Event
 	for _, regID := range visitOrder {
 		rawInt := bestIntensity[regID]
@@ -1161,7 +1157,7 @@ func (w *World) TriggerGeoAnomaly(spec GeoAnomalySpec) []Event {
 						ID:          spec.ID,
 						Name:        spec.Name,
 						StartedTick: w.Tick,
-						ExpiresTick: w.Tick + dur,
+						ExpiresTick: w.Tick + spec.DurationTicks,
 					})
 					dmgScale := maxInt(25, 100-infraMitPct)
 					for poolID, lossPct := range spec.ResourceDamagePct {
@@ -1406,9 +1402,9 @@ func (w *World) applyMoveVenue(tx *WorldTx, a *Actor, x Action) []Event {
 	if a.Energy < effEnergy {
 		return emitFail("insufficient energy to travel to " + destVenue.ID)
 	}
-	tx.setEnergy(a, a.Energy-effEnergy, x.Kind)
 	x.Channel = modeID
 	task := Task{Action: x, TotalTicks: effTicks, Remaining: effTicks - 1, StartedTick: w.Tick}
+	tx.startTaskWork(a, &task, effEnergy)
 	if task.Remaining <= 0 {
 		return w.finishMoveVenue(tx, a, task)
 	}
@@ -1472,9 +1468,6 @@ func (w *World) applyIssueDecree(tx *WorldTx, a *Actor, x Action) []Event {
 	}
 	if node.SeatDistrictID != "" && a.Location != node.SeatDistrictID {
 		return emitFail("ruler must be in seat district " + node.SeatDistrictID + " to promulgate decrees")
-	}
-	if a.Energy < 4 {
-		return emitFail("insufficient energy to issue decree")
 	}
 
 	kind := x.Item
@@ -1547,7 +1540,7 @@ func (w *World) applyIssueDecree(tx *WorldTx, a *Actor, x Action) []Event {
 			extra := min(remainder, population)
 			amount := perPerson*population + extra
 			remainder -= extra
-			cohort.MoneyPool += amount
+			w.addCohortCurrency(cohort, "coins", amount)
 			tx.recordTransfer("transfer_currency", node.ID, cohort.ID, "coins", -amount, x.Kind)
 			reliefDistributed += amount
 			if perPerson > 0 {
@@ -1556,7 +1549,7 @@ func (w *World) applyIssueDecree(tx *WorldTx, a *Actor, x Action) []Event {
 				reliefRecipients += int(extra)
 			}
 		}
-		node.Treasury -= reliefDistributed
+		w.addPolityCurrency(node, "coins", -(reliefDistributed))
 		node.Ledger.ReliefAndInfraOut += reliefDistributed
 		if reliefDistributed == 0 {
 			return emitFail("no eligible needy residents in governed jurisdiction for relief grant")
@@ -1566,7 +1559,6 @@ func (w *World) applyIssueDecree(tx *WorldTx, a *Actor, x Action) []Event {
 		return emitFail("unsupported decree kind: " + x.Item)
 	}
 
-	tx.setEnergy(a, a.Energy-4, x.Kind)
 	proclamation := x.Text
 	if proclamation == "" {
 		proclamation = fmt.Sprintf("%s promulgated %s decree (%s=%d) for %s", a.Name, kind, embargoTarget, decreeVal, node.Name)
@@ -1598,87 +1590,87 @@ func (w *World) applyIssueDecree(tx *WorldTx, a *Actor, x Action) []Event {
 	return []Event{ev}
 }
 
-func (w *World) applyTransmitMessage(tx *WorldTx, a *Actor, x Action) []Event {
-	emitFail := func(reason string) []Event {
-		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
+func (w *World) projectCommunicationContacts(p *Perception) {
+	if len(p.Catalog.CommChannels) == 0 {
+		return
 	}
-	if len(w.Catalog.CommChannels) == 0 {
-		return emitFail("no communication channels configured in world catalog")
+	contacts := make(map[string]bool)
+	addPerson := func(id string) {
+		if id != "" && id != p.Self.ID && !contacts[id] && w.actor(id) != nil {
+			contacts[id] = true
+		}
 	}
-	chID := x.Channel
-	tags := w.actorEffectiveTags(*a)
+	for id := range p.Self.Trust {
+		addPerson(id)
+	}
+	for _, m := range p.Self.Memories {
+		if m.Source != "world" {
+			addPerson(m.Source)
+		}
+		addPerson(m.TargetID)
+	}
+	p.CommunicationContacts = sortedProductionKeys(contacts)
+}
+
+func (c Catalog) transmissionChannelID(tags []string, requested string) string {
+	if requested != "" {
+		return requested
+	}
+	for _, id := range sortedProductionKeys(c.CommChannels) {
+		ch := c.CommChannels[id]
+		if len(ch.GrantedByTags) == 0 || actorHasAnyTag(tags, ch.GrantedByTags) {
+			return id
+		}
+	}
+	return ""
+}
+
+func transmissionChannel(catalog Catalog, a Actor, tags []string, shielding int, x Action) (CommChannelSpec, string) {
+	if len(catalog.CommChannels) == 0 {
+		return CommChannelSpec{}, "no communication channels configured in world catalog"
+	}
+	chID := catalog.transmissionChannelID(tags, x.Channel)
 	if chID == "" {
-		keys := make([]string, 0, len(w.Catalog.CommChannels))
-		for k := range w.Catalog.CommChannels {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			spec := w.Catalog.CommChannels[k]
-			for _, gt := range spec.GrantedByTags {
-				if ActorHasTag(tags, gt) {
-					chID = k
-					break
-				}
-			}
-			if chID != "" {
-				break
-			}
-		}
+		return CommChannelSpec{}, "actor has no available communication channel"
 	}
-	ch, exists := w.Catalog.CommChannels[chID]
+	ch, exists := catalog.CommChannels[chID]
 	if !exists {
-		return emitFail("unknown communication channel: " + chID)
+		return CommChannelSpec{}, "unknown communication channel: " + chID
 	}
-	if len(ch.GrantedByTags) > 0 {
-		granted := false
-		for _, gt := range ch.GrantedByTags {
-			if ActorHasTag(tags, gt) {
-				granted = true
-				break
-			}
-		}
-		if !granted {
-			return emitFail("actor lacks transmitter capability for channel " + ch.ID)
-		}
+	if len(ch.GrantedByTags) > 0 && !actorHasAnyTag(tags, ch.GrantedByTags) {
+		return CommChannelSpec{}, "actor lacks transmitter capability for channel " + chID
 	}
 	if !ch.Broadcast && x.TargetID == "" {
-		return emitFail("point-to-point channel requires target recipient")
+		return CommChannelSpec{}, "point-to-point channel requires target recipient"
 	}
 	if x.Text == "" {
-		return emitFail("empty channel message")
+		return CommChannelSpec{}, "empty channel message"
 	}
 	if a.Energy < ch.EnergyCost {
-		return emitFail("insufficient energy to transmit over " + ch.ID)
+		return CommChannelSpec{}, "insufficient energy to transmit over " + chID
 	}
-	_, senderShield := w.actorEnclosure(*a)
-	if senderShield > ch.PenetrationPower {
-		return emitFail("sender enclosure shielding blocks outgoing transmission on " + ch.ID)
+	if shielding > ch.PenetrationPower {
+		return CommChannelSpec{}, "sender enclosure shielding blocks outgoing transmission on " + chID
 	}
-	if !ch.Broadcast {
-		target := w.actor(x.TargetID)
-		if target == nil || target.Dead {
-			return emitFail("unknown or dead channel recipient")
-		}
-		if !w.communicationRangeAllows(*a, *target, ch.RangeKm) {
-			return emitFail("recipient is outside the channel range or its distance cannot be verified")
-		}
-	}
+	return ch, ""
+}
 
+func (w *World) applyTransmitMessage(tx *WorldTx, a *Actor, x Action) []Event {
+	channelID := x.Channel
+	if channelID == "" {
+		channelID = w.Catalog.transmissionChannelID(w.actorEffectiveTags(*a), "")
+	}
+	ch := w.Catalog.CommChannels[channelID]
 	tx.setEnergy(a, a.Energy-ch.EnergyCost, x.Kind)
 	x.Channel = ch.ID
 
 	var recipients []*Actor
-	for i := range w.Actors {
-		rcpt := &w.Actors[i]
+	collect := func(rcpt *Actor) {
 		if rcpt.Dead || rcpt.ID == a.ID || w.Tick < rcpt.JailedUntil {
-			continue
-		}
-		if !ch.Broadcast && rcpt.ID != x.TargetID {
-			continue
+			return
 		}
 		if rcpt.Task != nil && (rcpt.Task.Action.Kind == "sleep" || rcpt.Task.Dormant) {
-			continue
+			return
 		}
 		if len(ch.ReceiverTags) > 0 {
 			rTags := w.actorEffectiveTags(*rcpt)
@@ -1690,17 +1682,24 @@ func (w *World) applyTransmitMessage(tx *WorldTx, a *Actor, x Action) []Event {
 				}
 			}
 			if !hasReceiver {
-				continue
+				return
 			}
 		}
-		if !w.communicationRangeAllows(*a, *rcpt, ch.RangeKm) {
-			continue
+		if ch.Broadcast && !w.communicationRangeAllows(*a, *rcpt, ch.RangeKm) {
+			return
 		}
 		_, rcptShield := w.actorEnclosure(*rcpt)
 		if rcptShield > ch.PenetrationPower {
-			continue
+			return
 		}
 		recipients = append(recipients, rcpt)
+	}
+	if ch.Broadcast {
+		for i := range w.Actors {
+			collect(&w.Actors[i])
+		}
+	} else if rcpt := w.actor(x.TargetID); rcpt != nil {
+		collect(rcpt)
 	}
 
 	e := Event{
@@ -1749,6 +1748,19 @@ func (w *World) applyTransmitMessage(tx *WorldTx, a *Actor, x Action) []Event {
 		Statement:    stmtPtr,
 	}
 	tx.RecordMemory(a, senderMem)
+
+	if ch.DelayTicks > 0 {
+		ids := make([]string, 0, len(recipients))
+		for _, rcpt := range recipients {
+			ids = append(ids, rcpt.ID)
+		}
+		packet := ScheduledMessage{DueTick: w.Tick + ch.DelayTicks, ID: e.ID, Message: senderMem,
+			Recipients: ids, Action: cloneAction(x)}
+		w.scheduleMessage(tx, packet)
+		e.Payload["recipients"] = ids
+		e.Payload["delivery_tick"] = packet.DueTick
+		return []Event{e}
+	}
 
 	deliveredIDs := make([]string, 0, len(recipients))
 	for _, rcpt := range recipients {

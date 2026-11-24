@@ -11,13 +11,24 @@ import (
 type ExternalPatch struct {
 	Label              string                   `json:"label,omitempty"`
 	TriggerWorldEvents []PatchWorldEventTrigger `json:"trigger_world_events,omitempty"`
-	SpawnActors        []Actor                  `json:"spawn_actors,omitempty"`
+	SpawnActors        []PatchActorSpawn        `json:"spawn_actors,omitempty"`
 	AddSecrets         []ActorSecret            `json:"add_secrets,omitempty"`
 	AddGrudges         []GrudgeRecord           `json:"add_grudges,omitempty"`
-	SetDiplomacy       []FactionDiplomacy       `json:"set_diplomacy,omitempty"`
+	SetDiplomacy       []PatchFactionDiplomacy  `json:"set_diplomacy,omitempty"`
 	AddAmbitions       []PatchActorAmbition     `json:"add_ambitions,omitempty"`
 	AddGoldenFingers   []GoldenFingerSpec       `json:"add_golden_fingers,omitempty"`
 	AddGFQuests        []GFQuestInstance        `json:"add_gf_quests,omitempty"`
+}
+
+type PatchActorSpawn struct {
+	Actor
+	Health *int `json:"health,omitempty"`
+	Energy *int `json:"energy,omitempty"`
+}
+
+type PatchFactionDiplomacy struct {
+	FactionDiplomacy
+	RelationScore *int `json:"relation_score,omitempty"`
 }
 
 // PatchWorldEventTrigger fires either an already-declared Catalog.WorldEvent by SpecID
@@ -47,7 +58,7 @@ func (w *World) ApplyExternalPatch(patch ExternalPatch) ([]Event, error) {
 
 	// 1. Spawn newly entering named actors (with conservation-tracked external inflow).
 	for _, raw := range patch.SpawnActors {
-		a := CloneActor(raw)
+		a := CloneActor(raw.Actor)
 		if strings.TrimSpace(a.ID) == "" {
 			return nil, fmt.Errorf("spawn_actor missing id")
 		}
@@ -55,7 +66,7 @@ func (w *World) ApplyExternalPatch(patch ExternalPatch) ([]Event, error) {
 			return nil, fmt.Errorf("spawn_actor %q already exists in world", a.ID)
 		}
 		if a.Location == "" && len(w.Map.Districts) > 0 {
-			a.Location = w.Map.Districts[0].ID
+			(*WorldTx)(nil).MoveActor(&a, w.Map.Districts[0].ID, a.VenueID, a.InsideHouse)
 		}
 		if _, ok := w.Map.DistrictByID(a.Location); !ok {
 			return nil, fmt.Errorf("spawn_actor %q references unknown district %q", a.ID, a.Location)
@@ -63,12 +74,22 @@ func (w *World) ApplyExternalPatch(patch ExternalPatch) ([]Event, error) {
 		if a.Name == "" {
 			a.Name = a.ID
 		}
-		if a.Health <= 0 {
-			a.Health = MaxHealth
+		health, energy := MaxHealth, MaxEnergy
+		if raw.Health != nil {
+			health = *raw.Health
 		}
-		if a.Energy <= 0 {
-			a.Energy = MaxEnergy
+		if raw.Energy != nil {
+			energy = *raw.Energy
 		}
+		if health < 0 || health > MaxHealth || energy < 0 || energy > MaxEnergy {
+			return nil, fmt.Errorf("spawn_actor %q health or energy outside the actor's range: health=%d energy=%d", a.ID, health, energy)
+		}
+		if a.Dead {
+			health = 0
+		}
+		setActorHealthBounded(&a, health, 0)
+		setActorEnergy(&a, energy)
+		a.Dead = health == 0
 		if !ActorHasTag(a.Tags, "resident") {
 			a.Tags = append([]string{"resident"}, a.Tags...)
 		}
@@ -196,7 +217,7 @@ func (w *World) ApplyExternalPatch(patch ExternalPatch) ([]Event, error) {
 		if sev <= 0 {
 			sev = 60
 		}
-		_, holdEvs := w.addSecretWithWitnesses(s.OwnerID, s.Kind, s.SubjectID, sev, 0, s.KnownBy, s.WitnessedBy)
+		_, holdEvs := w.addSecretWithWitnesses(s.OwnerID, s.Kind, s.SubjectID, sev, Event{}, s.KnownBy, s.WitnessedBy)
 		events = append(events, holdEvs...)
 	}
 
@@ -231,8 +252,8 @@ func (w *World) ApplyExternalPatch(patch ExternalPatch) ([]Event, error) {
 		if d.Stance != "" {
 			rel.Stance = d.Stance
 		}
-		if d.RelationScore != 0 || d.Stance == "neutral" {
-			rel.RelationScore = d.RelationScore
+		if d.RelationScore != nil {
+			rel.RelationScore = *d.RelationScore
 		}
 		if d.Reason != "" {
 			rel.Reason = d.Reason
@@ -257,9 +278,13 @@ func (w *World) ApplyExternalPatch(patch ExternalPatch) ([]Event, error) {
 				"stance":         rel.Stance,
 				"relation_score": rel.RelationScore,
 				"reason":         rel.Reason,
+				"observation": Observation{
+					Kind: evKind, SubjectID: rel.FactionA, ObjectID: rel.FactionB, Quantity: rel.RelationScore,
+				},
 			},
 		}
 		w.NextID++
+		rel.RootEventID = ev.ID
 		events = append(events, ev)
 	}
 
@@ -269,7 +294,12 @@ func (w *World) ApplyExternalPatch(patch ExternalPatch) ([]Event, error) {
 		if a == nil || a.Dead {
 			return nil, fmt.Errorf("add_ambition references missing or dead actor %q", amb.ActorID)
 		}
-		kind := normalizeAmbitionKind(amb.Kind)
+		kind := amb.Kind
+		switch kind {
+		case "accumulate_wealth", "ascend_tier", "master_skill", "advance_profession", "trade_in_district", "seize_leadership", "avenge_blood", "expose_corrupt":
+		default:
+			return nil, fmt.Errorf("unknown ambition %q", kind)
+		}
 		newAmb := ActorAmbition{
 			ID:          fmt.Sprintf("amb_patch_%d_%s_%s", w.Tick, a.ID, kind),
 			Kind:        kind,

@@ -21,7 +21,7 @@ type SeasonSpec struct {
 
 // CalendarSpec defines each season duration. The default is a 365-day non-leap year.
 type CalendarSpec struct {
-	Seasons []SeasonSpec `json:"seasons,omitempty"`
+	Seasons []SeasonSpec `json:"seasons"`
 }
 
 // CalendarState is the derived calendar date for any quarter-hour simulation tick.
@@ -37,8 +37,17 @@ type CalendarState struct {
 
 // CalendarAt computes the year, season, and day within season from tick and CalendarSpec.
 func CalendarAt(tick int64, spec CalendarSpec) CalendarState {
-	if len(spec.Seasons) == 0 {
+	if spec.Seasons == nil {
 		spec = DefaultCalendarSpec()
+	}
+	if len(spec.Seasons) == 0 {
+		days := DefaultCalendarSpec()
+		yearDays := 0
+		for _, season := range days.Seasons {
+			yearDays += season.Days
+		}
+		day := ClockAt(tick).Day - 1
+		return CalendarState{Year: day/yearDays + 1, SeasonIndex: -1, DayOfYear: day%yearDays + 1, DaysInYear: yearDays}
 	}
 	yearDays := 0
 	for _, season := range spec.Seasons {
@@ -185,6 +194,7 @@ type DiseaseSpec struct {
 
 // LifecycleSpec defines age brackets, fertility, aging, natural elder mortality, and successor hydration rules.
 type LifecycleSpec struct {
+	configured                bool
 	WasteItem                 string `json:"waste_item,omitempty"`
 	WastePerFoodDivisor       int64  `json:"waste_per_food_divisor,omitempty"`
 	CompostRecipeID           string `json:"compost_recipe_id,omitempty"`
@@ -204,9 +214,15 @@ type LifecycleSpec struct {
 
 // EcologySpec configures initial ecological state for an external WorldPack.
 type EcologySpec struct {
-	Enabled        bool                     `json:"enabled,omitempty"`
-	ScalePop       int                      `json:"scale_pop,omitempty"`
-	DistrictStates map[string]DistrictState `json:"district_states,omitempty"`
+	Enabled        *bool                            `json:"enabled,omitempty"`
+	ScalePop       int                              `json:"scale_pop,omitempty"`
+	DistrictStates map[string]DistrictStateOverride `json:"district_states,omitempty"`
+}
+
+// DistrictStateOverride distinguishes omitted starting sanitation from a declared zero.
+type DistrictStateOverride struct {
+	DistrictState
+	Sanitation *int `json:"sanitation,omitempty"`
 }
 
 // ActiveDisaster tracks an ongoing regional disaster in a district until ExpiresTick.
@@ -802,7 +818,7 @@ func (w *World) pickSeasonWeather(districtID string, cal CalendarState) string {
 		return "clear"
 	}
 	sort.Strings(keys)
-	roll := int(worldHash(w.ID, w.Tick, "weather:"+districtID) % uint64(total))
+	roll := int(w.settlementRandom(w.Tick, "weather:"+districtID) % uint64(total))
 	acc := 0
 	for _, k := range keys {
 		wt := 10
@@ -971,7 +987,7 @@ func (w *World) stepWorldEnvironment() []Event {
 					infraMitigationPct = (infraCond * 60) / 100 // well-maintained levees/wells cut disaster risk & damage up to 60%!
 					prob = (prob * (100 - infraMitigationPct/2)) / 100
 				}
-				roll := int(worldHash(w.ID, w.Tick, "disaster:"+dID+":"+dis.ID) % 1000)
+				roll := int(w.settlementRandom(w.Tick, "disaster:"+dID+":"+dis.ID) % 1000)
 				if roll >= prob {
 					continue
 				}
@@ -1415,6 +1431,7 @@ func (w *World) districtsConnected(a, b string) bool {
 	}
 	return false
 }
+
 // and wild beast/anomaly encounters during primary resource extraction.
 func (w *World) stepCohortEncountersAndAccidents() []Event {
 	var events []Event
@@ -1458,12 +1475,12 @@ func (w *World) stepCohortEncountersAndAccidents() []Event {
 				cond := ds.Infrastructure[acc.SafetyInfra]
 				prob = (prob * (100 - cond/2)) / 100
 			}
-			roll := int(worldHash(w.ID, w.Tick, "acc:"+c.ID+":"+acc.ID) % 1000)
+			roll := int(w.settlementRandom(w.Tick, "acc:"+c.ID+":"+acc.ID) % 1000)
 			if roll < prob {
 				wReq := maxInt(1, exposed/450)
 				dNumer := int64(wReq) * int64(acc.LethalityPermille)
 				dReq := int(dNumer / 1000)
-				if rem := dNumer % 1000; rem > 0 && int64(worldHash(w.ID, w.Tick, "accd:"+c.ID+":"+acc.ID)%1000) < rem {
+				if rem := dNumer % 1000; rem > 0 && int64(w.settlementRandom(w.Tick, "accd:"+c.ID+":"+acc.ID)%1000) < rem {
 					dReq++
 				}
 				cw, cd, _ := w.applyCohortCasualtiesWithCause(c, wReq, dReq, 0, "accident")
@@ -1502,12 +1519,12 @@ func (w *World) stepCohortEncountersAndAccidents() []Event {
 				continue
 			}
 			prob := (enc.HazardPermille * act) / 30
-			roll := int(worldHash(w.ID, w.Tick, "enc:"+c.ID+":"+enc.ID) % 1000)
+			roll := int(w.settlementRandom(w.Tick, "enc:"+c.ID+":"+enc.ID) % 1000)
 			if roll < prob {
 				wReq := maxInt(1, exposed/500)
 				dNumer := int64(wReq) * int64(enc.LethalityPermille)
 				dReq := int(dNumer / 1000)
-				if rem := dNumer % 1000; rem > 0 && int64(worldHash(w.ID, w.Tick, "encd:"+c.ID+":"+enc.ID)%1000) < rem {
+				if rem := dNumer % 1000; rem > 0 && int64(w.settlementRandom(w.Tick, "encd:"+c.ID+":"+enc.ID)%1000) < rem {
 					dReq++
 				}
 				cw, cd, _ := w.applyCohortCasualtiesWithCause(c, wReq, dReq, 0, "beast")
@@ -1641,13 +1658,13 @@ func (w *World) checkActorCraftAccident(tx *WorldTx, a *Actor, x Action, r Recip
 		if prob <= 0 {
 			continue
 		}
-		roll := int(worldHash(w.ID, w.Tick, "actor_acc:"+a.ID+":"+acc.ID+":"+r.ID) % 1000)
+		roll := int(w.settlementRandom(w.Tick, "actor_acc:"+a.ID+":"+acc.ID+":"+r.ID) % 1000)
 		if roll >= prob {
 			continue
 		}
 		leth := (acc.LethalityPermille * (100 - mit.skillMitPct/2) * (100 - mit.tierDefPct)) / 10000
 		dmg := maxInt(4, (maxInt(8, acc.Damage)*(100-mit.tierDefPct))/100)
-		dRoll := int(worldHash(w.ID, w.Tick, "actor_accd:"+a.ID+":"+acc.ID+":"+r.ID) % 1000)
+		dRoll := int(w.settlementRandom(w.Tick, "actor_accd:"+a.ID+":"+acc.ID+":"+r.ID) % 1000)
 		prevHealth := a.Health
 		if dRoll < leth {
 			tx.setHealth(a, 0, 0, x.Kind)
@@ -1742,13 +1759,13 @@ func (w *World) checkActorTransitHazard(tx *WorldTx, a *Actor, x Action, fromDis
 		if prob <= 0 {
 			continue
 		}
-		roll := int(worldHash(w.ID, w.Tick, "actor_transit:"+a.ID+":"+acc.ID+":"+toDistrict) % 1000)
+		roll := int(w.settlementRandom(w.Tick, "actor_transit:"+a.ID+":"+acc.ID+":"+toDistrict) % 1000)
 		if roll >= prob {
 			continue
 		}
 		leth := (acc.LethalityPermille * (100 - mit.tierDefPct) * (100 - mit.evasionMitPct/2)) / 10000
 		dmg := maxInt(4, (maxInt(8, acc.Damage)*(100-mit.tierDefPct))/100)
-		dRoll := int(worldHash(w.ID, w.Tick, "actor_transitd:"+a.ID+":"+acc.ID+":"+toDistrict) % 1000)
+		dRoll := int(w.settlementRandom(w.Tick, "actor_transitd:"+a.ID+":"+acc.ID+":"+toDistrict) % 1000)
 		prevHealth := a.Health
 		if dRoll < leth {
 			tx.setHealth(a, 0, 0, x.Kind)
@@ -1809,13 +1826,13 @@ func (w *World) checkActorTransitHazard(tx *WorldTx, a *Actor, x Action, fromDis
 		if prob <= 0 {
 			continue
 		}
-		roll := int(worldHash(w.ID, w.Tick, "actor_tenc:"+a.ID+":"+enc.ID+":"+toDistrict) % 1000)
+		roll := int(w.settlementRandom(w.Tick, "actor_tenc:"+a.ID+":"+enc.ID+":"+toDistrict) % 1000)
 		if roll >= prob {
 			continue
 		}
 		leth := (enc.LethalityPermille * (100 - mit.tierDefPct) * (100 - mit.combatDefPct/2)) / 10000
 		dmg := maxInt(4, (maxInt(8, enc.Damage)*(100-mit.tierDefPct))/100)
-		dRoll := int(worldHash(w.ID, w.Tick, "actor_tencd:"+a.ID+":"+enc.ID+":"+toDistrict) % 1000)
+		dRoll := int(w.settlementRandom(w.Tick, "actor_tencd:"+a.ID+":"+enc.ID+":"+toDistrict) % 1000)
 		prevHealth := a.Health
 		if dRoll < leth {
 			tx.setHealth(a, 0, 0, x.Kind)
@@ -1894,13 +1911,13 @@ func (w *World) stepActorOutdoorEncounters() []Event {
 			if prob <= 0 {
 				continue
 			}
-			roll := int(worldHash(w.ID, w.Tick, "actor_enc:"+a.ID+":"+enc.ID) % 1000)
+			roll := int(w.settlementRandom(w.Tick, "actor_enc:"+a.ID+":"+enc.ID) % 1000)
 			if roll >= prob {
 				continue
 			}
 			leth := (enc.LethalityPermille * (100 - mit.tierDefPct) * (100 - mit.combatDefPct/2)) / 10000
 			dmg := maxInt(4, (maxInt(8, enc.Damage)*(100-mit.tierDefPct))/100)
-			dRoll := int(worldHash(w.ID, w.Tick, "actor_encd:"+a.ID+":"+enc.ID) % 1000)
+			dRoll := int(w.settlementRandom(w.Tick, "actor_encd:"+a.ID+":"+enc.ID) % 1000)
 			prevHealth := a.Health
 			if dRoll < leth {
 				setActorHealthBounded(a, 0, 0)

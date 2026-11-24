@@ -33,6 +33,9 @@ func recordedChoiceAction(action sim.Action) sim.Action {
 		action.Text, action.Statement, action.BasisEventID = "", nil, 0
 	case "issue_decree":
 		action.Text = ""
+	case "accept":
+		// The offer ID selects the trade. Rulebook citations only record why it was chosen.
+		action.BasisEventID = 0
 	}
 	return action
 }

@@ -2,6 +2,22 @@ package sim
 
 import "testing"
 
+func TestDiplomacyProjectionRequiresEvidenceOfCurrentAgreement(t *testing.T) {
+	a := lawPerson("observer")
+	a.Memories = []Memory{{
+		EventID: 10, Tick: 5,
+		Observation: &Observation{Kind: "faction_war_declared", SubjectID: "alpha", ObjectID: "beta"},
+	}}
+	current := FactionDiplomacy{FactionA: "alpha", FactionB: "beta", Stance: "neutral", WarStartedTick: 5, RootEventID: 20}
+	if actorKnowsDiplomacyUpdate(a, current) {
+		t.Fatal("witnessing the old war revealed the new peace treaty")
+	}
+	a.Memories = append(a.Memories, Memory{EventID: 21, FactEventID: 20, Statement: &Statement{Topic: "peace_treaty_signed"}})
+	if !actorKnowsDiplomacyUpdate(a, current) {
+		t.Fatal("verified news of the current treaty was hidden")
+	}
+}
+
 func TestP4EpistemicIsolationPartiesDisguiseDiplomacyCitationsAndRumors(t *testing.T) {
 	w := Village("p4-epistemic")
 	a := &w.Actors[0]

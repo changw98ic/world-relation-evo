@@ -15,8 +15,10 @@ type ActionIntent struct {
 // ActionCheckResult is the single-source precondition verdict shared by
 // candidate construction (Perception) and authoritative execution (World).
 type ActionCheckResult struct {
-	Allowed     bool   `json:"allowed"`
-	BlockReason string `json:"block_reason,omitempty"`
+	Allowed          bool   `json:"allowed"`
+	BlockReason      string `json:"block_reason,omitempty"`
+	routeUnavailable bool
+	workRate         actionWorkRate
 }
 
 func AllowAction() ActionCheckResult {
@@ -30,17 +32,19 @@ func BlockAction(reason string) ActionCheckResult {
 	return ActionCheckResult{Allowed: false, BlockReason: reason}
 }
 
-// Candidate represents a structured, legal action candidate produced by
-// CandidateBuilder and consumed uniformly by all Deciders (Jev, Rules, Rulebook, Playbook).
+// Candidate is an action and its parameters as viewed by the actor.
 type Candidate struct {
-	ID           string       `json:"id"`
-	Label        string       `json:"label"`
-	Intent       ActionIntent `json:"intent"`
-	Source       string       `json:"source,omitempty"`
-	RuleIDs      []string     `json:"rule_ids,omitempty"`
-	RuleReason   string       `json:"rule_reason,omitempty"`
-	BasisEventID int64        `json:"basis_event_id,omitempty"`
-	PriorityHint float64      `json:"priority_hint,omitempty"`
+	ID           string   `json:"id"`
+	Label        string   `json:"label"`
+	Action       Action   `json:"action"`
+	Source       string   `json:"source,omitempty"`
+	RuleIDs      []string `json:"rule_ids,omitempty"`
+	RuleReason   string   `json:"rule_reason,omitempty"`
+	PriorityHint float64  `json:"priority_hint,omitempty"`
+}
+
+func (c Candidate) Intent() ActionIntent {
+	return ActionIntent{Action: c.Action, CandidateID: c.ID, RuleIDs: c.RuleIDs, RuleReason: c.RuleReason, Source: c.Source}
 }
 
 // StateMutationRecord records an atomic state mutation applied via StatePrimitives.
@@ -64,14 +68,22 @@ type ExecutionResult struct {
 // ActionMetadata is the single authoritative descriptor for every engine built-in
 // and declarative action kind.
 type ActionMetadata struct {
-	Kind        string `json:"kind"`
-	Category    string `json:"category"`
-	Targeted    bool   `json:"targeted,omitempty"`
-	Relocation  bool   `json:"relocation,omitempty"`
-	MultiTick   bool   `json:"multi_tick,omitempty"`
-	Builtin     bool   `json:"builtin,omitempty"`
-	Declarative bool   `json:"declarative,omitempty"`
+	Kind            string `json:"kind"`
+	Category        string `json:"category"`
+	Targeted        bool   `json:"targeted,omitempty"`
+	Relocation      bool   `json:"relocation,omitempty"`
+	MultiTick       bool   `json:"multi_tick,omitempty"`
+	Builtin         bool   `json:"builtin,omitempty"`
+	Declarative     bool   `json:"declarative,omitempty"`
+	referenceEnergy int
 }
+
+const (
+	timeOnlyEnergy        = -1 // Recovery, time passing, or a change of intent.
+	energyFromActionFacts = -2 // A route, recipe, facility, or communication channel owns the amount.
+	lightActionEnergy     = 1  // One brief interaction or piece of paperwork.
+	handlingActionEnergy  = 2  // A transaction, transfer, or handling job.
+)
 
 // ActionExecutor executes an ActionIntent against the authoritative World.
 type ActionExecutor interface {
@@ -81,121 +93,123 @@ type ActionExecutor interface {
 
 var builtinActionMetadataList = []ActionMetadata{
 	// Survival & Rest
-	{Kind: "wait", Category: "survival", Builtin: true},
-	{Kind: "begin_rest", Category: "survival", Builtin: true},
-	{Kind: "end_rest", Category: "survival", Builtin: true},
-	{Kind: "sleep", Category: "survival", MultiTick: true, Builtin: true},
-	{Kind: "eat", Category: "survival", Builtin: true},
-	{Kind: "drink", Category: "survival", Builtin: true},
-	{Kind: "relieve", Category: "survival", Builtin: true},
-	{Kind: "medicate", Category: "survival", Builtin: true},
-	{Kind: "heal", Category: "survival", Targeted: true, Builtin: true},
+	{Kind: "wait", Category: "survival", Builtin: true, referenceEnergy: timeOnlyEnergy},
+	{Kind: "begin_rest", Category: "survival", Builtin: true, referenceEnergy: timeOnlyEnergy},
+	{Kind: "end_rest", Category: "survival", Builtin: true, referenceEnergy: timeOnlyEnergy},
+	{Kind: "sleep", Category: "survival", MultiTick: true, Builtin: true, referenceEnergy: timeOnlyEnergy},
+	{Kind: "eat", Category: "survival", Builtin: true, referenceEnergy: timeOnlyEnergy},
+	{Kind: "drink", Category: "survival", Builtin: true, referenceEnergy: timeOnlyEnergy},
+	{Kind: "relieve", Category: "survival", Builtin: true, referenceEnergy: timeOnlyEnergy},
+	{Kind: "medicate", Category: "survival", Builtin: true, referenceEnergy: timeOnlyEnergy},
+	{Kind: "heal", Category: "survival", Targeted: true, Builtin: true, referenceEnergy: handlingActionEnergy},
 
 	// Movement & Housing
-	{Kind: "move", Category: "movement", Relocation: true, MultiTick: true, Builtin: true},
-	{Kind: "move_venue", Category: "movement", Relocation: true, MultiTick: true, Builtin: true},
-	{Kind: "enter_house", Category: "movement", Relocation: true, Builtin: true},
-	{Kind: "leave_house", Category: "movement", Relocation: true, Builtin: true},
-	{Kind: "repair_house", Category: "housing", MultiTick: true, Builtin: true},
-	{Kind: "upgrade_house", Category: "housing", MultiTick: true, Builtin: true},
-	{Kind: "transfer_house", Category: "housing", Targeted: true, Builtin: true},
+	{Kind: "move", Category: "movement", Relocation: true, MultiTick: true, Builtin: true, referenceEnergy: energyFromActionFacts},
+	{Kind: "move_venue", Category: "movement", Relocation: true, MultiTick: true, Builtin: true, referenceEnergy: energyFromActionFacts},
+	{Kind: "enter_house", Category: "movement", Relocation: true, Builtin: true, referenceEnergy: timeOnlyEnergy},
+	{Kind: "leave_house", Category: "movement", Relocation: true, Builtin: true, referenceEnergy: timeOnlyEnergy},
+	{Kind: "repair_house", Category: "housing", MultiTick: true, Builtin: true, referenceEnergy: 8},
+	{Kind: "upgrade_house", Category: "housing", MultiTick: true, Builtin: true, referenceEnergy: 12},
+	{Kind: "transfer_house", Category: "housing", Targeted: true, Builtin: true, referenceEnergy: lightActionEnergy},
 
 	// Production, Growth & Energy
-	{Kind: "craft", Category: "production", MultiTick: true, Builtin: true},
-	{Kind: "refuel", Category: "production", Targeted: true, Builtin: true},
-	{Kind: "harvest", Category: "production", Targeted: true, Builtin: true},
-	{Kind: "propose_growth_care", Category: "production", Targeted: true, Builtin: true},
-	{Kind: "accept_growth_care", Category: "production", Targeted: true, Builtin: true},
-	{Kind: "dispatch_harvest", Category: "production", Targeted: true, Builtin: true},
-	{Kind: "maintain_infra", Category: "ecology", MultiTick: true, Builtin: true},
-	{Kind: "hunt_threat", Category: "ecology", Targeted: true, MultiTick: true, Builtin: true},
-	{Kind: "perform_ritual", Category: "ecology", MultiTick: true, Builtin: true},
-	{Kind: "claim_world_event", Category: "world_event", Targeted: true, Builtin: true},
+	{Kind: "craft", Category: "production", MultiTick: true, Builtin: true, referenceEnergy: energyFromActionFacts},
+	{Kind: "refuel", Category: "production", Targeted: true, Builtin: true, referenceEnergy: handlingActionEnergy},
+	{Kind: "harvest", Category: "production", Targeted: true, Builtin: true, referenceEnergy: 4},
+	{Kind: "propose_growth_care", Category: "production", Targeted: true, Builtin: true, referenceEnergy: lightActionEnergy},
+	{Kind: "accept_growth_care", Category: "production", Targeted: true, Builtin: true, referenceEnergy: lightActionEnergy},
+	{Kind: "dispatch_harvest", Category: "production", Targeted: true, Builtin: true, referenceEnergy: handlingActionEnergy},
+	{Kind: "maintain_infra", Category: "ecology", MultiTick: true, Builtin: true, referenceEnergy: energyFromActionFacts},
+	{Kind: "hunt_threat", Category: "ecology", Targeted: true, MultiTick: true, Builtin: true, referenceEnergy: 10},
+	{Kind: "perform_ritual", Category: "ecology", MultiTick: true, Builtin: true, referenceEnergy: energyFromActionFacts},
+	{Kind: "claim_world_event", Category: "world_event", Targeted: true, Builtin: true, referenceEnergy: 8},
 
 	// Economy, Trade, Credit & Continuity
-	{Kind: "offer", Category: "economy", Targeted: true, Builtin: true},
-	{Kind: "accept", Category: "economy", Targeted: true, Builtin: true},
-	{Kind: "reject", Category: "economy", Targeted: true, Builtin: true},
-	{Kind: "start_plan", Category: "continuity", Builtin: true},
-	{Kind: "abandon_plan", Category: "continuity", Builtin: true},
-	{Kind: "propose_agreement", Category: "continuity", Targeted: true, Builtin: true},
-	{Kind: "accept_agreement", Category: "continuity", Targeted: true, Builtin: true},
-	{Kind: "reject_agreement", Category: "continuity", Targeted: true, Builtin: true},
-	{Kind: "fulfill_agreement", Category: "continuity", Targeted: true, Builtin: true},
-	{Kind: "borrow_loan", Category: "credit", Targeted: true, Builtin: true},
-	{Kind: "accept_loan", Category: "credit", Targeted: true, Builtin: true},
-	{Kind: "reject_loan", Category: "credit", Targeted: true, Builtin: true},
-	{Kind: "cancel_loan", Category: "credit", Targeted: true, Builtin: true},
-	{Kind: "repay_loan", Category: "credit", Builtin: true},
-	{Kind: "foreclose_collateral", Category: "credit", Targeted: true, Builtin: true},
+	{Kind: "offer", Category: "economy", Targeted: true, Builtin: true, referenceEnergy: lightActionEnergy},
+	{Kind: "accept", Category: "economy", Targeted: true, Builtin: true, referenceEnergy: handlingActionEnergy},
+	{Kind: "reject", Category: "economy", Targeted: true, Builtin: true, referenceEnergy: lightActionEnergy},
+	{Kind: "market_buy", Category: "economy", Targeted: true, Builtin: true, referenceEnergy: handlingActionEnergy},
+	{Kind: "market_sell", Category: "economy", Targeted: true, Builtin: true, referenceEnergy: handlingActionEnergy},
+	{Kind: "start_plan", Category: "continuity", Builtin: true, referenceEnergy: timeOnlyEnergy},
+	{Kind: "abandon_plan", Category: "continuity", Builtin: true, referenceEnergy: timeOnlyEnergy},
+	{Kind: "propose_agreement", Category: "continuity", Targeted: true, Builtin: true, referenceEnergy: lightActionEnergy},
+	{Kind: "accept_agreement", Category: "continuity", Targeted: true, Builtin: true, referenceEnergy: lightActionEnergy},
+	{Kind: "reject_agreement", Category: "continuity", Targeted: true, Builtin: true, referenceEnergy: lightActionEnergy},
+	{Kind: "fulfill_agreement", Category: "continuity", Targeted: true, Builtin: true, referenceEnergy: handlingActionEnergy},
+	{Kind: "borrow_loan", Category: "credit", Targeted: true, Builtin: true, referenceEnergy: lightActionEnergy},
+	{Kind: "accept_loan", Category: "credit", Targeted: true, Builtin: true, referenceEnergy: lightActionEnergy},
+	{Kind: "reject_loan", Category: "credit", Targeted: true, Builtin: true, referenceEnergy: lightActionEnergy},
+	{Kind: "cancel_loan", Category: "credit", Targeted: true, Builtin: true, referenceEnergy: lightActionEnergy},
+	{Kind: "repay_loan", Category: "credit", Builtin: true, referenceEnergy: lightActionEnergy},
+	{Kind: "foreclose_collateral", Category: "credit", Targeted: true, Builtin: true, referenceEnergy: lightActionEnergy},
 
 	// Factions, Professions, Skills & Equipment
-	{Kind: "join_faction", Category: "faction", Builtin: true},
-	{Kind: "join_profession", Category: "progression", Builtin: true},
-	{Kind: "practice_skill", Category: "progression", Builtin: true},
-	{Kind: "equip", Category: "equipment", Builtin: true},
-	{Kind: "unequip", Category: "equipment", Builtin: true},
-	{Kind: "attempt_transition", Category: "progression", MultiTick: true, Builtin: true},
-	{Kind: "refine_currency_item", Category: "progression", Builtin: true},
-	{Kind: "absorb_item_slot", Category: "progression", Builtin: true},
+	{Kind: "join_faction", Category: "faction", Builtin: true, referenceEnergy: lightActionEnergy},
+	{Kind: "join_profession", Category: "progression", Builtin: true, referenceEnergy: 4},
+	{Kind: "practice_skill", Category: "progression", Builtin: true, referenceEnergy: 4},
+	{Kind: "equip", Category: "equipment", Builtin: true, referenceEnergy: lightActionEnergy},
+	{Kind: "unequip", Category: "equipment", Builtin: true, referenceEnergy: lightActionEnergy},
+	{Kind: "attempt_transition", Category: "progression", MultiTick: true, Builtin: true, referenceEnergy: 4},
+	{Kind: "refine_currency_item", Category: "progression", Builtin: true, referenceEnergy: handlingActionEnergy},
+	{Kind: "absorb_item_slot", Category: "progression", Builtin: true, referenceEnergy: handlingActionEnergy},
 
 	// Flow, Knowledge & World Laws
-	{Kind: "sever_flow_edge", Category: "infrastructure", Targeted: true, Builtin: true},
-	{Kind: "repair_flow_edge", Category: "infrastructure", Targeted: true, Builtin: true},
-	{Kind: "research_tech", Category: "knowledge", MultiTick: true, Builtin: true},
-	{Kind: "teach_knowledge", Category: "knowledge", Targeted: true, Builtin: true},
-	{Kind: "adopt_facility", Category: "knowledge", MultiTick: true, Builtin: true},
-	{Kind: "rewrite_world_law", Category: "world_law", Builtin: true},
+	{Kind: "sever_flow_edge", Category: "infrastructure", Targeted: true, Builtin: true, referenceEnergy: 4},
+	{Kind: "repair_flow_edge", Category: "infrastructure", Targeted: true, Builtin: true, referenceEnergy: 4},
+	{Kind: "research_tech", Category: "knowledge", MultiTick: true, Builtin: true, referenceEnergy: energyFromActionFacts},
+	{Kind: "teach_knowledge", Category: "knowledge", Targeted: true, Builtin: true, referenceEnergy: 4},
+	{Kind: "adopt_facility", Category: "knowledge", MultiTick: true, Builtin: true, referenceEnergy: energyFromActionFacts},
+	{Kind: "rewrite_world_law", Category: "world_law", Builtin: true, referenceEnergy: 8},
 
 	// Communication & Governance
-	{Kind: "speak", Category: "communication", Targeted: true, Builtin: true},
-	{Kind: "transmit_message", Category: "communication", Targeted: true, Builtin: true},
-	{Kind: "issue_decree", Category: "polity", Builtin: true},
+	{Kind: "speak", Category: "communication", Targeted: true, Builtin: true, referenceEnergy: lightActionEnergy},
+	{Kind: "transmit_message", Category: "communication", Targeted: true, Builtin: true, referenceEnergy: energyFromActionFacts},
+	{Kind: "issue_decree", Category: "polity", Builtin: true, referenceEnergy: 4},
 
 	// Combat, Crime & Coercion
-	{Kind: "attack", Category: "combat", Targeted: true, Builtin: true},
-	{Kind: "spar", Category: "combat", Targeted: true, Builtin: true},
-	{Kind: "steal", Category: "crime", Targeted: true, Builtin: true},
-	{Kind: "raid", Category: "crime", Targeted: true, Builtin: true},
-	{Kind: "extort", Category: "crime", Targeted: true, Builtin: true},
-	{Kind: "bribe", Category: "crime", Targeted: true, Builtin: true},
+	{Kind: "attack", Category: "combat", Targeted: true, Builtin: true, referenceEnergy: 6},
+	{Kind: "spar", Category: "combat", Targeted: true, Builtin: true, referenceEnergy: 6},
+	{Kind: "steal", Category: "crime", Targeted: true, Builtin: true, referenceEnergy: 5},
+	{Kind: "raid", Category: "crime", Targeted: true, Builtin: true, referenceEnergy: 8},
+	{Kind: "extort", Category: "crime", Targeted: true, Builtin: true, referenceEnergy: 6},
+	{Kind: "bribe", Category: "crime", Targeted: true, Builtin: true, referenceEnergy: 3},
 
 	// Justice & Enforcement
-	{Kind: "open_case", Category: "justice", Targeted: true, Builtin: true},
-	{Kind: "arrest", Category: "justice", Targeted: true, Builtin: true},
-	{Kind: "audit_corruption", Category: "justice", Targeted: true, Builtin: true},
-	{Kind: "hold_trial", Category: "justice", Targeted: true, Builtin: true},
-	{Kind: "frame_suspect", Category: "justice", Targeted: true, Builtin: true},
-	{Kind: "file_appeal", Category: "justice", Targeted: true, Builtin: true},
+	{Kind: "open_case", Category: "justice", Targeted: true, Builtin: true, referenceEnergy: 4},
+	{Kind: "arrest", Category: "justice", Targeted: true, Builtin: true, referenceEnergy: 7},
+	{Kind: "audit_corruption", Category: "justice", Targeted: true, Builtin: true, referenceEnergy: 6},
+	{Kind: "hold_trial", Category: "justice", Targeted: true, Builtin: true, referenceEnergy: 6},
+	{Kind: "frame_suspect", Category: "justice", Targeted: true, Builtin: true, referenceEnergy: 4},
+	{Kind: "file_appeal", Category: "justice", Targeted: true, Builtin: true, referenceEnergy: 4},
 
 	// Relations, Kinship & Turf
-	{Kind: "marry", Category: "relations", Targeted: true, Builtin: true},
-	{Kind: "swear_bond", Category: "relations", Targeted: true, Builtin: true},
-	{Kind: "avenge_feud", Category: "relations", Targeted: true, Builtin: true},
-	{Kind: "mediate_feud", Category: "relations", Targeted: true, Builtin: true},
-	{Kind: "claim_turf", Category: "faction", Builtin: true},
+	{Kind: "marry", Category: "relations", Targeted: true, Builtin: true, referenceEnergy: handlingActionEnergy},
+	{Kind: "swear_bond", Category: "relations", Targeted: true, Builtin: true, referenceEnergy: handlingActionEnergy},
+	{Kind: "avenge_feud", Category: "relations", Targeted: true, Builtin: true, referenceEnergy: 6},
+	{Kind: "mediate_feud", Category: "relations", Targeted: true, Builtin: true, referenceEnergy: handlingActionEnergy},
+	{Kind: "claim_turf", Category: "faction", Builtin: true, referenceEnergy: 5},
 
 	// Parties
-	{Kind: "form_party", Category: "party", Targeted: true, Builtin: true},
-	{Kind: "join_party", Category: "party", Targeted: true, Builtin: true},
-	{Kind: "leave_party", Category: "party", Targeted: true, Builtin: true},
-	{Kind: "betray_party", Category: "party", Targeted: true, Builtin: true},
+	{Kind: "form_party", Category: "party", Targeted: true, Builtin: true, referenceEnergy: 3},
+	{Kind: "join_party", Category: "party", Targeted: true, Builtin: true, referenceEnergy: 2},
+	{Kind: "leave_party", Category: "party", Targeted: true, Builtin: true, referenceEnergy: lightActionEnergy},
+	{Kind: "betray_party", Category: "party", Targeted: true, Builtin: true, referenceEnergy: 6},
 
 	// Diplomacy
-	{Kind: "propose_alliance", Category: "diplomacy", Targeted: true, Builtin: true},
-	{Kind: "declare_war", Category: "diplomacy", Targeted: true, Builtin: true},
-	{Kind: "make_peace", Category: "diplomacy", Targeted: true, Builtin: true},
+	{Kind: "propose_alliance", Category: "diplomacy", Targeted: true, Builtin: true, referenceEnergy: 5},
+	{Kind: "declare_war", Category: "diplomacy", Targeted: true, Builtin: true, referenceEnergy: 6},
+	{Kind: "make_peace", Category: "diplomacy", Targeted: true, Builtin: true, referenceEnergy: 4},
 
 	// Ambitions & Secrets
-	{Kind: "set_ambition", Category: "ambition", Builtin: true},
-	{Kind: "challenge_leadership", Category: "faction", Builtin: true},
-	{Kind: "investigate_actor", Category: "intrigue", Targeted: true, Builtin: true},
-	{Kind: "blackmail", Category: "intrigue", Targeted: true, Builtin: true},
-	{Kind: "expose_secret", Category: "intrigue", Targeted: true, Builtin: true},
+	{Kind: "set_ambition", Category: "ambition", Builtin: true, referenceEnergy: timeOnlyEnergy},
+	{Kind: "challenge_leadership", Category: "faction", Builtin: true, referenceEnergy: handlingActionEnergy},
+	{Kind: "investigate_actor", Category: "intrigue", Targeted: true, Builtin: true, referenceEnergy: 5},
+	{Kind: "blackmail", Category: "intrigue", Targeted: true, Builtin: true, referenceEnergy: 4},
+	{Kind: "expose_secret", Category: "intrigue", Targeted: true, Builtin: true, referenceEnergy: 4},
 
 	// Golden Finger
-	{Kind: "gf_exchange", Category: "golden_finger", Builtin: true},
-	{Kind: "gf_simulate", Category: "golden_finger", Builtin: true},
+	{Kind: "gf_exchange", Category: "golden_finger", Builtin: true, referenceEnergy: lightActionEnergy},
+	{Kind: "gf_simulate", Category: "golden_finger", Builtin: true, referenceEnergy: lightActionEnergy},
 }
 
 var builtinActionMetadataIndex = func() map[string]ActionMetadata {
@@ -206,7 +220,7 @@ var builtinActionMetadataIndex = func() map[string]ActionMetadata {
 	return m
 }()
 
-// BuiltinActionMetadata returns a copy of all 89 built-in engine action descriptors.
+// BuiltinActionMetadata returns a copy of the engine's built-in action descriptors.
 func BuiltinActionMetadata() []ActionMetadata {
 	out := make([]ActionMetadata, len(builtinActionMetadataList))
 	copy(out, builtinActionMetadataList)
@@ -318,5 +332,7 @@ func (DefaultActionExecutor) executeTx(tx *WorldTx, a *Actor) ExecutionResult {
 	if a == nil {
 		return ExecutionResult{Reason: "unknown actor: " + tx.ActorID}
 	}
+	tx.trackStoredActor(a.ID)
+	tx.trackStoredActor(tx.Intent.Action.TargetID)
 	return tx.commitEvents(tx.World.apply(tx, a, tx.Intent.Action))
 }

@@ -1,6 +1,63 @@
 package sim
 
-import "testing"
+import (
+	"encoding/json"
+	"math"
+	"testing"
+)
+
+func TestSnapshotRestoresPrivateStockToItsOwner(t *testing.T) {
+	w := lawWorld()
+	a := &w.Actors[0]
+	a.Items["wood"] = math.MaxInt - 2
+	w.Cohorts = []PopulationCohort{{ID: "merchant", District: "home", Population: 1, Adults: 1}}
+	w.MarketCredit = NewMarketCreditState()
+	w.MarketCredit.HoardedStock[a.ID] = map[string]int64{"wood": 2}
+	w.MarketCredit.HoardedStock["merchant"] = map[string]int64{"grain": 1}
+	w.InitLedgerAudit()
+	raw, err := json.Marshal(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := DecodeWorldSnapshot(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.Actors[0].Items["wood"] != math.MaxInt || restored.MarketCredit.HoardedStock[a.ID] != nil ||
+		restored.MarketCredit.HoardedStock["merchant"]["grain"] != 1 {
+		t.Fatal("personal or cohort holdings changed ownership")
+	}
+	if err := restored.VerifyLedgerConservation(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPostedMarketLotSettlesOnceAtTheExactCashBound(t *testing.T) {
+	w := lawWorld()
+	a, b := &w.Actors[0], &w.Actors[1]
+	a.Location, b.Location = "home", "home"
+	a.Money, b.Money = 1, 0
+	w.Catalog.Items["grain"] = ItemSpec{ID: "grain", Edible: true, NutritionUnits: 1, Tradeable: true, BatchQty: 2, BatchPrice: 1}
+	w.Cohorts = []PopulationCohort{{ID: "seller", District: "home", Population: 1, Adults: 1, AvgEnergy: 4,
+		MoneyPool: math.MaxInt64 - 1, ItemPool: map[string]int64{"grain": 5}}}
+	lot := Action{Kind: "market_buy", TargetID: "seller", Location: "home", Item: "grain", Quantity: 2, Price: 1}
+	w.InitLedgerAudit()
+	lawOK(t, w.Apply(a.ID, lot))
+	if a.Items["grain"] != 2 || a.Money != 0 || w.Cohorts[0].MoneyPool != math.MaxInt64 || w.Cohorts[0].ItemPool["grain"] != 3 {
+		t.Fatalf("the exact legal budget or public reserve was lost: %+v, %+v", a, w.Cohorts[0])
+	}
+	w.Cohorts[0].MoneyPool--
+	b.Money++
+	if events := w.Apply(b.ID, lot); len(events) != 1 || events[0].Kind != "action_failed" {
+		t.Fatalf("the already sold lot settled again: %+v", events)
+	}
+	if b.Money != 1 || b.Items["grain"] != 0 || w.Cohorts[0].ItemPool["grain"] != 3 {
+		t.Fatal("the unavailable lot charged money or sold protected stock")
+	}
+	if err := w.VerifyLedgerConservation(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestRationAccessAtLowHealthRequiresPresentBuyerSurplusAndPayment(t *testing.T) {
 	for _, tc := range []struct {
@@ -24,9 +81,12 @@ func TestRationAccessAtLowHealthRequiresPresentBuyerSurplusAndPayment(t *testing
 			}
 			w.PublicTreasury = int64(tc.treasury)
 			w.Catalog.Items["grain"] = ItemSpec{ID: "grain", Edible: true, NutritionUnits: 1, Tradeable: true, BatchQty: 2, BatchPrice: 1}
-			w.Cohorts = []PopulationCohort{{ID: "seller", District: "home", Population: 1, Adults: 1, ItemPool: map[string]int64{"grain": int64(tc.stock)}}}
+			w.Cohorts = []PopulationCohort{{ID: "seller", District: "home", Population: 1, Adults: 1, AvgEnergy: 2, ItemPool: map[string]int64{"grain": int64(tc.stock)}}}
 			w.InitLedgerAudit()
-			w.clearFocalActorCohortTrades()
+			if tc.wallet > 0 {
+				w.Apply(a.ID, Action{Kind: "market_buy", TargetID: "seller", Location: "home", Item: "grain", Quantity: 2, Price: 1})
+			}
+			w.settleFocalRelief()
 			cost := tc.want / 2
 			if a.Items["grain"] != tc.want || w.Cohorts[0].ItemPool["grain"] != int64(tc.stock-tc.want) || w.Cohorts[0].MoneyPool != int64(cost) || a.Money != tc.wallet-min(tc.wallet, cost) || w.PublicTreasury != int64(tc.treasury-(cost-min(tc.wallet, cost))) || a.Hunger != 6 {
 				t.Fatalf("delivery, payment or hunger wrong: actor %+v seller %+v treasury %d", a, w.Cohorts[0], w.PublicTreasury)
@@ -72,9 +132,14 @@ func TestFoodSaleRulesAlsoApplyWhenTreasuryPays(t *testing.T) {
 				item := ItemSpec{ID: "grain", Edible: true, Tradeable: true, BatchQty: 2, BatchPrice: 1, NutritionUnits: 1}
 				tc.configure(w, &item)
 				w.Catalog.Items["grain"] = item
-				w.Cohorts = []PopulationCohort{{ID: "supplier", District: "home", Population: 1, Adults: 1, ItemPool: map[string]int64{"grain": 6}}}
+				w.Cohorts = []PopulationCohort{{ID: "supplier", District: "home", Population: 1, Adults: 1, AvgEnergy: 2, ItemPool: map[string]int64{"grain": 6}}}
 				w.InitLedgerAudit()
-				events := w.clearFocalActorCohortTrades()
+				var events []Event
+				if public {
+					events = w.settleFocalRelief()
+				} else {
+					events = w.Apply(a.ID, Action{Kind: "market_buy", TargetID: "supplier", Location: "home", Item: "grain", Quantity: 2, Price: 1})
+				}
 				if a.Items["grain"] != tc.want || w.Cohorts[0].ItemPool["grain"] != int64(6-tc.want) || w.Cohorts[0].MoneyPool != int64(tc.want/2) || int64(a.Money)+w.PublicTreasury != int64(1-tc.want/2) {
 					t.Fatalf("unsettled or unauthorized procurement: %+v", events)
 				}

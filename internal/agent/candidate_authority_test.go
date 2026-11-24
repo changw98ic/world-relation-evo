@@ -2,10 +2,95 @@ package agent
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/changw98ic/world-relation-evo/internal/sim"
 )
+
+func TestLoanCandidateAndExecutionUseConfiguredTraderTag(t *testing.T) {
+	w := boundaryWorld()
+	w.Catalog.TagActions["resident"] = append(w.Catalog.TagActions["resident"], "borrow_loan")
+	w.MarketCredit = sim.NewMarketCreditState()
+	w.MarketCredit.Spec.TraderTag = "licensed_merchant"
+	lender := &w.Actors[1]
+	lender.Tags, lender.Money = []string{"resident", "trader"}, 27
+	request := sim.Action{Kind: "borrow_loan", TargetID: lender.ID}
+	events := w.Apply("alice", request)
+	if len(events) != 1 || events[0].Kind != "action_failed" || !strings.Contains(fmt.Sprint(events[0].Payload["text"]), "configured trader tag") {
+		t.Fatalf("lender without the configured tag: %+v", events)
+	}
+	lender.Tags = []string{"resident", "licensed_merchant"}
+	request = boundaryOption(t, w, "alice", "borrow_loan", lender.ID)
+	events = boundaryApply(t, w, "alice", request)
+	if len(events) != 1 || events[0].Kind != "loan_requested" || w.MarketCredit.LoanRequests[0].Principal != 12 || lender.Money != 27 {
+		t.Fatalf("expected a 12-coin request before any payment: %+v", events)
+	}
+}
+
+func TestSeventhPartyMemberCanChooseAndJoin(t *testing.T) {
+	w := boundaryWorld()
+	w.Catalog.TagActions["resident"] = append(w.Catalog.TagActions["resident"], "join_party")
+	w.Parties = []sim.Party{{ID: "expedition", LeaderID: "bob", ExpiresTick: w.Tick + 1, MemberIDs: []string{"bob"}}}
+	for i := 0; i < 5; i++ {
+		member := sim.CloneActor(w.Actors[1])
+		member.ID = fmt.Sprintf("member%d", i)
+		w.Actors = append(w.Actors, member)
+		w.Parties[0].MemberIDs = append(w.Parties[0].MemberIDs, member.ID)
+	}
+	join := boundaryOption(t, w, "alice", "join_party", "expedition")
+	events := boundaryApply(t, w, "alice", join)
+	if len(events) != 1 || events[0].Kind != "party_joined" || len(w.Parties[0].MemberIDs) != 7 {
+		t.Fatalf("seventh party member failed to join: %+v", events)
+	}
+}
+
+func TestTransmissionCandidatesUseKnownPeopleAsRecipients(t *testing.T) {
+	w := boundaryWorld()
+	a := &w.Actors[0]
+	w.Actors[1].Location = "remote"
+	w.Map.GeoRegions = []sim.GeoRegion{{ID: "near"}, {ID: "far", Coord: sim.GeoCoord{X: 5}}}
+	w.Map.Districts[0].GeoRegionID, w.Map.Districts[1].GeoRegionID = "near", "far"
+	w.Catalog.TagActions["resident"] = append(w.Catalog.TagActions["resident"], "transmit_message")
+	w.Catalog.CommChannels = map[string]sim.CommChannelSpec{
+		"letter": {ID: "letter", RangeKm: 5, EnergyCost: 4},
+		"signal": {ID: "signal", RangeKm: 5, Broadcast: true},
+	}
+	a.Memories = []sim.Memory{
+		{EventID: 1, Source: a.ID, TargetID: "cultivation", Kind: "skill_leveled"},
+		{EventID: 2, Source: a.ID, TargetID: "jade_pill_pavilion", Kind: "faction_joined"},
+		{EventID: 3, Source: a.ID, TargetID: "bob", Kind: "speech", Text: "Hello Bob"},
+	}
+	view := w.View(a.ID)
+	var sawLetter, sawBroadcast bool
+	for _, option := range Options(view) {
+		x := option.Action
+		if x.Kind != "transmit_message" {
+			continue
+		}
+		switch {
+		case x.Channel == "letter" && x.TargetID == "bob":
+			sawLetter = true
+			events := boundaryApply(t, w, a.ID, x)
+			if len(events) == 0 || events[0].Kind != "channel_transmitted" || events[0].Payload["delivered_count"] != 1 {
+				t.Fatalf("letter was not delivered at the channel's range: %+v", events)
+			}
+		case x.Channel == "signal" && x.TargetID == "":
+			sawBroadcast = true
+		default:
+			t.Fatalf("unexpected transmission candidate %+v", x)
+		}
+	}
+	if !sawLetter || !sawBroadcast {
+		t.Fatalf("expected a letter to Bob and an untargeted broadcast, got letter=%t broadcast=%t", sawLetter, sawBroadcast)
+	}
+	for _, id := range []string{"cultivation", "jade_pill_pavilion"} {
+		x := sim.Action{Kind: "transmit_message", Channel: "letter", TargetID: id, Text: "Hello"}
+		if view.CheckAction(x).Allowed || w.CheckAction(a.ID, x).Allowed {
+			t.Fatalf("%s was accepted as a recipient", id)
+		}
+	}
+}
 
 func hasBoundaryKind(w *sim.World, actor, kind string) bool {
 	for _, option := range Options(w.View(actor)) {

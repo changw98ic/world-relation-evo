@@ -5,10 +5,45 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/changw98ic/world-relation-evo/internal/sim"
 )
+
+func TestLoadPlaybookValidatesExplicitDayWindows(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "summary.json"), []byte(`{"world_id":"local","horizon_days":30,"actors":[{"actor_id":"alice","output_file":"alice.json"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		window string
+		want   [2]int
+	}{
+		{`"day_window":[7,3],`, [2]int{}},
+		{`"day_window":[],`, [2]int{}},
+		{`"day_window":[7,7],`, [2]int{7, 7}},
+		{"", [2]int{1, 30}},
+	} {
+		raw := `{"actor_id":"alice","catalog":{"options":[{"id":"greeting",` + tt.window + `"action":{"engine_kind":"speak"}}]}}`
+		if err := os.WriteFile(filepath.Join(dir, "alice.json"), []byte(raw), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		pb, err := LoadPlaybook(dir, sim.DefaultCatalog())
+		if tt.want == [2]int{} {
+			if err == nil || !strings.Contains(err.Error(), `option "greeting": invalid day_window`) {
+				t.Fatalf("window %s: got %v", tt.window, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := pb.Actors["alice"].BaseOptions[0].DayWindow; got != tt.want {
+			t.Fatalf("window %s: got %v, want %v", tt.window, got, tt.want)
+		}
+	}
+}
 
 func writeSyntheticPlaybookDir(t *testing.T) string {
 	t.Helper()
@@ -72,9 +107,10 @@ func writeSyntheticPlaybookDir(t *testing.T) string {
 					"day_window": []int{1, 10},
 					"priority":   "medium",
 					"action": map[string]any{
-						"engine_kind":     "new_primitive:scout_route",
-						"target_location": "south",
-						"summary":         "Walk south and inspect trade routes.",
+						"engine_kind":      "speak",
+						"target_actor_ids": []string{"bob"},
+						"target_location":  "south",
+						"summary":          "Ask Bob about the southern trade routes.",
 					},
 				},
 			},
@@ -163,7 +199,7 @@ func writeSyntheticPlaybookDir(t *testing.T) string {
 					"trigger_condition":    "Alice pressures Bob",
 					"probability_hint":     "低",
 					"action": map[string]any{
-						"engine_kind":      "new_primitive:spread_rumor",
+						"engine_kind":      "speak",
 						"target_actor_ids": []string{"alice"},
 						"target_location":  "north",
 						"summary":          "Quietly shift market sentiment.",
@@ -220,7 +256,7 @@ func testPerception(actorID, actorName, loc string, tick int64, nearby []sim.Nei
 
 func TestLoadPlaybookAndReactiveChain(t *testing.T) {
 	dir := writeSyntheticPlaybookDir(t)
-	pb, err := LoadPlaybook(dir)
+	pb, err := LoadPlaybook(dir, sim.DefaultCatalog())
 	if err != nil {
 		t.Fatalf("LoadPlaybook failed: %v", err)
 	}
@@ -281,8 +317,7 @@ func TestLoadPlaybookAndReactiveChain(t *testing.T) {
 		t.Fatalf("expected ScenariosActivated=1, got %d", log.Stats.ScenariosActivated)
 	}
 
-	// 4. Multi-step travel intent + new_primitive fallback: after base pace passes (tick 30),
-	//    Alice picks opt_02 (new_primitive:scout_route targeting south) and walks south.
+	// 4. Alice travels south to execute the declared conversation.
 	pAliceTravel := testPerception("alice", "Alice", "north", 30, nil, 0, 0, 100, 90)
 	optsTravel := Options(pAliceTravel)
 	travelID, err := sel.Select(ctx, pAliceTravel, optsTravel)
@@ -294,19 +329,19 @@ func TestLoadPlaybookAndReactiveChain(t *testing.T) {
 		t.Fatalf("expected Alice move->south for opt_02, got %+v", travelOpt)
 	}
 
-	// Upon arriving in south, Alice resolves new_primitive:scout_route via semantic fallback!
+	// After arriving, Alice executes the original action with its declared target.
 	pAliceSouth := testPerception("alice", "Alice", "south", 31, []sim.Neighbor{{ID: "bob", Name: "Bob", Health: 100}}, 0, 0, 100, 88)
 	optsSouth := Options(pAliceSouth)
 	southID, err := sel.Select(ctx, pAliceSouth, optsSouth)
 	if err != nil {
 		t.Fatalf("Select alice arrived south failed: %v", err)
 	}
-	if findOptionByID(optsSouth, southID) == nil {
-		t.Fatalf("returned illegal option ID %q", southID)
+	if option := findOptionByID(optsSouth, southID); option == nil || option.Action.Kind != "speak" || option.Action.TargetID != "bob" {
+		t.Fatalf("expected Alice to speak to Bob, got %+v", option)
 	}
 	log2 := sel.SnapshotLog()
-	if log2.Stats.TravelForBase != 1 || log2.Stats.SemanticFallbacks < 1 {
-		t.Fatalf("expected TravelForBase=1 and SemanticFallbacks>=1, got %+v", log2.Stats)
+	if log2.Stats.TravelForBase != 1 || log2.Stats.SemanticFallbacks != 0 {
+		t.Fatalf("expected TravelForBase=1 and SemanticFallbacks=0, got %+v", log2.Stats)
 	}
 
 	// 5. WriteLog round-trip.
@@ -323,7 +358,7 @@ func TestLoadPlaybookAndReactiveChain(t *testing.T) {
 func TestPlaybookDeterminism(t *testing.T) {
 	dir := writeSyntheticPlaybookDir(t)
 	runOnce := func() PlaybookLog {
-		pb, err := LoadPlaybook(dir)
+		pb, err := LoadPlaybook(dir, sim.DefaultCatalog())
 		if err != nil {
 			t.Fatalf("LoadPlaybook: %v", err)
 		}

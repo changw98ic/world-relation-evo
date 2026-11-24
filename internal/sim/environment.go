@@ -1,6 +1,9 @@
 package sim
 
-import "sort"
+import (
+	"slices"
+	"sort"
+)
 
 // InstitutionToggles lets a WorldPack selectively enable or disable macro-institutional
 // subsystems (e.g. taxation, enforcement courts, oversight audits, syndicate rackets,
@@ -49,10 +52,10 @@ type EnvironmentProfile struct {
 	ActorNoun          string              `json:"actor_noun,omitempty"`
 	AuthorityName      string              `json:"authority_name,omitempty"`
 	OversightName      string              `json:"oversight_name,omitempty"`
-	ForumFeatures      []string            `json:"forum_features,omitempty"`
-	EnforcementTags    []string            `json:"enforcement_tags,omitempty"`
-	OversightTags      []string            `json:"oversight_tags,omitempty"`
-	OutlawTags         []string            `json:"outlaw_tags,omitempty"`
+	ForumFeatures      []string            `json:"forum_features"`
+	EnforcementTags    []string            `json:"enforcement_tags"`
+	OversightTags      []string            `json:"oversight_tags"`
+	OutlawTags         []string            `json:"outlaw_tags"`
 	EnforcementItem    string              `json:"enforcement_item,omitempty"`
 	RepairItem         string              `json:"repair_item,omitempty"`
 	BuilderProfession  string              `json:"builder_profession,omitempty"`
@@ -69,10 +72,10 @@ func CloneEnvironmentProfile(src *EnvironmentProfile) *EnvironmentProfile {
 		return nil
 	}
 	cp := *src
-	cp.ForumFeatures = append([]string(nil), src.ForumFeatures...)
-	cp.EnforcementTags = append([]string(nil), src.EnforcementTags...)
-	cp.OversightTags = append([]string(nil), src.OversightTags...)
-	cp.OutlawTags = append([]string(nil), src.OutlawTags...)
+	cp.ForumFeatures = slices.Clone(src.ForumFeatures)
+	cp.EnforcementTags = slices.Clone(src.EnforcementTags)
+	cp.OversightTags = slices.Clone(src.OversightTags)
+	cp.OutlawTags = slices.Clone(src.OutlawTags)
 	if src.Institutions != nil {
 		t := *src.Institutions
 		if src.Institutions.Taxation != nil {
@@ -137,7 +140,7 @@ func DefaultEnvironmentProfile() EnvironmentProfile {
 		ActorNoun:         "resident",
 		AuthorityName:     "authority",
 		OversightName:     "oversight",
-		ForumFeatures:     []string{"public_forum", "authority_seat", "ritual_site", "hub", "market", "academy", "shrine", "yamen"},
+		ForumFeatures:     []string{"public_forum", "authority_seat", "exchange_hub", "ritual_site", "hub", "market", "academy", "shrine", "yamen"},
 		EnforcementTags:   []string{"law"},
 		OversightTags:     []string{"censor"},
 		OutlawTags:        []string{"outlaw", "raider", "thief", "gang"},
@@ -169,16 +172,16 @@ func (c Catalog) EffectiveEnvironment() EnvironmentProfile {
 	if env.OversightName == "" {
 		env.OversightName = def.OversightName
 	}
-	if len(env.ForumFeatures) == 0 {
+	if env.ForumFeatures == nil {
 		env.ForumFeatures = def.ForumFeatures
 	}
-	if len(env.EnforcementTags) == 0 {
+	if env.EnforcementTags == nil {
 		env.EnforcementTags = def.EnforcementTags
 	}
-	if len(env.OversightTags) == 0 {
+	if env.OversightTags == nil {
 		env.OversightTags = def.OversightTags
 	}
-	if len(env.OutlawTags) == 0 {
+	if env.OutlawTags == nil {
 		env.OutlawTags = def.OutlawTags
 	}
 	if env.EnforcementItem == "" {
@@ -197,12 +200,11 @@ func (c Catalog) EffectiveEnvironment() EnvironmentProfile {
 	return env
 }
 
-// PrimaryOutlawTag returns the canonical outlaw tag configured for this environment.
-func (e EnvironmentProfile) PrimaryOutlawTag() string {
-	if len(e.OutlawTags) > 0 && e.OutlawTags[0] != "" {
-		return e.OutlawTags[0]
+func (c Catalog) markOutlaw(a *Actor) {
+	tags := c.EffectiveEnvironment().OutlawTags
+	if len(tags) > 0 && tags[0] != "" {
+		a.Tags = appendUnique(a.Tags, tags[0])
 	}
-	return "outlaw"
 }
 
 // IsOutlawTags reports whether any tag in tags marks an outlaw/hostile-violator role
@@ -239,8 +241,7 @@ func (c Catalog) IsOversightTags(tags []string) bool {
 	return false
 }
 
-// IsPublicForumDistrict reports whether districtID carries any configured forum feature
-// (or universal public_forum / authority_seat / exchange_hub tags).
+// isConfiguredForumDistrict reports whether the district carries a configured forum feature.
 func (w *World) isConfiguredForumDistrict(districtID string) bool {
 	env := w.Catalog.EffectiveEnvironment()
 	for _, feat := range env.ForumFeatures {
@@ -248,9 +249,7 @@ func (w *World) isConfiguredForumDistrict(districtID string) bool {
 			return true
 		}
 	}
-	return w.Map.DistrictHasFeature(districtID, "public_forum") ||
-		w.Map.DistrictHasFeature(districtID, "authority_seat") ||
-		w.Map.DistrictHasFeature(districtID, "exchange_hub")
+	return false
 }
 
 // ProfessionGrantsCapability reports whether profession p grants the given action capability

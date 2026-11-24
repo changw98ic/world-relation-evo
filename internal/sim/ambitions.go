@@ -9,13 +9,103 @@ import (
 // ActorAmbition represents a long-term personal aspiration spanning days/months.
 type ActorAmbition struct {
 	ID            string `json:"id"`
-	Kind          string `json:"kind"` // "ascend_tier" | "avenge_blood" | "accumulate_wealth" | "expose_corrupt" | "seize_leadership" | "master_skill"
+	Kind          string `json:"kind"`
 	TargetID      string `json:"target_id,omitempty"`
 	TargetValue   int    `json:"target_value,omitempty"`
-	Progress      int    `json:"progress,omitempty"`
 	StartedTick   int64  `json:"started_tick"`
 	CompletedTick int64  `json:"completed_tick,omitempty"`
 	Completed     bool   `json:"completed,omitempty"`
+}
+
+// Need binds a goal to the same quantity that actions change and settlement
+// reads. A milestone has its own identity when its result is an event.
+func (a ActorAmbition) Need(c Catalog) (NeedKey, int) {
+	switch a.Kind {
+	case "accumulate_wealth":
+		return NeedKey{Measure: "money"}, a.TargetValue
+	case "ascend_tier":
+		return NeedKey{Measure: "power_tier"}, a.TargetValue
+	case "master_skill":
+		if a.TargetValue > 1 && a.TargetValue <= len(c.LevelThresholds) {
+			return NeedKey{Measure: "skill", Subject: a.TargetID}, c.LevelThresholds[a.TargetValue-1]
+		}
+	case "advance_profession":
+		return NeedKey{Measure: "profession_xp", Subject: a.TargetID}, a.TargetValue
+	case "trade_in_district":
+		return NeedKey{Measure: "market_trade", Subject: a.TargetID}, 1
+	}
+	return NeedKey{Measure: "ambition", Subject: a.ID}, 1
+}
+
+// These are the built-in resident profiles. Authored actors can set the same
+// weights, ambitions and inertia directly in a world pack.
+func (w *World) seedResidentMotives(a *Actor) {
+	w.seedResidentPractice(a)
+	profiles := []struct {
+		personality                     string
+		money, craft, relation, inertia float64
+	}{
+		{"careful and candid", 1.5, 0.4, 0.15, 0.08},
+		{"sociable and generous", 1.2, 0.4, 0.45, 0.05},
+		{"ambitious and skeptical", 1.2, 0.7, 0.10, 0.03},
+	}
+	profile := profiles[worldHash(w.ID, 0, a.ID+"/preferences")%uint64(len(profiles))]
+	a.Personality = profile.personality
+	a.NeedWeights = map[string]float64{"money": profile.money, "profession_xp": profile.craft, "relationship": profile.relation}
+	a.NeedWeights["state_slot:social_contact"] = profile.relation
+	a.InertiaMargin = &profile.inertia
+
+	add := func(kind, subject string, target int) {
+		a.Ambitions = append(a.Ambitions, ActorAmbition{
+			ID: a.ID + "/" + kind, Kind: kind, TargetID: subject, TargetValue: target, StartedTick: w.Tick,
+		})
+	}
+	var description []string
+	profession, known := w.Catalog.ProfessionByID(a.Role)
+	level := a.Professions[a.Role]
+	if known && level > 0 && level <= len(w.Catalog.LevelThresholds) {
+		if a.ProfessionXP == nil {
+			a.ProfessionXP = make(map[string]int)
+		}
+		a.ProfessionXP[a.Role] = max(a.ProfessionXP[a.Role], w.Catalog.LevelThresholds[level-1])
+		for next := level + 1; next <= min(profession.MaxLevel, len(w.Catalog.LevelThresholds)); next++ {
+			if profession.RankTitle(next) != profession.RankTitle(level) || next == profession.MaxLevel {
+				add("advance_profession", a.Role, w.Catalog.LevelThresholds[next-1])
+				description = append(description, "练习"+profession.Name+"，晋至"+profession.RankTitle(next))
+				break
+			}
+		}
+	}
+	if profile.money > 1.2 || profession.TradeMargin || a.Role == "martial_artist" {
+		// The household cash target is two ordinary operating reserves.
+		for _, need := range w.Catalog.EffectivePlanningRules().Needs {
+			if need.Measure == "money" && (need.Subject == "" || need.Subject == "coins") && need.Target > 0 {
+				target := int(2 * need.Target)
+				if a.Money < target {
+					add("accumulate_wealth", "", target)
+					description = append(description, fmt.Sprintf("攒到%d枚钱", target))
+				}
+				break
+			}
+		}
+	}
+	if profession.TradeMargin || a.Role == "martial_artist" {
+		p := Perception{Self: *a, Catalog: w.Catalog, Map: w.Map, Tick: w.Tick}
+		var destination District
+		var fastest int64
+		for _, district := range w.Map.Districts {
+			if district.ID != a.Location && ActorHasTag(district.Features, "market") {
+				if route, ok := p.PlanRoute(district.ID, ""); ok && (destination.ID == "" || route.Ticks < fastest) {
+					destination, fastest = district, route.Ticks
+				}
+			}
+		}
+		if destination.ID != "" {
+			add("trade_in_district", destination.ID, 1)
+			description = append(description, "在"+destination.Name+"完成一笔有收入的交易")
+		}
+	}
+	a.Goal = strings.Join(description, "，")
 }
 
 // ActorSecret represents an epistemically isolated secret owned by an actor.
@@ -28,6 +118,7 @@ type ActorSecret struct {
 	CreatedTick     int64             `json:"created_tick"`
 	IllicitProceeds int               `json:"illicit_proceeds,omitempty"`
 	RootEventID     int64             `json:"root_event_id,omitempty"`
+	SourceEventID   int64             `json:"source_event_id,omitempty"`
 	KnownBy         []string          `json:"known_by,omitempty"`
 	WitnessedBy     []string          `json:"witnessed_by,omitempty"`   // eyewitnesses who caught the owner red-handed on site
 	HolderStances   map[string]string `json:"holder_stances,omitempty"` // knowerID -> "shield" | "bide_time" | "fear_silence" | "leverage" | "confront"
@@ -181,6 +272,7 @@ func (w *World) refreshSecretHolderStances(s *ActorSecret) []Event {
 		}
 		s.HolderStances[kid] = next
 		if prev == "" && (next == "shield" || next == "bide_time" || next == "fear_silence") {
+			cause, root := s.evidenceFor(*holder)
 			ev := Event{
 				ID:       w.NextID,
 				Tick:     w.Tick,
@@ -189,12 +281,14 @@ func (w *World) refreshSecretHolderStances(s *ActorSecret) []Event {
 				Kind:     "secret_held",
 				Action:   Action{Kind: "wait", TargetID: owner.ID, Item: s.ID},
 				Payload: map[string]any{
-					"text":        fmt.Sprintf("%s chose to hold %s's secret (%s) in silence (%s)", holder.Name, owner.Name, w.formatSecretDesc(*s), next),
-					"secret_id":   s.ID,
-					"owner_id":    owner.ID,
-					"holder_id":   holder.ID,
-					"hold_stance": next,
-					"severity":    s.Severity,
+					"text":           fmt.Sprintf("%s chose to hold %s's secret (%s) in silence (%s)", holder.Name, owner.Name, w.formatSecretDesc(*s), next),
+					"secret_id":      s.ID,
+					"owner_id":       owner.ID,
+					"holder_id":      holder.ID,
+					"hold_stance":    next,
+					"severity":       s.Severity,
+					"cause_event_id": cause,
+					"root_event_id":  root,
 				},
 			}
 			w.NextID++
@@ -243,20 +337,11 @@ func (w *World) perceivedSecrets(a Actor) []ActorSecret {
 	return out
 }
 
-func normalizeAmbitionKind(raw string) string {
-	switch raw {
-	case "ascend_tier", "avenge_blood", "accumulate_wealth", "expose_corrupt", "seize_leadership", "master_skill":
-		return raw
-	default:
-		return "accumulate_wealth"
-	}
-}
-
 func (w *World) applySetAmbition(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
 		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
-	kind := normalizeAmbitionKind(x.Item)
+	kind := x.Item
 	targetID := x.TargetID
 	activeCount := 0
 	for _, amb := range a.Ambitions {
@@ -291,10 +376,12 @@ func (w *World) applySetAmbition(tx *WorldTx, a *Actor, x Action) []Event {
 		if targetVal <= cur {
 			targetVal = cur + 2
 		}
-	default:
+	case "seize_leadership", "avenge_blood", "expose_corrupt":
 		if targetVal <= 0 {
 			targetVal = 1
 		}
+	default:
+		return fail("unknown ambition: " + kind)
 	}
 
 	amb := ActorAmbition{
@@ -319,14 +406,10 @@ func (w *World) applyInvestigateActor(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
 		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
-	if a.Energy < 5 {
-		return fail("insufficient energy to investigate actor")
-	}
 	target := w.actor(x.TargetID)
 	if target == nil || target.Dead || target.ID == a.ID || !SamePlace(*a, *target) {
 		return fail("investigation target must be co-located and alive")
 	}
-	tx.setEnergy(a, a.Energy-5, x.Kind)
 
 	secretIdx := -1
 	for i := range w.Secrets {
@@ -353,7 +436,7 @@ func (w *World) applyInvestigateActor(tx *WorldTx, a *Actor, x Action) []Event {
 	if prob > 85 {
 		prob = 85
 	}
-	roll := int(worldHash(w.ID, w.Tick, "inv:"+a.ID+":"+target.ID) % 100)
+	roll := int(w.settlementRandom(w.Tick, "inv:"+a.ID+":"+target.ID) % 100)
 	if roll >= prob {
 		return []Event{tx.record(a, x, "investigation_inconclusive", map[string]any{
 			"text":      fmt.Sprintf("%s investigated %s but found no conclusive proof", a.Name, target.Name),
@@ -363,7 +446,6 @@ func (w *World) applyInvestigateActor(tx *WorldTx, a *Actor, x Action) []Event {
 
 	s := &w.Secrets[secretIdx]
 	s.KnownBy = appendUnique(s.KnownBy, a.ID)
-	holdEvs := w.refreshSecretHolderStances(s)
 	obs := Observation{
 		Kind:      "secret_discovered",
 		Modality:  "eyewitness",
@@ -375,25 +457,37 @@ func (w *World) applyInvestigateActor(tx *WorldTx, a *Actor, x Action) []Event {
 		Proceeds:  s.IllicitProceeds,
 	}
 	ev := tx.record(a, x, "secret_discovered", map[string]any{
-		"text":          fmt.Sprintf("%s uncovered %s's secret (%s, severity %d)", a.Name, target.Name, w.formatSecretDesc(*s), s.Severity),
-		"secret_id":     s.ID,
-		"owner_id":      s.OwnerID,
-		"subject_id":    s.SubjectID,
-		"secret_kind":   s.Kind,
-		"severity":      s.Severity,
-		"hold_stance":   s.HolderStances[a.ID],
-		"observation":   obs,
-		"root_event_id": s.RootEventID,
+		"text":           fmt.Sprintf("%s uncovered %s's secret (%s, severity %d)", a.Name, target.Name, w.formatSecretDesc(*s), s.Severity),
+		"secret_id":      s.ID,
+		"owner_id":       s.OwnerID,
+		"subject_id":     s.SubjectID,
+		"secret_kind":    s.Kind,
+		"severity":       s.Severity,
+		"observation":    obs,
+		"cause_event_id": s.SourceEventID,
+		"root_event_id":  s.RootEventID,
 	})
+	holdEvs := w.refreshSecretHolderStances(s)
+	ev.Payload["hold_stance"] = s.HolderStances[a.ID]
 	return append([]Event{ev}, holdEvs...)
+}
+
+func (s ActorSecret) evidenceFor(a Actor) (cause, root int64) {
+	for i := len(a.Memories) - 1; i >= 0; i-- {
+		m := a.Memories[i]
+		if o := m.Observation; o != nil && o.ObjectID == s.ID && o.SubjectID == s.OwnerID && secretReportTopic(o.Kind) {
+			return m.EventID, m.RootEventID
+		}
+		if st := m.Statement; st != nil && m.FactEventID > 0 && st.ObjectID == s.ID && st.SubjectID == s.OwnerID && secretReportTopic(st.Topic) {
+			return m.EventID, m.RootEventID
+		}
+	}
+	return s.SourceEventID, s.RootEventID
 }
 
 func (w *World) applyBlackmail(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
 		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
-	}
-	if a.Energy < 4 {
-		return fail("insufficient energy to blackmail")
 	}
 	target := w.actor(x.TargetID)
 	if target == nil || target.Dead || target.ID == a.ID || !SamePlace(*a, *target) {
@@ -418,11 +512,8 @@ func (w *World) applyBlackmail(tx *WorldTx, a *Actor, x Action) []Event {
 		return fail("no known unexposed secret to blackmail target")
 	}
 	s := &w.Secrets[secretIdx]
-	tx.setEnergy(a, a.Energy-4, x.Kind)
+	causeEventID, rootEventID := s.evidenceFor(*a)
 
-	if target.Trust == nil {
-		target.Trust = map[string]int{}
-	}
 	// Continuous Offense vs Breaking-Threshold model:
 	// Demand size (relative to target wealth), attitude ("subtle" | "firm" | "hostile"), and
 	// exponential escalation on repeated triggers determine whether the victim treats it as a
@@ -459,8 +550,8 @@ func (w *World) applyBlackmail(tx *WorldTx, a *Actor, x Action) []Event {
 			"backlash_damage":     backlashDmg,
 			"absorbed":            absorbed,
 			"immune_blocked":      immune,
-			"root_event_id":       s.RootEventID,
-			"cause_event_id":      s.RootEventID,
+			"root_event_id":       rootEventID,
+			"cause_event_id":      causeEventID,
 		}, observers...)
 		events := append(effects, ev)
 		events = append(events, w.ensureRelations().recordGrudge(tx, w, target.ID, a.ID, "blackmail_attempt", minInt(90, 45+assess.PriorRepeats*15), ev.ID, ev.ID)...)
@@ -503,8 +594,8 @@ func (w *World) applyBlackmail(tx *WorldTx, a *Actor, x Action) []Event {
 			"accumulated_offense": assess.AccumulatedAfter,
 			"breaking_threshold":  assess.Threshold,
 			"observation":         obs,
-			"root_event_id":       s.RootEventID,
-			"cause_event_id":      s.RootEventID,
+			"root_event_id":       rootEventID,
+			"cause_event_id":      causeEventID,
 		}, observers...)
 		return []Event{ev}
 	}
@@ -525,8 +616,8 @@ func (w *World) applyBlackmail(tx *WorldTx, a *Actor, x Action) []Event {
 		"breaking_threshold":  assess.Threshold,
 		"severity":            s.Severity,
 		"observation":         obs,
-		"root_event_id":       s.RootEventID,
-		"cause_event_id":      s.RootEventID,
+		"root_event_id":       rootEventID,
+		"cause_event_id":      causeEventID,
 	}, observers...)
 	events := []Event{ev}
 	events = append(events, w.ensureRelations().recordGrudge(tx, w, target.ID, a.ID, "blackmailed", grudgeInt, ev.ID, ev.ID)...)
@@ -536,9 +627,6 @@ func (w *World) applyBlackmail(tx *WorldTx, a *Actor, x Action) []Event {
 func (w *World) applyExposeSecret(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
 		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
-	}
-	if a.Energy < 4 {
-		return fail("insufficient energy to expose secret")
 	}
 	secretIdx := -1
 	for i := range w.Secrets {
@@ -559,7 +647,7 @@ func (w *World) applyExposeSecret(tx *WorldTx, a *Actor, x Action) []Event {
 		return fail("no known unexposed secret to expose")
 	}
 	s := &w.Secrets[secretIdx]
-	tx.setEnergy(a, a.Energy-4, x.Kind)
+	causeEventID, rootEventID := s.evidenceFor(*a)
 	if !s.Exposed {
 		s.Exposed = true
 		s.ExposedTick = w.Tick
@@ -577,16 +665,10 @@ func (w *World) applyExposeSecret(tx *WorldTx, a *Actor, x Action) []Event {
 		if ob.ID == s.OwnerID {
 			continue
 		}
-		if ob.Trust == nil {
-			ob.Trust = map[string]int{}
-		}
 		tx.MutateTrust(ob, s.OwnerID, -3)
 	}
 	if owner != nil && !owner.Dead && ActorHasTag(s.ExposureKnownBy, owner.ID) {
 		if owner.ID != a.ID {
-			if owner.Trust == nil {
-				owner.Trust = map[string]int{}
-			}
 			tx.MutateTrust(owner, a.ID, -5)
 		}
 	}
@@ -609,16 +691,17 @@ func (w *World) applyExposeSecret(tx *WorldTx, a *Actor, x Action) []Event {
 		witnessIDs = appendUnique(witnessIDs, obs.ID)
 	}
 	ev := tx.record(a, x, "secret_exposed", map[string]any{
-		"text":          fmt.Sprintf("%s publicly exposed %s's secret (%s, severity %d) in %s", a.Name, ownerName, w.formatSecretDesc(*s), s.Severity, a.Location),
-		"secret_id":     s.ID,
-		"owner_id":      s.OwnerID,
-		"subject_id":    s.SubjectID,
-		"secret_kind":   s.Kind,
-		"severity":      s.Severity,
-		"witnesses":     witnessIDs,
-		"witness_count": len(observers),
-		"observation":   obs,
-		"root_event_id": s.RootEventID,
+		"text":           fmt.Sprintf("%s publicly exposed %s's secret (%s, severity %d) in %s", a.Name, ownerName, w.formatSecretDesc(*s), s.Severity, a.Location),
+		"secret_id":      s.ID,
+		"owner_id":       s.OwnerID,
+		"subject_id":     s.SubjectID,
+		"secret_kind":    s.Kind,
+		"severity":       s.Severity,
+		"witnesses":      witnessIDs,
+		"witness_count":  len(observers),
+		"observation":    obs,
+		"cause_event_id": causeEventID,
+		"root_event_id":  rootEventID,
 	}, observers...)
 	events := []Event{ev}
 	if owner != nil && !owner.Dead && owner.ID != a.ID && ActorHasTag(s.ExposureKnownBy, owner.ID) {
@@ -640,13 +723,18 @@ func (w *World) applyExposeSecret(tx *WorldTx, a *Actor, x Action) []Event {
 	return events
 }
 
-func (w *World) addSecretWithWitnesses(ownerID, kind, subjectID string, severity int, rootEventID int64, knownBy, witnessedBy []string) (*ActorSecret, []Event) {
+func (w *World) addSecretWithWitnesses(ownerID, kind, subjectID string, severity int, origin Event, knownBy, witnessedBy []string) (*ActorSecret, []Event) {
 	if ownerID == "" || kind == "" {
 		return nil, nil
 	}
+	rootEventID := origin.causalRoot()
 	for i := range w.Secrets {
 		s := &w.Secrets[i]
-		if s.OwnerID == ownerID && s.Kind == kind && s.SubjectID == subjectID && (s.RootEventID == rootEventID || len(witnessedBy) == 0 && !s.Exposed) {
+		sameSource := s.SourceEventID == origin.ID
+		if s.SourceEventID == 0 {
+			sameSource = s.RootEventID == rootEventID
+		}
+		if s.OwnerID == ownerID && s.Kind == kind && s.SubjectID == subjectID && (sameSource || len(witnessedBy) == 0 && !s.Exposed) {
 			if !s.Exposed {
 				for _, kb := range knownBy {
 					if kb != "" {
@@ -666,23 +754,11 @@ func (w *World) addSecretWithWitnesses(ownerID, kind, subjectID string, severity
 				}
 				return s, w.refreshSecretHolderStances(s)
 			}
-			// Never duplicate a secret spawned from the exact same root event.
-			if rootEventID != 0 && s.RootEventID == rootEventID {
+			// The same source event can be noticed more than once.
+			if origin.ID != 0 && sameSource {
 				return s, nil
 			}
 		}
-	}
-	// Retain up to 200 secrets, retiring public records before active leads.
-	if len(w.Secrets) >= 200 {
-		retire := 0
-		for i := 1; i < len(w.Secrets); i++ {
-			candidate, current := w.Secrets[i], w.Secrets[retire]
-			if candidate.Exposed && !current.Exposed ||
-				candidate.Exposed == current.Exposed && candidate.Severity < current.Severity {
-				retire = i
-			}
-		}
-		w.Secrets = append(w.Secrets[:retire], w.Secrets[retire+1:]...)
 	}
 	var kb, wb []string
 	kb = appendUnique(kb, ownerID)
@@ -700,15 +776,16 @@ func (w *World) addSecretWithWitnesses(ownerID, kind, subjectID string, severity
 	sort.Strings(kb)
 	sort.Strings(wb)
 	w.Secrets = append(w.Secrets, ActorSecret{
-		ID:          fmt.Sprintf("sec_%d_%s_%d", w.Tick, ownerID, w.NextID),
-		OwnerID:     ownerID,
-		Kind:        kind,
-		SubjectID:   subjectID,
-		Severity:    minInt(100, maxInt(10, severity)),
-		CreatedTick: w.Tick,
-		RootEventID: rootEventID,
-		KnownBy:     kb,
-		WitnessedBy: wb,
+		ID:            fmt.Sprintf("sec_%d_%s_%d", w.Tick, ownerID, w.NextID),
+		OwnerID:       ownerID,
+		Kind:          kind,
+		SubjectID:     subjectID,
+		Severity:      minInt(100, maxInt(10, severity)),
+		CreatedTick:   w.Tick,
+		RootEventID:   rootEventID,
+		SourceEventID: origin.ID,
+		KnownBy:       kb,
+		WitnessedBy:   wb,
 	})
 	w.NextID++
 	sec := &w.Secrets[len(w.Secrets)-1]
@@ -716,7 +793,7 @@ func (w *World) addSecretWithWitnesses(ownerID, kind, subjectID string, severity
 }
 
 func (w *World) addSecret(ownerID, kind, subjectID string, severity int, rootEventID int64, knownBy []string) {
-	_, _ = w.addSecretWithWitnesses(ownerID, kind, subjectID, severity, rootEventID, knownBy, nil)
+	_, _ = w.addSecretWithWitnesses(ownerID, kind, subjectID, severity, Event{ID: rootEventID}, knownBy, nil)
 }
 
 func secretReportTopic(topic string) bool {
@@ -818,7 +895,7 @@ func (w *World) captureActionSecrets(tx *WorldTx, ev Event) []Event {
 		if targetKnows {
 			known = append(known, subjectID)
 		}
-		s, holds := w.addSecretWithWitnesses(culprit.ID, secretKind, subjectID, severity, root, known, observerIDs)
+		s, holds := w.addSecretWithWitnesses(culprit.ID, secretKind, subjectID, severity, ev, known, observerIDs)
 		s.IllicitProceeds = proceeds
 		out = append(out, holds...)
 		obs := Observation{Kind: "secret_caught_red_handed", Modality: "eyewitness",
@@ -856,53 +933,65 @@ func (w *World) stepAmbitionsAndSecrets(settled []Event) []Event {
 	for _, ev := range settled {
 		if ev.Kind == "grudge_formed" {
 			if intensity := int(payloadInt64(ev.Payload, "intensity")); intensity >= 50 {
-				_, holds := w.addSecretWithWitnesses(ev.ActorID, "secret_vendetta", ev.TargetID, intensity, ev.ID, nil, nil)
+				_, holds := w.addSecretWithWitnesses(ev.ActorID, "secret_vendetta", ev.TargetID, intensity, ev, nil, nil)
 				events = append(events, holds...)
 			}
 		}
 	}
 
-	// 2. Daily 09:00 ambition seeding, progress evaluation, and secret stance refresh.
+	// Secret stances retain their review schedule. Goal completion follows the
+	// settlement that changed the underlying state.
 	clock := ClockAt(w.Tick)
-	if clock.Hour != 9 || clock.Minute != 0 {
-		return events
+	if clock.Hour == 9 && clock.Minute == 0 {
+		for si := range w.Secrets {
+			events = append(events, w.refreshSecretHolderStances(&w.Secrets[si])...)
+		}
 	}
-	for si := range w.Secrets {
-		events = append(events, w.refreshSecretHolderStances(&w.Secrets[si])...)
+	var marketTrades map[string]Event
+	for _, event := range settled {
+		if event.Kind != "trade_completed" && event.Kind != "agreement_fulfilled" {
+			continue
+		}
+		district := relPayloadString(event.Payload, "district")
+		if district == "" || event.Action.Price <= 0 {
+			continue
+		}
+		if marketTrades == nil {
+			marketTrades = make(map[string]Event)
+		}
+		marketTrades[relPayloadString(event.Payload, "seller_id")+"/"+district] = event
 	}
 	for i := range w.Actors {
 		a := &w.Actors[i]
 		if a.Dead {
 			continue
 		}
-		activeCount := 0
 		for ai := range a.Ambitions {
 			amb := &a.Ambitions[ai]
 			if amb.Completed {
 				continue
 			}
-			activeCount++
 			done := false
+			var basis int64
 			switch amb.Kind {
 			case "accumulate_wealth":
-				amb.Progress = a.Money
 				done = a.Money >= amb.TargetValue
 			case "ascend_tier":
-				amb.Progress = w.Catalog.ActorPowerTier(*a)
-				done = amb.Progress >= amb.TargetValue
+				done = w.Catalog.ActorPowerTier(*a) >= amb.TargetValue
 			case "master_skill":
-				amb.Progress = a.Skills[amb.TargetID]
-				done = amb.Progress >= amb.TargetValue
+				done = a.Skills[amb.TargetID] >= amb.TargetValue
+			case "advance_profession":
+				done = a.ProfessionXP[amb.TargetID] >= amb.TargetValue
+			case "trade_in_district":
+				event, ok := marketTrades[a.ID+"/"+amb.TargetID]
+				done, basis = ok && event.Tick >= amb.StartedTick, event.ID
 			case "seize_leadership":
-				if w.Relations != nil && amb.TargetID != "" && w.Relations.FactionLeader[amb.TargetID] == a.ID {
-					amb.Progress = 1
-					done = true
-				}
+				done = w.Relations != nil && amb.TargetID != "" && w.Relations.FactionLeader[amb.TargetID] == a.ID
 			case "avenge_blood":
 				if w.Relations != nil {
 					for _, g := range w.Relations.Grudges {
 						if g.OffenderID == amb.TargetID && g.Resolution == "avenged" && w.Relations.matchesAggrieved(a, g) && actorKnowsAboutGrudge(*a, g) {
-							amb.Progress, done = 1, true
+							done = true
 							break
 						}
 					}
@@ -910,7 +999,6 @@ func (w *World) stepAmbitionsAndSecrets(settled []Event) []Event {
 			case "expose_corrupt":
 				for _, s := range w.Secrets {
 					if s.Exposed && ActorHasTag(s.ExposureKnownBy, a.ID) && (s.OwnerID == amb.TargetID || s.ID == amb.TargetID) {
-						amb.Progress = 1
 						done = true
 						break
 					}
@@ -918,7 +1006,7 @@ func (w *World) stepAmbitionsAndSecrets(settled []Event) []Event {
 				if !done {
 					for _, memory := range a.Memories {
 						if memory.Kind == "corruption_purged" && memory.TargetID == amb.TargetID {
-							amb.Progress, done = 1, true
+							done, basis = true, memory.EventID
 							break
 						}
 					}
@@ -927,7 +1015,6 @@ func (w *World) stepAmbitionsAndSecrets(settled []Event) []Event {
 			if done {
 				amb.Completed = true
 				amb.CompletedTick = w.Tick
-				activeCount--
 				desc := amb.Kind
 				if amb.TargetID != "" {
 					desc = fmt.Sprintf("%s (%s)", amb.Kind, amb.TargetID)
@@ -946,57 +1033,14 @@ func (w *World) stepAmbitionsAndSecrets(settled []Event) []Event {
 						"target_value": amb.TargetValue,
 					},
 				}
+				if basis != 0 {
+					ev.Payload["cause_event_id"] = basis
+				}
 				w.NextID++
 				events = append(events, ev)
-			}
-		}
-
-		if activeCount == 0 && len(a.Ambitions) < 4 {
-			// Auto-seed 1 natural long-term ambition.
-			seeded := false
-			if w.Relations != nil {
-				for _, g := range w.Relations.Grudges {
-					if !g.Resolved && g.AggrievedID == a.ID && g.OffenderID != "" && g.Intensity >= 40 {
-						a.Ambitions = append(a.Ambitions, ActorAmbition{
-							ID:          fmt.Sprintf("amb_%d_%s_avenge", w.Tick, a.ID),
-							Kind:        "avenge_blood",
-							TargetID:    g.OffenderID,
-							TargetValue: 1,
-							StartedTick: w.Tick,
-						})
-						seeded = true
-						break
-					}
+				if a.Task == nil {
+					w.setWake(a, w.Tick, "goal_completed")
 				}
-			}
-			if !seeded && len(w.Catalog.Transitions) > 0 {
-				curTier := w.Catalog.ActorPowerTier(*a)
-				hasHigher := false
-				for _, f := range w.Catalog.Forms {
-					if f.PowerTier > curTier {
-						hasHigher = true
-						break
-					}
-				}
-				if hasHigher {
-					a.Ambitions = append(a.Ambitions, ActorAmbition{
-						ID:          fmt.Sprintf("amb_%d_%s_ascend", w.Tick, a.ID),
-						Kind:        "ascend_tier",
-						TargetValue: curTier + 1,
-						Progress:    curTier,
-						StartedTick: w.Tick,
-					})
-					seeded = true
-				}
-			}
-			if !seeded {
-				a.Ambitions = append(a.Ambitions, ActorAmbition{
-					ID:          fmt.Sprintf("amb_%d_%s_wealth", w.Tick, a.ID),
-					Kind:        "accumulate_wealth",
-					TargetValue: maxInt(a.Money+40, 80),
-					Progress:    a.Money,
-					StartedTick: w.Tick,
-				})
 			}
 		}
 	}

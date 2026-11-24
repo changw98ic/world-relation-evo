@@ -1,6 +1,9 @@
 package sim
 
-import "testing"
+import (
+	"strconv"
+	"testing"
+)
 
 // S1: a person cannot act at both road endpoints while travelling, and cannot
 // skip an intermediate district. The road's declared time and energy are inputs.
@@ -13,8 +16,8 @@ func TestLawSpaceTravelHasTimeCostAndNoEndpointPresence(t *testing.T) {
 		t.Fatal("nonadjacent movement charged or teleported the traveler")
 	}
 	lawOK(t, w.Apply("a", Action{Kind: "move", Location: "away"}))
-	if w.Actors[0].Energy != 94 || !w.Actors[0].InTransit() || w.Actors[0].Location != "home" {
-		t.Fatal("departure did not pay the declared road cost and begin transit")
+	if w.Actors[0].Energy != 98 || !w.Actors[0].InTransit() || w.Actors[0].Location != "home" {
+		t.Fatal("departure did not pay for its first interval and begin transit")
 	}
 	for _, observer := range []string{"b", "c"} {
 		for _, nearby := range w.View(observer).Nearby {
@@ -58,6 +61,41 @@ func TestLawSpaceHouseAndVenueBoundariesIsolateSpeech(t *testing.T) {
 	}
 }
 
+func TestLawSpaceAllVisibleNeighborsCanHearSpeech(t *testing.T) {
+	w := lawWorld()
+	for i := 0; i < 40; i++ {
+		w.Actors = append(w.Actors, lawPerson("neighbor-"+strconv.Itoa(i)))
+	}
+	p := w.View("a")
+	if len(p.Nearby) != len(w.Actors)-1 {
+		t.Fatalf("view includes %d of %d co-located neighbors", len(p.Nearby), len(w.Actors)-1)
+	}
+	for _, a := range w.Actors[1:] {
+		x := Action{Kind: "speak", TargetID: a.ID, Text: "Hello"}
+		if !p.CheckAction(x).Allowed || !w.CheckAction("a", x).Allowed {
+			t.Fatalf("valid local listener %s was excluded", a.ID)
+		}
+	}
+}
+
+func TestLawSpaceHouseTransferMovesFormerOwnerOutside(t *testing.T) {
+	w := lawWorld()
+	w.Catalog.TagActions["person"] = append(w.Catalog.TagActions["person"], "transfer_house", "enter_house")
+	w.Houses = []House{{ID: "home_house", District: "home", OwnerID: "a", Residents: []string{"a", "b", "c"}}}
+	w.Actors[0].HomeID = "home_house"
+	w.Actors[0].InsideHouse, w.Actors[1].InsideHouse = "home_house", "home_house"
+	events := w.Apply("a", Action{Kind: "transfer_house", HouseID: "home_house", TargetID: "b"})
+	if len(events) != 1 || events[0].Kind != "house_transferred" {
+		t.Fatalf("valid house transfer rejected: %+v", events)
+	}
+	if w.Houses[0].OwnerID != "b" || w.Actors[1].HomeID != "home_house" || w.Actors[0].HomeID != "" || w.Actors[0].InsideHouse != "" {
+		t.Fatal("house ownership, home and physical presence disagree")
+	}
+	if w.Houses[0].CanAccess("a") || !w.Houses[0].CanAccess("c") {
+		t.Fatal("house transfer did not revoke only the former owner's access")
+	}
+}
+
 // S2: preparation is not a guaranteed hit on a target that has left. The funded
 // successful control proves that the rejection case is not merely a disabled action.
 func TestLawSpaceDelayedEffectRechecksPhysicalTarget(t *testing.T) {
@@ -66,7 +104,7 @@ func TestLawSpaceDelayedEffectRechecksPhysicalTarget(t *testing.T) {
 		w.Catalog.ActionSpecs = map[string]ActionSpec{"strike": {ID: "strike", GrantedByTags: []string{"person"}, TargetKind: "actor", Ticks: 3, EnergyCost: 2, ItemCosts: map[string]int{"wood": 1}, Attack: &AttackSpec{DamageByType: map[string]int{"physical": 10}}}}
 		w.Actors[0].Items["wood"] = 1
 		lawOK(t, w.Apply("a", Action{Kind: "strike", TargetID: "b"}))
-		if w.Actors[0].Items["wood"] != 0 || w.Actors[0].Energy != 98 || w.Actors[1].Health != 100 {
+		if w.Actors[0].Items["wood"] != 0 || w.Actors[0].Energy != 99 || w.Actors[1].Health != 100 {
 			t.Fatal("delayed action applied damage before paying costs and doing work")
 		}
 		w.Tick++
@@ -79,15 +117,15 @@ func TestLawSpaceDelayedEffectRechecksPhysicalTarget(t *testing.T) {
 		}
 		w.Tick++
 		events := w.Advance("a")
-		wantHealth := 90
+		wantHealth, wantWood := 90, 0
 		if depart {
-			wantHealth = 100
+			wantHealth, wantWood = 100, 1
 			lawRejected(t, events)
 		} else {
 			lawOK(t, events)
 		}
-		if w.Actors[1].Health != wantHealth || w.Actors[0].Items["wood"] != 0 || w.Actors[0].Energy != 98 {
-			t.Fatal("delayed target settlement violated locality or charged preparation twice")
+		if w.Actors[1].Health != wantHealth || w.Actors[0].Items["wood"] != wantWood || w.Actors[0].Energy != 98 {
+			t.Fatal("delayed target settlement violated locality, payment, or refund")
 		}
 	}
 }

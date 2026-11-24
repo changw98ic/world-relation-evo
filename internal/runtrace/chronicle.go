@@ -205,8 +205,6 @@ func eventLink(e sim.Event, key string) int64 {
 		return value
 	case int:
 		return int64(value)
-	case float64:
-		return int64(value)
 	}
 	return 0
 }
@@ -381,10 +379,14 @@ func buildChronicleFromSnapshot(events []sim.Event, snap *WorldMetadataSnapshot,
 		rep.ActiveParties = snap.ActiveParties
 		for _, bio := range snap.Actors {
 			b := bio
+			b.Guilds = append([]string(nil), bio.Guilds...)
 			b.MilestoneCount = milestoneByActor[b.ID]
 			rep.Biographies = append(rep.Biographies, b)
 		}
 		rep.Factions = append([]FactionStanding(nil), snap.Factions...)
+		for i := range rep.Factions {
+			rep.Factions[i].ControlledDistricts = append([]string(nil), rep.Factions[i].ControlledDistricts...)
+		}
 		rep.Diplomacy = append([]sim.FactionDiplomacy(nil), snap.Diplomacy...)
 		rep.Cohorts = append([]CohortStanding(nil), snap.Cohorts...)
 	}

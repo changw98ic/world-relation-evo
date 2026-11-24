@@ -7,6 +7,29 @@ import (
 	"github.com/changw98ic/world-relation-evo/internal/sim"
 )
 
+func TestPlannerReconsidersSleepWhenWaitingLowersEnergy(t *testing.T) {
+	w := boundaryWorld()
+	w.Tick = 18 * sim.TicksPerHour // Midnight on the first night.
+	w.Actors = w.Actors[:1]
+	w.Actors[0].Energy = 65
+	rules := sim.DefaultPlanningRules()
+	rules.Needs = []sim.NeedRule{{NeedKey: sim.NeedKey{Measure: "energy"}, Target: 65, Scale: 40, BaseWeight: 2}}
+	w.Catalog.Planning = &rules
+	for range 3 {
+		events, err := w.Step(context.Background(), Planner{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range events {
+			if event.ActorID == "alice" && event.Kind == "sleep_started" {
+				return
+			}
+		}
+	}
+	t.Fatalf("waiting did not lead to sleep when the energy need appeared: energy=%d, review=%+v",
+		w.Actors[0].Energy, w.Actors[0].NextWake)
+}
+
 func TestHungryExhaustedWorkerCompletesRestBeforeStartingAnotherForagingTrip(t *testing.T) {
 	w := sim.Village("rest-before-new-food-trip")
 	a := w.Actors[14]

@@ -118,7 +118,7 @@ func (w *World) releaseCohortJailed(c *PopulationCohort, want int) int {
 		return 0
 	}
 	c.ensureResidents(c.Population)
-	c.updateResidentBandState(released, func(b ResidentBand) bool { return b.Jailed }, func(b *ResidentBand) { b.Jailed = false })
+	released = c.updateResidentBandState(released, func(b ResidentBand) bool { return b.Jailed }, func(b *ResidentBand) { b.Jailed = false })
 	c.Jailed -= released
 	return released
 }
@@ -180,6 +180,9 @@ func SettlementCorruptionSurcharge(assessed, taxable int64, corruption int) int6
 // Actor lifespan semantics), then falling back to Catalog.Lifecycle.MaxExpectancy.
 // A return value <= 0 denotes an ageless / immortal / synthetic form.
 func CohortFormLifeExpectancy(cat Catalog, c PopulationCohort) int {
+	if cat.Lifecycle.Ageless {
+		return 0
+	}
 	if c.FormID != "" {
 		if form, ok := cat.Forms[c.FormID]; ok {
 			if form.LifeExpectancyYears < 0 {
@@ -190,7 +193,7 @@ func CohortFormLifeExpectancy(cat Catalog, c PopulationCohort) int {
 			}
 		}
 	}
-	if cat.Lifecycle.Ageless || cat.Lifecycle.MaxExpectancy < 0 {
+	if cat.Lifecycle.MaxExpectancy < 0 {
 		return 0
 	}
 	if cat.Lifecycle.MaxExpectancy > 0 {

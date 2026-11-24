@@ -9,17 +9,16 @@ Requires Go 1.23+. Run commands from the repository root. Try the built-in
 30-character village with rule-based decisions and in-memory state:
 
 ```sh
-go run ./cmd/wre -offline-run -decider rules -steps 4 -pace 0s -quiet
+go run ./cmd/wre -offline-run -steps 4 -pace 0s -quiet
 ```
 
 The final status line on stderr reports `tick=4`. Omit `-quiet` to emit one JSON
 event per line on stdout. Each tick advances 15 simulated minutes; a day has 96
 ticks. The built-in village starts at Day 1, 06:00.
 
-`-offline-run` disables database access; `-decider rules` disables model calls.
-Use both for a run that needs neither PostgreSQL nor model credentials. In-memory
-runs start a new world each time. Export files as shown below to inspect or replay
-one later.
+`-offline-run` runs in memory. All simulation runs choose actions with local
+rules. Use `-state-in` to resume an exported snapshot, or use PostgreSQL to
+resume by world ID.
 
 ## Run with PostgreSQL
 
@@ -31,11 +30,11 @@ export WRE_DB_PASSWORD=local-development-password
 # Uses the official PostgreSQL image; data persists in a named volume.
 docker compose up -d
 export DATABASE_URL="postgres://wre:${WRE_DB_PASSWORD}@localhost:5432/wre?sslmode=disable"
-go run ./cmd/wre -decider rules -world village-30 -steps 672 -pace 0s
+go run ./cmd/wre -world village-30 -steps 672 -pace 0s
 # Run a 1,000,000-population multi-resolution world with event compaction:
-go run ./cmd/wre -decider rules -world prefecture-1m -pop 1000000 -compact-events -steps 96 -pace 0s
+go run ./cmd/wre -world prefecture-1m -pop 1000000 -compact-events -steps 96 -pace 0s
 # Resume the same world continuously; Ctrl-C stops it.
-go run ./cmd/wre -decider rules -world village-30 -steps 0 -pace 1s
+go run ./cmd/wre -world village-30 -steps 0 -pace 1s
 ```
 
 Without `-pack`, a new world uses the built-in village and the requested population.
@@ -43,9 +42,10 @@ An existing world resumes its saved state and in-progress tasks; `-pop` only
 controls creation. Different world IDs are separate simulations. A PostgreSQL
 session lock allows one simulation runner per world.
 
-World snapshots and each batch of events commit in one transaction. Decision logs
-and replay checkpoints are saved separately. JSON events reach stdout after these
-writes succeed. `-checkpoint-every` defaults to 24 ticks; `0` disables periodic
+World state, actor and cohort records, decisions, and events commit in one
+transaction. The same transaction saves any due replay checkpoint. Each actor
+record includes its plan, learned preferences and next scheduled wake. JSON
+events reach stdout after the write succeeds. `-checkpoint-every` defaults to 24 ticks; `0` disables periodic
 DB checkpoints. `-compact-events` filters persisted and stdout events to selected
 causal, economic, and progression events. It does not filter `-out-events` exports.
 
@@ -62,7 +62,7 @@ The loader validates references before creating the world.
 | [wasteland_sector.json](packs/wasteland_sector.json) | Science-fiction wasteland |
 
 ```sh
-go run ./cmd/wre -offline-run -decider rules \
+go run ./cmd/wre -offline-run \
   -pack packs/xianxia_sect.json -steps 32 -pace 0s -quiet
 ```
 
@@ -74,7 +74,7 @@ initialize new worlds; loading an existing world resumes its saved snapshot.
 Record a short offline run. These output files are overwritten if they already exist:
 
 ```sh
-go run ./cmd/wre -offline-run -decider rules -steps 4 -pace 0s -quiet \
+go run ./cmd/wre -offline-run -steps 4 -pace 0s -quiet \
   -out-checkpoint /tmp/wre-checkpoint.json \
   -out-decisions /tmp/wre-decisions.json \
   -out-state /tmp/wre-state.json \
@@ -103,47 +103,40 @@ For stored worlds, use `inspect -world <world-id> -kind conservation` or
 loads the nearest checkpoint at or before the target and its subsequent decision
 logs.
 
-## Decision modes
+## Character decisions
 
-`-decider rules` is a deterministic, profession-agnostic offline baseline for exercising the engine. It plans over the declarative `World.Catalog` (`Items`, `Recipes`, `TagProfiles`), navigates multi-hop roads via shortest travel time, maintains standalone `House` assets with planks, eats edible items when hungry, sleeps in its home during its circadian window or when low on energy, trades surplus goods at `market_street`, and relays or acts on item supply reports.
+The planner scores actions from the actor's needs and the facts in their
+perception. It uses one time interval for every candidate. A need has its own
+target, value scale and weight. Weights combine a long-term preference,
+temporary effects from known experiences, and variation driven by the run seed.
+The planner estimates changes in each need, including preparation time, costs,
+and possible failure. It can continue a current plan or repair a route before
+scoring alternatives. Leaving a viable plan requires clearing its inertia margin.
+Execution checks the chosen action against the true world state.
 
-The production pipeline (`-decider jev`, the default) is:
+A character can observe a dry well after visiting it, a closed route after trying
+to travel, or an unavailable payment after a failed delivery. This information
+changes that person's next choice. A valid offer and the ability to pay remain
+separate facts. Other participants make their own choices and the world settles
+actual resource transfers. A signed delivery can lead the supplier to obtain
+materials and make the goods in time for the agreed deadline. Communication
+channels can set `delay_ticks` to deliver a message at a later simulated time.
 
-**identity tags + catalog → system-defined action candidates → Jev choice → system settlement → events/state.**
+World packs define planning rules in `catalog.planning`. `horizon_ticks`
+sets the common scoring interval. `needs` defines each measure, optional
+subject, target, scale and base weight. An actor can override a weight with
+`need_weights`, keyed by measure or by `measure:subject`. For a zero weight,
+write `0`. `inertia_margin` is the additional value required to leave a
+viable plan. An actor can override the pack's margin with the same field.
+A rule with `minimize: true` values lower observed quantities,
+such as radiation exposure. The included packs show ordinary needs, qi, and
+battery charge.
 
-Jev selects a candidate ID for an idle character. Ongoing tasks advance without
-another decision. TypeSafe's [Choice protocol](https://docs.typesafe.ai/primitives/choice)
-allows at most 255 alternatives per question. Larger action sets use successive
-group and concrete-action choices. Every original action remains reachable; all
-stages are recorded. A character's decision can therefore make multiple Jev
-requests. Simulation runtime does not call a content LLM; `speak`,
-`transmit_message`, and `issue_decree` candidates carry deterministic
-system-built text, assertions, and memory references.
-
-Configure Jev:
-
-```sh
-export WRE_JEV_KEY=your-jev-key
-export WRE_JEV_MODEL=jev-latest
-# Optional complete endpoint: WRE_JEV_URL=https://api.typesafe.ai/v1/systemone
-go run ./cmd/wre -world model-village -decider jev -steps 24 -pace 0s
-```
-
-The CLI reads `.env` from the working directory; existing nonempty environment
-variables take precedence. `WRE_JEV_KEY` is required in Jev mode.
-Jev's URL and model default to the values shown above. Add `-offline-run` to use
-model decisions without PostgreSQL.
-
-Idle decisions run concurrently from the same starting view. The worker count is
-the CPU count bounded to 4–32, further limited by the number of idle actors.
-Settlement advances ongoing tasks and non-movement actions first, then relocation
-actions, in actor order. A decision error stops the step before settlement.
-
-Every idle independent character uses the selected decider, regardless of total
-population, salience, or tick number. Worker limits queue decisions; they do not
-replace model decisions with rules. Ongoing tasks advance without new decisions.
-Population groups still advance in bulk in the simulation engine. Choose
-`-decider rules` explicitly for an offline rule-driven run. Model failures propagate.
+Use `-seed` when creating a world. The world stores the seed and rule version.
+Subsequent runs continue from the saved preferences, tasks and future events.
+`-trace-dir` records the candidate scores, the contribution of each need, and
+the reason a plan was chosen or continued. The scores include the need weights
+used for the choice and their baseline, temporary bias, and fluctuation.
 
 ## World mechanics and semantics
 
@@ -381,8 +374,8 @@ Personal credit uses `borrow_loan` → lender `accept_loan` / `reject_loan`. A r
 records system-quoted principal, interest, term and collateral without moving assets.
 Daily settlement accrues interest but no longer originates personal loans, repays them,
 or forecloses collateral on a character’s behalf. Repayment and foreclosure are explicit
-character actions; pending requests can be withdrawn with `cancel_loan`. Both Jev and offline character
-policies use these explicit actions; the engine only settles their consequences.
+character actions. Use `cancel_loan` to withdraw a pending request. The
+engine settles each explicit action against the stored terms.
 Unsecured loans cannot seize a house that was never pledged. Group equity is
 stored in `cohort_equity_permille` as debtor → creditor → share. Multiple creditors
 retain separate shares and receive their own portion of rent; a later creditor
@@ -401,12 +394,10 @@ and inherited permissions when selecting work.
 
 Personal memories are retained in snapshots. Each decision recalls at most 32,
 combining recent context with relevant older experiences, plans and counterparties.
-Model requests retain the latest text in each directed conversation, plus recalled
-structured claims, observations and source IDs. Omitted older text and archived
-closed agreements are disclosed; full history remains in snapshots and traces.
-Open agreements remain complete. Observations remain observations and statements
-remain attributed claims. Communication candidates carry deterministic system-built
-text and structured claims; simulation runtime does not invoke a content LLM.
+Open agreements remain complete. First-hand observations and attributed
+statements retain their own sources. `transmit_message` follows the channel's
+range, access and delivery time. `chronicle` reads settled events to produce
+a separate account of the run.
 
 ## Tests
 
@@ -429,37 +420,24 @@ WRE_TEST_DATABASE_URL="$DATABASE_URL" \
   go test -tags integration ./internal/store -count=1 -v
 ```
 
-The real model workflow builds and starts the executable, calls the configured
-Jev provider, saves to PostgreSQL, restarts from that database, and
-replays persisted decisions. Configure `WRE_JEV_KEY` and
-`DATABASE_URL`, then run:
+The live storage test starts two simulation processes against the same
+PostgreSQL database and compares the continued world with a database replay.
 
 ```sh
 go test -tags live ./cmd/wre \
-  -run '^TestLiveModelWorkflowRecordsEvidenceAcrossDatabaseRestart$' \
-  -count=1 -v -timeout 30m
+  -run '^TestLiveRuleWorkflowRecordsEvidenceAcrossDatabaseRestart$' -count=1 -v
 ```
 
-Every simulation mode can record original evidence in a new directory:
+Record and review a run in a new directory.
 
 ```sh
-go run ./cmd/wre -offline-run -decider rules -steps 4 -pace 0 -quiet \
+go run ./cmd/wre -offline-run -steps 4 -pace 0 -quiet \
   -trace-dir /tmp/wre-evidence-new-run
-
-go run ./cmd/wre audit-trace -trace-dir /tmp/wre-evidence-new-run \
-  > /tmp/wre-evidence-review.json
+go run ./cmd/wre audit-trace -trace-dir /tmp/wre-evidence-new-run
 ```
 
-Trace includes original model request/response bodies, perceptions, candidates,
-actions, settled state, events, persistence acknowledgments, and failures.
-Tiered runs record both model and rule decisions with their `decision_source`;
-Rule decisions record which preferred actions were unavailable before the person
-chose an available action. Trace review compares immediate work instructions to
-the actual choices, delivery proposals to stored contracts, and accepted care
-agreements to the previously signed caretaker for the same crop.
-Existing evidence is not overwritten. Authentication headers and configured
-credentials are not recorded as fields. Review reports keep simulation
-correctness as `not_established`, including when execution and replay succeed.
+The audit compares the recorded choice with the settled action and checks
+resource, contract and memory evidence.
 
 Long food-cycle observation records every decision and event, checks the ledger
 each tick, records actual harvests and deaths, and replays the last day against
@@ -485,18 +463,11 @@ See the [November 17 repair review](docs/testing/full-repair-2026-11-17.md) and
 the [November 18 world-rules review](docs/testing/world-rules-2026-11-18.md) for
 the contract, harvest, movement and starvation findings and their replay scope.
 
-The actual 2026-11-16 model run completed 32 ticks with 254 Jev and 115 content
-responses, but trace review found zero-output water production, ungrounded task
-narration, and repeated travel requiring investigation. See the
-[testing rules and commands](docs/testing/README.md) and the
-[real-run findings and evidence](docs/testing/live-trace-review-2026-11-16.md).
-Workflow completion is not evidence that the simulated world is valid.
-
 ## Layout
 
 - `cmd/wre`: simulation, inspection, and replay commands
 - `internal/sim`: world state, perception, action settlement, population groups, world systems, and replay
-- `internal/agent`: action candidates, Jev selection, and rule decisions
+- `internal/agent`: candidate discovery, need valuation, and local planning
 - `internal/pack`: WorldPack loading, validation, and world creation
 - `internal/store`: PostgreSQL snapshots, events, decision logs, checkpoints, and world locks
 - `packs`: reference world definitions
@@ -535,10 +506,8 @@ and original expiry remain visible. Only the other party can accept it; acceptan
 checks current location, permissions, stock and funds, then transfers the exact
 accepted terms once. Named offers cannot be diverted to unrelated cohorts.
 Catalog prices are references, not price floors: an explicit zero-price proposal
-is valid. The offline baseline uses its existing demand/sale-intent, uncommitted
-inventory and trust preferences to answer counteroffers; this is not a calibrated
-bargaining model. Delivery-agreement price negotiation is not added by this path.
+is valid. The planner compares the cost, expected delivery and relevant needs before
+accepting terms. Responses stay independent of the proposing actor's decision.
 
 Tests exercise cross-tick counteroffers, rejection, failed/stale settlement,
-pending-offer snapshots and deterministic replay. They do not establish the
-quality of real-model negotiations or improved long-run survival.
+pending-offer snapshots and deterministic replay. Long-run behavior is measured separately.

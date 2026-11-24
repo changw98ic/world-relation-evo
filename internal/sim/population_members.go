@@ -66,24 +66,22 @@ func hungerIncrement(tick int64, _ LifecycleSpec, form FormSpec) int {
 	if tick <= 0 || form.IsHungerDisabled() {
 		return 0
 	}
-	if form.DailyIntakePct != nil {
-		intakePct := int64(*form.DailyIntakePct)
-		denom := int64(TicksPerDay) * 100
-		numer := DailyNutritionUnits * intakePct
-		total := func(t int64) int64 {
-			return (t * numer) / denom
-		}
-		return int(total(tick) - total(tick-1))
-	}
-	multiplier := int64(100)
-	if form.HungerIntervalMulPct > 0 {
-		multiplier = int64(form.HungerIntervalMulPct)
-	}
-	period := int64(TicksPerDay) * multiplier
+	numerator, period := nutritionRate(form)
 	total := func(t int64) int64 {
-		return t/period*(DailyNutritionUnits*100) + t%period*(DailyNutritionUnits*100)/period
+		return t/period*numerator + t%period*numerator/period
 	}
 	return int(total(tick) - total(tick-1))
+}
+
+func nutritionRate(form FormSpec) (int64, int64) {
+	if form.DailyIntakePct != nil {
+		return DailyNutritionUnits * int64(*form.DailyIntakePct), TicksPerDay * 100
+	}
+	multiplier := int64(form.HungerIntervalMulPct)
+	if multiplier <= 0 {
+		multiplier = 100
+	}
+	return DailyNutritionUnits * 100, TicksPerDay * multiplier
 }
 
 func advanceNutrition(hunger *int, reserve *int64, units int) {
@@ -250,6 +248,65 @@ func (w *World) anonymousCohortEnergy(c *PopulationCohort, population int) int64
 	return int64(c.AvgEnergy)*int64(population) - w.Production.EnergyRemainder[c.ID]
 }
 
+func (w *World) addCohortBirths(c *PopulationCohort, count int) {
+	population := w.anonymousCohort(*c).Population
+	c.ensureResidents(population)
+	hunger := c.hungerUnits(population)
+	energy := w.anonymousCohortEnergy(c, population)
+	c.Population += count
+	c.Children += count
+	c.CumulativeBirths += count
+	c.issueResidents(count, 0)
+	c.setHungerUnits(population+count, hunger)
+	w.setAnonymousCohortEnergy(c, population+count, energy)
+	w.TotalBirthsCount += int64(count)
+}
+
+func (w *World) recordCohortDeaths(c *PopulationCohort, anonymousPopulation, deaths int, cause string) {
+	if len(c.Members) > 0 {
+		anonymous := w.anonymousCohort(*c)
+		w.recordCohortDeaths(&anonymous, anonymousPopulation, deaths, cause)
+		anonymous.Members = c.Members
+		for _, a := range c.Members {
+			w.adjustCohortMember(&anonymous, a, 1)
+		}
+		*c = anonymous
+		return
+	}
+	energy := w.anonymousCohortEnergy(c, anonymousPopulation)
+	c.Population -= deaths
+	w.setAnonymousCohortEnergy(c, anonymousPopulation-deaths, energy-energy*int64(deaths)/int64(anonymousPopulation))
+	c.CumulativeDeaths += deaths
+	if cause == "old_age" {
+		c.Elders -= deaths
+	}
+	reconcileCohortAgeBrackets(c)
+	w.recordDeathCause(cause, deaths)
+}
+
+func (w *World) retireResidentBand(c *PopulationCohort, b ResidentBand, cause string) {
+	if b.Health < MaxHealth {
+		c.Wounded -= b.Count
+		c.PendingWoundedDeaths += b.Count
+	}
+	if b.Sick {
+		c.Sick -= b.Count
+		if b.Health < MaxHealth {
+			c.WoundedSick -= b.Count
+		}
+		if cause != "disease" {
+			c.PendingSickDiedOther += b.Count
+		}
+	}
+	if b.Jailed {
+		c.Jailed -= b.Count
+		c.PendingJailedDeaths += b.Count
+	}
+	for itemID, qty := range b.Items {
+		w.adjustCohortItem(c, itemID, int64(qty)*int64(b.Count), false)
+	}
+}
+
 func (w *World) setAnonymousCohortEnergy(c *PopulationCohort, population int, energy int64) {
 	if population == 0 {
 		c.AvgEnergy = 0
@@ -297,31 +354,28 @@ func (w *World) transferCohortStoredShare(from, to *PopulationCohort, moved, pop
 	for currency, amount := range from.Currencies {
 		share := amount * int64(moved) / int64(population)
 		w.addCohortCurrency(to, currency, share)
-		from.Currencies[currency] -= share
+		w.addCohortCurrency(from, currency, -share)
 	}
 }
 
 func (w *World) transferLastCohortAssets(tx *WorldTx, c *PopulationCohort, a *Actor) {
 	w.adjustActorCurrency(a, "coins", c.MoneyPool, false)
 	tx.recordTransfer("transfer_currency", c.ID, a.ID, "coins", -c.MoneyPool, "cohort assets")
-	c.MoneyPool = 0
+	w.addCohortCurrency(c, "coins", -c.MoneyPool)
 	a.DigestedFood += c.DigestedFood
 	c.DigestedFood = 0
-	if a.Items == nil {
-		a.Items = map[string]int{}
-	}
 	for _, item := range sortedProductionKeys(c.ItemPool) {
 		qty := c.ItemPool[item]
-		a.Items[item] += int(qty)
+		w.adjustActorItem(a, item, int(qty), false)
+		w.adjustCohortItem(c, item, -qty, false)
 		tx.recordTransfer("transfer_item", c.ID, a.ID, item, -qty, "cohort assets")
 	}
-	c.ItemPool = nil
 	for _, currency := range sortedProductionKeys(c.Currencies) {
 		amount := c.Currencies[currency]
 		w.addActorCurrency(a, currency, amount)
+		w.addCohortCurrency(c, currency, -amount)
 		tx.recordTransfer("transfer_currency", c.ID, a.ID, currency, -amount, "cohort assets")
 	}
-	c.Currencies = nil
 	w.transferGrowingAssets("cohort", c.ID, "actor", a.ID)
 }
 
@@ -343,21 +397,18 @@ func (w *World) settleUnclaimedActorEstate(tx *WorldTx, deceased *Actor, houses 
 			custodian = &w.Cohorts[len(w.Cohorts)-1]
 		}
 	}
-	if len(deceased.Items) > 0 && custodian.ItemPool == nil {
-		custodian.ItemPool = map[string]int64{}
-	}
 	for _, item := range sortedProductionKeys(deceased.Items) {
 		qty := deceased.Items[item]
-		custodian.ItemPool[item] += int64(qty)
+		w.adjustCohortItem(custodian, item, int64(qty), false)
 		tx.recordTransfer("transfer_item", deceased.ID, custodian.ID, item, -int64(qty), "inheritance")
 	}
 	deceased.Items = nil
 	for _, currency := range sortedProductionKeys(deceased.Currencies) {
 		amount := deceased.Currencies[currency]
 		w.addCohortCurrency(custodian, currency, amount)
+		w.adjustActorCurrency(deceased, currency, -amount, false)
 		tx.recordTransfer("transfer_currency", deceased.ID, custodian.ID, currency, -amount, "inheritance")
 	}
-	deceased.Currencies = nil
 	for _, hi := range houses {
 		w.Houses[hi].OwnerID = custodian.ID
 	}

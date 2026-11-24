@@ -76,7 +76,7 @@ func (w *World) stepCohortThreatSuppression() []Event {
 			if ds.ThreatActivity[enc.ID] < enc.BaseActivity+10 {
 				continue
 			}
-			if worldHash(w.ID, w.Tick, "sup_roll:"+district+":"+enc.ID)%1000 >= 320 && ds.BountyPool == 0 {
+			if w.settlementRandom(w.Tick, "sup_roll:"+district+":"+enc.ID)%1000 >= 320 && ds.BountyPool == 0 {
 				continue
 			}
 			recipe, ok := w.ecologyPatrolRecipe(enc)
@@ -157,13 +157,13 @@ func (w *World) startEcologyPatrolLeg(c *PopulationCohort, p *EcologyPatrol) boo
 }
 
 func (w *World) payEcologyPatrolEnergy(c *PopulationCohort, workers, cost int) bool {
-	// AvgEnergy is an integer population average. Round the aggregate debit up
-	// so issuing many small expeditions cannot make all travel cost disappear.
-	debit := (cost*workers + c.Population - 1) / c.Population
-	if c.AvgEnergy < debit {
+	population := w.anonymousCohort(*c).Population
+	energy := w.anonymousCohortEnergy(c, population)
+	debit := int64(cost) * int64(workers)
+	if energy < debit {
 		return false
 	}
-	c.AvgEnergy -= debit
+	w.setAnonymousCohortEnergy(c, population, energy-debit)
 	return true
 }
 
@@ -219,7 +219,7 @@ func (w *World) advanceEcologyPatrols() []Event {
 					w.adjustCohortItem(c, p.CargoItem, p.CargoQuantity, true)
 				}
 				paid := w.debitTreasury(p.BountyClaim, "bounty")
-				c.MoneyPool += paid
+				w.addCohortCurrency(c, "coins", paid)
 				ds := w.DistrictStates[p.Target]
 				ds.BountyPool -= min(ds.BountyPool, int(paid))
 				w.DistrictStates[p.Target] = ds

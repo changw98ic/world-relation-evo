@@ -17,15 +17,6 @@ type LoanRequest struct {
 	Status           string `json:"status"`
 }
 
-// QuotePersonalLoan computes a small subsistence loan; selection models choose
-// the action and partner, not financial amounts or collateral.
-func QuotePersonalLoan(borrower, lender Actor) int {
-	if borrower.ID == lender.ID || borrower.Dead || lender.Dead || !ActorHasTag(lender.IdentityTags(), "trader") {
-		return 0
-	}
-	return maxInt(0, minInt(12, lender.Money-15))
-}
-
 func (mc *MarketCreditState) PendingLoanRequests(actorID string) []LoanRequest {
 	var requests []LoanRequest
 	if mc == nil {
@@ -66,7 +57,7 @@ func (w *World) applyPersonalCredit(tx *WorldTx, mc *MarketCreditState, a *Actor
 		}
 		return fail("no pending request from this borrower to this lender")
 	}
-	if b == nil || !SamePlace(*a, *b) || a.ID == b.ID || w.Tick < b.JailedUntil {
+	if b == nil || b.Dead || !SamePlace(*a, *b) || a.ID == b.ID || w.Tick < b.JailedUntil {
 		return fail("loan partner is unavailable")
 	}
 	if x.Kind == "borrow_loan" {
@@ -80,7 +71,11 @@ func (w *World) applyPersonalCredit(tx *WorldTx, mc *MarketCreditState, a *Actor
 				return fail("borrower already has a pending request")
 			}
 		}
-		amount := QuotePersonalLoan(*a, *b)
+		if !ActorHasTag(w.actorEffectiveTags(*b), spec.TraderTag) {
+			return fail("loan partner lacks the configured trader tag")
+		}
+		// A personal loan leaves the lender's subsistence reserve intact.
+		amount := min(12, b.Money-15)
 		if amount <= 0 {
 			return fail("lender cannot fund a loan")
 		}

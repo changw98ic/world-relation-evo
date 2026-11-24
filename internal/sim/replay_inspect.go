@@ -17,6 +17,7 @@ type TickDecisionLog struct {
 
 func cloneAction(x Action) Action {
 	out := x
+	out.Decision = cloneDecision(x.Decision)
 	if x.DueTick != nil {
 		deadline := *x.DueTick
 		out.DueTick = &deadline
@@ -152,6 +153,12 @@ func DecodeWorldSnapshot(raw []byte) (*World, error) {
 	}
 	if err := w.InitCohortResidents(); err != nil {
 		return nil, fmt.Errorf("restore cohort residents: %w", err)
+	}
+	if err := w.mergePersonalHoardedStock(); err != nil {
+		return nil, err
+	}
+	if err := w.ValidateIncome(); err != nil {
+		return nil, err
 	}
 	w.PlaceResidents()
 	return &w, nil
@@ -362,6 +369,7 @@ type LineageNode struct {
 	ActionKind   string     `json:"action_kind"`
 	ChannelID    string     `json:"channel_id,omitempty"`
 	BasisEventID int64      `json:"basis_event_id,omitempty"`
+	CauseEventID int64      `json:"cause_event_id,omitempty"`
 	RootEventID  int64      `json:"root_event_id"`
 	HasStatement bool       `json:"has_statement,omitempty"`
 	Statement    *Statement `json:"statement,omitempty"`
@@ -374,8 +382,7 @@ type LineageTreeNode struct {
 	Children []*LineageTreeNode `json:"children,omitempty"`
 }
 
-// LineageInspection traces the full upstream chain (RootEventID -> ... -> BasisEventID -> eventID)
-// and the downstream propagation tree across events.
+// LineageInspection traces the upstream chain and downstream propagation tree across events.
 type LineageInspection struct {
 	TargetEventID  int64            `json:"target_event_id"`
 	RootEventID    int64            `json:"root_event_id"`
@@ -390,8 +397,9 @@ func eventLineageNode(e Event) LineageNode {
 	if basis == 0 {
 		basis = payloadInt64(e.Payload, "basis_event_id")
 	}
+	cause := payloadInt64(e.Payload, "cause_event_id")
 	root := payloadInt64(e.Payload, "root_event_id")
-	if root == 0 && basis == 0 {
+	if root == 0 && cause == 0 && basis == 0 {
 		root = e.ID
 	}
 	ch := e.Action.Channel
@@ -423,6 +431,7 @@ func eventLineageNode(e Event) LineageNode {
 		ActionKind:   e.Action.Kind,
 		ChannelID:    ch,
 		BasisEventID: basis,
+		CauseEventID: cause,
 		RootEventID:  root,
 		HasStatement: stmt != nil,
 		Statement:    stmt,
@@ -430,8 +439,7 @@ func eventLineageNode(e Event) LineageNode {
 	}
 }
 
-// InspectLineage traces the full causal ancestry (RootEventID -> ... -> BasisEventID -> eventID)
-// and downstream propagation tree for eventID across events.
+// InspectLineage follows direct causes and citations to trace an event across the available history.
 func InspectLineage(events []Event, eventID int64) (*LineageInspection, error) {
 	byID := make(map[int64]LineageNode, len(events))
 	orderedIDs := make([]int64, 0, len(events))
@@ -447,18 +455,30 @@ func InspectLineage(events []Event, eventID int64) (*LineageInspection, error) {
 	}
 	sort.Slice(orderedIDs, func(i, j int) bool { return orderedIDs[i] < orderedIDs[j] })
 
-	// Walk upstream along BasisEventID links.
+	parentByID := make(map[int64]int64)
+	childrenByParent := make(map[int64][]int64)
+	for _, id := range orderedIDs {
+		n := byID[id]
+		parentID := n.CauseEventID
+		if parentID == 0 {
+			parentID = n.BasisEventID
+		}
+		if _, hasParent := byID[parentID]; !hasParent {
+			parentID = n.RootEventID
+		}
+		if _, exists := byID[parentID]; parentID != 0 && parentID != id && exists {
+			parentByID[id] = parentID
+			childrenByParent[parentID] = append(childrenByParent[parentID], id)
+		}
+	}
+
 	var reversed []LineageNode
 	seen := make(map[int64]bool)
 	curID := eventID
 	for curID != 0 && !seen[curID] {
 		seen[curID] = true
-		node, exists := byID[curID]
-		if !exists {
-			break
-		}
-		reversed = append(reversed, node)
-		curID = node.BasisEventID
+		reversed = append(reversed, byID[curID])
+		curID = parentByID[curID]
 	}
 	rootID := target.RootEventID
 	if rootID == 0 {
@@ -477,25 +497,6 @@ func InspectLineage(events []Event, eventID int64) (*LineageInspection, error) {
 	chain := make([]LineageNode, len(reversed))
 	for i := range reversed {
 		chain[i] = reversed[len(reversed)-1-i]
-	}
-
-	// Build parent -> sorted child edges for downstream propagation trees.
-	childrenByParent := make(map[int64][]int64)
-	for _, id := range orderedIDs {
-		n := byID[id]
-		parentID := n.BasisEventID
-		if parentID != 0 {
-			if _, hasParent := byID[parentID]; hasParent {
-				childrenByParent[parentID] = append(childrenByParent[parentID], id)
-				continue
-			}
-		}
-		// Fallback when intermediate basis event was compacted out but root exists.
-		if n.RootEventID != 0 && n.RootEventID != id {
-			if _, hasRoot := byID[n.RootEventID]; hasRoot {
-				childrenByParent[n.RootEventID] = append(childrenByParent[n.RootEventID], id)
-			}
-		}
 	}
 
 	var buildTree func(id int64, visited map[int64]bool) *LineageTreeNode

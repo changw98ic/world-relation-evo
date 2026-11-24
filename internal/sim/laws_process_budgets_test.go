@@ -38,8 +38,13 @@ func TestLawProductionEquivalentWorkersHaveSameMaterialAndTimeBudget(t *testing.
 		}
 	}
 	c := aggregate.Cohorts[0]
-	if c.ItemPool["wood"] != 0 || individual.Actors[0].Items["wood"] != 0 || individual.Actors[1].Items["wood"] != 0 || c.AvgEnergy*2-int(aggregate.Production.EnergyRemainder[c.ID]) != 192 || individual.Actors[0].Energy+individual.Actors[1].Energy != 192 {
-		t.Fatal("worker representation changed the six-unit material or eight-unit energy debit")
+	if c.ItemPool["wood"] != 0 || individual.Actors[0].Items["wood"] != 0 || individual.Actors[1].Items["wood"] != 0 {
+		t.Fatal("worker representation changed the six-unit material debit")
+	}
+	const remainingEnergy = 190 // Eight points for work, plus one per worker for three waking ticks.
+	if c.AvgEnergy*2-int(aggregate.Production.EnergyRemainder[c.ID]) != remainingEnergy ||
+		individual.Actors[0].Energy+individual.Actors[1].Energy != remainingEnergy {
+		t.Fatal("worker representation changed the work or waking energy debit")
 	}
 }
 

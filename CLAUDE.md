@@ -14,30 +14,28 @@ Default tests use memory and local HTTP protocol fixtures. Explicit external che
 
 ```sh
 WRE_TEST_DATABASE_URL="$DATABASE_URL" go test -tags integration ./internal/store -count=1 -v
-go test -tags live ./cmd/wre -run '^TestLiveModelWorkflowRecordsEvidenceAcrossDatabaseRestart$' -count=1 -v -timeout 30m
+go test -tags live ./cmd/wre -run '^TestLiveRuleWorkflowRecordsEvidenceAcrossDatabaseRestart$' -count=1 -v -timeout 30m
 go test -tags longrun ./internal/agent -run '^TestLongFoodCycles$' -count=1 -v -timeout 0
 ```
 
-The live test requires the configured Jev service and PostgreSQL.
+The live test requires PostgreSQL.
 It starts two real simulation processes and compares database replay with final
 state. The long test records rule-driven village and watershed food cycles for
-250 simulated days. Missing external configuration is a test failure.
+365 simulated days by default. Set `WRE_FOOD_TEST_DAYS` for a shorter observation.
+Missing external configuration is a test failure.
 
 ## Engine boundaries
 
 - One tick is 15 minutes; there are 96 ticks per day. Tick zero is 06:00.
-- `internal/sim` owns state, physical settlement, population groups, perception,
-  resource accounts and deterministic replay. `internal/agent` owns candidates,
-  Jev selection and the explicit offline rule policy.
-- `internal/pack` validates and clones external definitions. `internal/store`
-  persists snapshots, events, decisions and replay checkpoints in PostgreSQL.
-- Idle decisions run concurrently against isolated views of one starting world.
-  Settlement is serial and deterministic. A model error aborts before settlement.
-  Earlier same-tick actions can legitimately consume unreserved trade goods.
-- Jev chooses a system-defined candidate directly. Simulation runtime does not
-  call a content LLM; communication candidates carry deterministic system-built
-  text and structured claims. There is no silent fallback from a failed model
-  call to offline rules.
+- `internal/sim` owns state, settlement, population groups, perception, and
+  scheduled wakes. `internal/agent` projects outcomes and scores them against
+  the actor's needs. `internal/pack` validates world definitions.
+- Actors with due choices use the local planner. The planner can continue or
+  repair a viable plan before generating alternatives. Settlement processes
+  actions in a stable order and checks their conditions against true state.
+- `internal/store` commits world state, actors, cohorts, decisions, events and
+  any due checkpoint in one transaction.
+
 - Material and nutrition budgets bound output. Skill and facilities cannot create
   extra material. Biological growth requires declared sources, elapsed time and
   local care. Preparation, care, harvest and patrols share available workers.
@@ -51,10 +49,8 @@ state. The long test records rule-driven village and watershed food cycles for
   next crop can start on free authorized land before the previous harvest sells.
 - An observation records experience; a statement remains an attributed claim.
   A memory reference must name an event actually held by that person.
-- Personal history is retained. Model request projections disclose older text
-  omissions and archived closed agreements; open obligations remain complete.
-- Snapshot and event batches commit together. Per-world database locks prevent
-  competing runners. Trace and replay evidence must expose errors and omissions.
+- Actor records retain observations, preferences, active plans, habits and the
+  next scheduled wake. Trace and replay evidence expose failures and omissions.
 
 ## Evidence
 

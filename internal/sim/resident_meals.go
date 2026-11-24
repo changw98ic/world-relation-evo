@@ -90,23 +90,14 @@ func (w *World) settleResidentMeals(c *PopulationCohort, edible []string, physio
 			absorbNutrition(&part.Hunger, &part.NutritionReserve, w.Catalog.Items[item].NutritionUnits)
 			c.DigestedFood += int64(part.Count)
 		}
+		beforeDamage := part
 		if damageDue {
 			setResidentBandHealthBounded(&part, part.Health-starvationDamage(part.Hunger, w.Catalog.Lifecycle, form))
 		}
 		r.HungerAfter, r.HealthAfter, r.NutritionAfter = part.Hunger, part.Health, part.NutritionReserve
 		meals = append(meals, r)
 		if part.Health == 0 {
-			// Return personal items of starved residents to the cohort pool to preserve item conservation.
-			if len(part.Items) > 0 && part.Count > 0 {
-				if c.ItemPool == nil {
-					c.ItemPool = map[string]int64{}
-				}
-				for itemID, qty := range part.Items {
-					if qty > 0 {
-						c.ItemPool[itemID] += int64(qty) * int64(part.Count)
-					}
-				}
-			}
+			w.retireResidentBand(c, beforeDamage, "starvation")
 			dead += part.Count
 			fatalities = append(fatalities, r)
 		} else {
@@ -114,6 +105,9 @@ func (w *World) settleResidentMeals(c *PopulationCohort, edible []string, physio
 			hunger += int64(part.Count) * int64(part.Hunger)
 			if r.HealthBefore == MaxHealth && part.Health < MaxHealth {
 				wounded += part.Count
+				if part.Sick {
+					c.WoundedSick += part.Count
+				}
 			}
 		}
 	}
@@ -168,10 +162,9 @@ func (w *World) settleResidentMeals(c *PopulationCohort, edible []string, physio
 		}
 		return fatalities[i].First < fatalities[j].First
 	})
-	if dead > 0 || wounded > 0 {
-		// The census accounts for these casualties. The meal settlement owns the
-		// identities and hunger of the survivors.
-		wounded, _, _ = w.applyCohortCasualtiesWithCause(c, wounded, dead, 0, "starvation")
+	c.Wounded += wounded
+	if dead > 0 {
+		w.recordCohortDeaths(c, population, dead, "starvation")
 	}
 	events := []Event{{
 		ID: w.NextID, Tick: w.Tick, ActorID: c.ID, Kind: "cohort_meals_settled",

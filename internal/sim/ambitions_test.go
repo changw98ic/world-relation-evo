@@ -4,9 +4,32 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 )
+
+func TestNewSecretsKeepOldUnexposedSecrets(t *testing.T) {
+	w := lawWorld()
+	w.Catalog.TagActions["person"] = append(w.Catalog.TagActions["person"], "expose_secret")
+	for i := 0; i < 201; i++ {
+		w.addSecret("a", "offense", fmt.Sprintf("offense-%d", i), 45, 0, []string{"b"})
+	}
+	if len(w.Secrets) != 201 {
+		t.Fatalf("adding a secret left %d records; expected 201", len(w.Secrets))
+	}
+	first := w.Secrets[0].ID
+	for _, s := range w.View("b").KnownSecrets {
+		if s.ID == first {
+			lawOK(t, w.Apply("b", Action{Kind: "expose_secret", Item: first}))
+			if !w.Secrets[0].Exposed {
+				t.Fatal("the original secret was not exposed")
+			}
+			return
+		}
+	}
+	t.Fatal("the witness forgot an active secret after the 201st insert")
+}
 
 func TestAmbitionsEpistemicSecretsBlackmailExposureAndReplay(t *testing.T) {
 	w := Village("ambitions-test")

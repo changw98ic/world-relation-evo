@@ -286,13 +286,8 @@ func QueryEvents(events []sim.Event, f EventQueryFilter) QueryResult {
 
 func isUnverifiedNarrativeEvent(e sim.Event) bool {
 	if e.Kind == "rumor_panic_triggered" {
-		if verified, ok := e.Payload["verified"].(bool); ok && !verified {
-			return true
-		}
-		if _, ok := e.Payload["verified"]; !ok {
-			return true
-		}
-		return false
+		verified, _ := e.Payload["verified"].(bool)
+		return !verified
 	}
 	if e.Kind == "speech" || e.Kind == "channel_message" || e.Kind == "channel_transmitted" {
 		hasFact := false
@@ -302,12 +297,9 @@ func isUnverifiedNarrativeEvent(e sim.Event) bool {
 				hasFact = n > 0
 			case int:
 				hasFact = n > 0
-			case float64:
-				hasFact = n > 0
 			}
 		}
-		hasWitness, _ := e.Payload["witness_id"].(string)
-		return !hasFact && hasWitness == ""
+		return !hasFact
 	}
 	return false
 }

@@ -11,36 +11,39 @@ import (
 	"github.com/changw98ic/world-relation-evo/internal/sim"
 )
 
+const worldPackSchemaVersion = 2
+
 // WorldPack is an external JSON world definition supporting arbitrary genres (historical, xianxia, sci-fi, etc.).
 type WorldPack struct {
-	SchemaVersion  int                     `json:"schema_version,omitempty"`
-	ID             string                  `json:"id"`
-	Name           string                  `json:"name"`
-	Genre          string                  `json:"genre"`
-	Description    string                  `json:"description,omitempty"`
-	SeedTick       int64                   `json:"seed_tick,omitempty"`
-	PublicTreasury int64                   `json:"public_treasury,omitempty"`
-	Catalog        sim.Catalog             `json:"catalog"`
-	Map            sim.WorldMap            `json:"map"`
-	Polities       *sim.PolityNetwork      `json:"polities,omitempty"`
-	Houses         []sim.House             `json:"houses,omitempty"`
-	Factions       []sim.Faction           `json:"factions,omitempty"`
-	Actors         []sim.Actor             `json:"actors"`
-	Cohorts        []sim.PopulationCohort  `json:"cohorts,omitempty"`
-	Ecology        *sim.EcologySpec        `json:"ecology,omitempty"`
-	Production     *sim.ProductionState    `json:"production,omitempty"`
-	Governance     *sim.GovernanceSpec     `json:"governance,omitempty"`
-	MarketCredit   *sim.MarketCreditSpec   `json:"market_credit,omitempty"`
-	JusticeRevolt  *sim.JusticeRevoltSpec  `json:"justice_revolt,omitempty"`
-	SpotlightRumor *sim.SpotlightRumorSpec `json:"spotlight_rumor,omitempty"`
-	FlowGrid       *sim.FlowGridState      `json:"flow_grid,omitempty"`
-	WorldLaws      map[string]int          `json:"world_laws,omitempty"`
-	Knowledge      *sim.KnowledgeBook      `json:"knowledge,omitempty"`
-	Environment    *sim.EnvironmentProfile `json:"environment,omitempty"`
-	Relations      *sim.RelationEvoState   `json:"relations,omitempty"`
-	Diplomacy      *sim.DiplomacyState     `json:"diplomacy,omitempty"`
-	Secrets        []sim.ActorSecret       `json:"secrets,omitempty"`
-	Parties        []sim.Party             `json:"parties,omitempty"`
+	SchemaVersion    int                     `json:"schema_version,omitempty"`
+	ID               string                  `json:"id"`
+	Name             string                  `json:"name"`
+	Genre            string                  `json:"genre"`
+	Description      string                  `json:"description,omitempty"`
+	SeedTick         int64                   `json:"seed_tick,omitempty"`
+	PublicTreasury   int64                   `json:"public_treasury,omitempty"`
+	Catalog          sim.Catalog             `json:"catalog"`
+	Map              sim.WorldMap            `json:"map"`
+	Polities         *sim.PolityNetwork      `json:"polities,omitempty"`
+	Houses           []sim.House             `json:"houses,omitempty"`
+	Factions         []sim.Faction           `json:"factions,omitempty"`
+	Actors           []sim.Actor             `json:"actors"`
+	Cohorts          []sim.PopulationCohort  `json:"cohorts,omitempty"`
+	Ecology          *sim.EcologySpec        `json:"ecology,omitempty"`
+	Production       *sim.ProductionState    `json:"production,omitempty"`
+	Governance       *sim.GovernanceSpec     `json:"governance,omitempty"`
+	DividendAccounts []sim.DividendAccount   `json:"dividend_accounts,omitempty"`
+	MarketCredit     *sim.MarketCreditSpec   `json:"market_credit,omitempty"`
+	JusticeRevolt    *sim.JusticeRevoltSpec  `json:"justice_revolt,omitempty"`
+	SpotlightRumor   *sim.SpotlightRumorSpec `json:"spotlight_rumor,omitempty"`
+	FlowGrid         *sim.FlowGridState      `json:"flow_grid,omitempty"`
+	WorldLaws        map[string]int          `json:"world_laws,omitempty"`
+	Knowledge        *sim.KnowledgeBook      `json:"knowledge,omitempty"`
+	Environment      *sim.EnvironmentProfile `json:"environment,omitempty"`
+	Relations        *sim.RelationEvoState   `json:"relations,omitempty"`
+	Diplomacy        *sim.DiplomacyState     `json:"diplomacy,omitempty"`
+	Secrets          []sim.ActorSecret       `json:"secrets,omitempty"`
+	Parties          []sim.Party             `json:"parties,omitempty"`
 }
 
 // LoadFile reads and validates a WorldPack JSON file from disk.
@@ -61,6 +64,7 @@ func LoadFile(path string) (*WorldPack, error) {
 func Decode(r io.Reader) (*WorldPack, error) {
 	var p WorldPack
 	dec := json.NewDecoder(r)
+	dec.DisallowUnknownFields()
 	if err := dec.Decode(&p); err != nil {
 		return nil, fmt.Errorf("decode world pack JSON: %w", err)
 	}
@@ -74,6 +78,7 @@ func Decode(r io.Reader) (*WorldPack, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
+	p.SchemaVersion = worldPackSchemaVersion
 	return &p, nil
 }
 
@@ -81,6 +86,9 @@ func Decode(r io.Reader) (*WorldPack, error) {
 func (p *WorldPack) Validate() error {
 	if p == nil {
 		return fmt.Errorf("world pack is nil")
+	}
+	if p.SchemaVersion < 0 || p.SchemaVersion > worldPackSchemaVersion {
+		return fmt.Errorf("unsupported world pack schema_version %d", p.SchemaVersion)
 	}
 	if p.ID == "" {
 		return fmt.Errorf("world pack id is required")
@@ -396,7 +404,10 @@ func (p *WorldPack) Validate() error {
 	}
 	initial := &sim.World{Actors: p.Actors, Cohorts: p.Cohorts, PublicTreasury: p.PublicTreasury, Polities: p.Polities, FlowGrid: p.FlowGrid}
 	if p.Ecology != nil {
-		initial.DistrictStates = p.Ecology.DistrictStates
+		initial.DistrictStates = make(map[string]sim.DistrictState, len(p.Ecology.DistrictStates))
+		for id, override := range p.Ecology.DistrictStates {
+			initial.DistrictStates[id] = override.DistrictState
+		}
 	}
 	if err := initial.VerifyHoldingBounds(); err != nil {
 		return fmt.Errorf("invalid initial holdings: %w", err)
@@ -914,6 +925,9 @@ func (p *WorldPack) Instantiate(worldIDOverride string) (*sim.World, error) {
 		Knowledge:      sim.CloneKnowledgeBook(p.Knowledge),
 	}
 	w.PlaceResidents()
+	if err := w.RegisterDividends(p.DividendAccounts); err != nil {
+		return nil, err
+	}
 	if p.Production != nil {
 		w.Production = sim.CloneProductionState(*p.Production)
 	} else {
@@ -978,10 +992,10 @@ func (p *WorldPack) Instantiate(worldIDOverride string) (*sim.World, error) {
 	initEco := len(w.Cohorts) > 0 || len(w.Catalog.WorldEvents) > 0
 	scalePop := w.TotalPopulation()
 	if p.Ecology != nil {
-		if p.Ecology.Enabled || p.Ecology.ScalePop > 0 || len(p.Ecology.DistrictStates) > 0 {
+		if p.Ecology.Enabled != nil {
+			initEco = *p.Ecology.Enabled
+		} else if p.Ecology.ScalePop > 0 || len(p.Ecology.DistrictStates) > 0 {
 			initEco = true
-		} else if p.SchemaVersion >= 2 {
-			initEco = false
 		}
 		if p.Ecology.ScalePop > 0 {
 			scalePop = p.Ecology.ScalePop
@@ -1005,12 +1019,10 @@ func (p *WorldPack) Instantiate(worldIDOverride string) (*sim.World, error) {
 				if ov.Weather != "" {
 					base.Weather = ov.Weather
 				}
-				if ov.Sanitation > 0 || p.SchemaVersion >= 2 {
-					base.Sanitation = ov.Sanitation
+				if ov.Sanitation != nil {
+					base.Sanitation = *ov.Sanitation
 				}
-				if ov.Corruption > 0 || p.SchemaVersion >= 2 {
-					base.Corruption = ov.Corruption
-				}
+				base.Corruption = ov.Corruption
 				if ov.MoraleBonus != 0 {
 					base.MoraleBonus = ov.MoraleBonus
 				}
@@ -1125,13 +1137,13 @@ func normalizeCatalog(cat sim.Catalog) sim.Catalog {
 	if len(cat.FactionLevelThresholds) == 0 {
 		cat.FactionLevelThresholds = append([]int(nil), def.FactionLevelThresholds...)
 	}
-	if len(cat.Calendar.Seasons) == 0 {
+	if cat.Calendar.Seasons == nil {
 		cat.Calendar = sim.DefaultCalendarSpec()
 	}
 	if len(cat.Weathers) == 0 {
 		cat.Weathers = sim.DefaultWeatherSpecs()
 	}
-	if !cat.Lifecycle.Ageless && cat.Lifecycle.MaxExpectancy <= 0 {
+	if cat.Lifecycle == (sim.LifecycleSpec{}) {
 		lc := sim.DefaultLifecycleSpec()
 		if _, hasWaste := cat.Items[lc.WasteItem]; !hasWaste {
 			lc.WasteItem = ""
@@ -1148,6 +1160,8 @@ func normalizeCatalog(cat sim.Catalog) sim.Catalog {
 			lc.CompostRecipeID = ""
 		}
 		cat.Lifecycle = lc
+	} else if cat.Lifecycle.MaxExpectancy == 0 {
+		cat.Lifecycle.Ageless = true
 	}
 	if len(cat.Resources) == 0 {
 		cat.Resources = nil

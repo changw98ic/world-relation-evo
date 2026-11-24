@@ -15,6 +15,24 @@ import (
 	"github.com/changw98ic/world-relation-evo/internal/sim"
 )
 
+func TestGeneratedOptionsRejectReversedWindow(t *testing.T) {
+	w := sim.Village("invalid-window")
+	dossier, err := BuildDossier(w, w.Actors[0].ID, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, window := range []string{`"day_window":[7,3],`, `"day_window":[1,3,7],`} {
+		_, err := decodeOptionCatalog(`{"options":[{`+window+`"id":"test"}]}`, dossier)
+		if err == nil || !strings.Contains(err.Error(), "invalid day_window") {
+			t.Errorf("expected %s to be rejected, got %v", window, err)
+		}
+	}
+	cat, err := decodeOptionCatalog(`{"options":[{"id":"full"},{"id":"one-day","day_window":[7,7]}]}`, dossier)
+	if err != nil || cat.Options[0].DayWindow != [2]int{1, 30} || cat.Options[1].DayWindow != [2]int{7, 7} {
+		t.Fatalf("valid option windows were not preserved: %+v, %v", cat, err)
+	}
+}
+
 func TestExpandWorldSendsOneRequestPerCharacterWithCompleteDossier(t *testing.T) {
 	w := sim.Village("test-village")
 	w.Actors = w.Actors[:3]
@@ -89,16 +107,18 @@ func TestExpandWorldSendsOneRequestPerCharacterWithCompleteDossier(t *testing.T)
 	defer server.Close()
 
 	outDir := t.TempDir()
-	summary, err := ExpandWorld(context.Background(), w, Client{
+	client := Client{
 		Endpoint:   server.URL + "/v1",
 		Model:      "deepseek-test",
 		APIKey:     "test-key",
 		HTTPClient: server.Client(),
-	}, ExpandConfig{
+	}
+	cfg := ExpandConfig{
 		OutDir:      outDir,
 		HorizonDays: 30,
 		Concurrency: 2,
-	})
+	}
+	summary, err := ExpandWorld(context.Background(), w, client, cfg)
 	if err != nil {
 		t.Fatalf("ExpandWorld failed: %v", err)
 	}
@@ -124,6 +144,27 @@ func TestExpandWorldSendsOneRequestPerCharacterWithCompleteDossier(t *testing.T)
 	}
 	if _, err := os.Stat(filepath.Join(outDir, "overview.md")); err != nil {
 		t.Fatalf("missing overview.md: %v", err)
+	}
+	cfg.Resume = true
+	resumed, err := ExpandWorld(context.Background(), w, client, cfg)
+	if err != nil || resumed.TotalRequests != 0 || calls.Load() != 3 || resumed.TotalOptions != summary.TotalOptions {
+		t.Fatalf("identical request did not resume: calls=%d summary=%+v err=%v", calls.Load(), resumed, err)
+	}
+	for _, change := range []struct {
+		name   string
+		update func(*sim.World, *Client, *ExpandConfig)
+	}{
+		{"world", func(w *sim.World, _ *Client, _ *ExpandConfig) { w.ID = "another-world" }},
+		{"horizon", func(_ *sim.World, _ *Client, c *ExpandConfig) { c.HorizonDays = 1 }},
+		{"model", func(_ *sim.World, c *Client, _ *ExpandConfig) { c.Model = "another-model" }},
+	} {
+		t.Run(change.name, func(t *testing.T) {
+			newWorld, newClient, newConfig := *w, client, cfg
+			change.update(&newWorld, &newClient, &newConfig)
+			if _, err := ExpandWorld(context.Background(), &newWorld, newClient, newConfig); err == nil || !strings.Contains(err.Error(), "does not match the current request") || calls.Load() != 3 {
+				t.Fatalf("different %s accepted saved output or made a model call: calls=%d err=%v", change.name, calls.Load(), err)
+			}
+		})
 	}
 }
 

@@ -11,9 +11,7 @@ import (
 	"github.com/changw98ic/world-relation-evo/internal/sim"
 )
 
-// With this role, eating is allowed while drinking is unavailable. Thirst
-// outranks hunger in the rule policy; hunger must still get a turn.
-func TestUnavailablePreferenceDoesNotSuppressALegalMeal(t *testing.T) {
+func TestPlannerScoresOnlyActionsAvailableToTheActor(t *testing.T) {
 	w := boundaryWorld()
 	a := &w.Actors[0]
 	a.Tags = []string{"diner"}
@@ -40,26 +38,29 @@ func TestUnavailablePreferenceDoesNotSuppressALegalMeal(t *testing.T) {
 	}
 	defer f.Close()
 	decoder := json.NewDecoder(f)
-	sawDrink := false
+	var sawInput bool
 	for decoder.More() {
 		var entry runtrace.Entry
 		if err := decoder.Decode(&entry); err != nil {
 			t.Fatal(err)
 		}
-		if entry.Kind == "rule_unavailable" {
-			var data struct{ Preferences []sim.Action }
+		if entry.Kind == "decision_input" {
+			sawInput = true
+			var data struct {
+				Options []sim.Candidate
+			}
 			if err := json.Unmarshal(entry.Data, &data); err != nil {
 				t.Fatal(err)
 			}
-			for _, pref := range data.Preferences {
-				if pref.Kind == "drink" {
-					sawDrink = true
+			for _, candidate := range data.Options {
+				if candidate.Action.Kind == "drink" {
+					t.Fatal("an action outside the actor's capabilities entered the comparison")
 				}
 			}
 		}
 	}
-	if !sawDrink {
-		t.Fatal("trace lost the unavailable drink")
+	if !sawInput {
+		t.Fatal("trace lost the planning input")
 	}
 	boundaryApply(t, w, a.ID, action)
 	if a.Items["food"] != 19 {

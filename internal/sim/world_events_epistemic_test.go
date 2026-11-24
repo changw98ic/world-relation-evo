@@ -2,6 +2,20 @@ package sim
 
 import "testing"
 
+func TestWorldEventDurationIsPreservedInRegionalCascade(t *testing.T) {
+	w := Village("instant-quake")
+	district := &w.Map.Districts[0]
+	district.GeoRegionID = "region"
+	w.Map.GeoRegions = []GeoRegion{{ID: "region"}}
+	w.Catalog.WorldEvents = []WorldEventSpec{{ID: "quake", Category: "terrain_shift", Intensity: 30}}
+	w.DistrictStates = map[string]DistrictState{district.ID: {}}
+	w.TriggerWorldEvent("quake", district.ID)
+	disasters := w.DistrictStates[district.ID].ActiveDisasters
+	if len(disasters) != 1 || disasters[0].ExpiresTick != w.Tick {
+		t.Fatalf("instant world event left a lasting geographic disaster: %+v", disasters)
+	}
+}
+
 func TestEpistemicDeathNewsPropagationAndDelayedVendetta(t *testing.T) {
 	w := Village("epistemic-death-test")
 	w.Catalog.Skills = map[string]SkillSpec{

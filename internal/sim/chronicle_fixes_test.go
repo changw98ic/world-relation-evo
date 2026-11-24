@@ -1,8 +1,135 @@
 package sim
 
 import (
+	"slices"
 	"testing"
 )
+
+func TestFailedTransitionRecordsDeathWhenHealthReachesZero(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		health int
+	}{
+		{name: "survives", health: 23},
+		{name: "dies", health: 22},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := lawWorld()
+			w.Catalog.TagActions["person"] = append(w.Catalog.TagActions["person"], "attempt_transition")
+			w.Catalog.Transitions = map[string]TransitionSpec{"stage": {ID: "stage", Ticks: 1, FailureHealthLoss: 22}}
+			w.Actors[0].Health = tc.health
+			events := w.Apply("a", Action{Kind: "attempt_transition", TransitionID: "stage"})
+			if len(events) == 0 || events[0].Kind != "transition_failed" || w.Actors[0].Health != tc.health-22 {
+				t.Fatalf("unexpected transition result: %+v", events)
+			}
+			if tc.health > 22 {
+				if w.Actors[0].Dead || len(events) != 1 {
+					t.Fatalf("failure at 23 health should leave one health and no death: %+v", events)
+				}
+				return
+			}
+			if len(events) != 2 || events[1].Kind != "actor_died" || events[1].Payload["cause"] != "transition_failure" {
+				t.Fatalf("expected death attributed to the transition: %+v", events)
+			}
+			requireEventCause(t, events[1], events[0])
+		})
+	}
+}
+
+func TestVenueStrikeRecordsCauseForActiveAndStoredActors(t *testing.T) {
+	w := lawWorld()
+	w.Map.Venues = []Venue{{ID: "hall", DistrictID: "home"}}
+	for i := range w.Actors {
+		w.Actors[i].VenueID = "hall"
+	}
+	w.Actors[1].Health, w.Actors[2].Health = 1, 1
+	if err := w.DehydrateActor("c"); err != nil {
+		t.Fatal(err)
+	}
+	w.Catalog.ActionSpecs = map[string]ActionSpec{
+		"strike": {ID: "strike", TargetKind: "venue", GrantedByTags: []string{"person"}, Ticks: 1,
+			Attack: &AttackSpec{AreaScope: "venue", DamageByType: map[string]int{"physical": 100}}},
+	}
+	events := w.Apply("a", Action{Kind: "strike", Location: "hall"})
+	if len(events) == 0 || events[0].Kind != "action_resolved" {
+		t.Fatalf("expected area strike to be recorded: %+v", events)
+	}
+	dead := map[string]bool{}
+	for _, event := range events[1:] {
+		if event.Kind == "actor_died" {
+			requireEventCause(t, event, events[0])
+			dead[event.ActorID] = true
+		}
+	}
+	if !dead["b"] || !dead["c"] {
+		t.Fatalf("expected active and stored actors to have linked death events: %+v", events)
+	}
+}
+
+func requireEventCause(t *testing.T, event, cause Event) {
+	t.Helper()
+	if event.ID <= cause.ID || payloadInt64(event.Payload, "cause_event_id") != cause.ID || event.causalRoot() != cause.causalRoot() {
+		t.Fatalf("event %d (%s) did not follow cause %d (%s): %+v", event.ID, event.Kind, cause.ID, cause.Kind, event.Payload)
+	}
+}
+
+func TestLineageFollowsDirectCauseBeforeCitedEvidence(t *testing.T) {
+	events := []Event{
+		{ID: 1, Kind: "speech"},
+		{ID: 2, Kind: "attacked", Action: Action{BasisEventID: 1}},
+		{ID: 3, Kind: "actor_died", Action: Action{BasisEventID: 1}, Payload: map[string]any{"cause_event_id": int64(2), "root_event_id": int64(1)}},
+	}
+	death, err := InspectLineage(events, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chain []int64
+	for _, node := range death.UpstreamChain {
+		chain = append(chain, node.EventID)
+	}
+	if !slices.Equal(chain, []int64{1, 2, 3}) {
+		t.Fatalf("expected the attack before the death, got %v", chain)
+	}
+	attack, err := InspectLineage(events, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(attack.DescendantIDs, []int64{3}) {
+		t.Fatalf("expected the death as a consequence of the attack, got %v", attack.DescendantIDs)
+	}
+}
+
+func TestAnomalyExposuresKeepTheirOwnCausesWhenTheyShareAReference(t *testing.T) {
+	w := lawWorld()
+	w.Catalog.TagActions["person"] = append(w.Catalog.TagActions["person"], "gf_exchange", "expose_secret")
+	w.Catalog.GoldenFingers = []GoldenFingerSpec{
+		{ID: "anomaly", OwnerActorID: "a", ExposureRiskPermille: 1000,
+			Shop: []GFShopItemSpec{{ID: "buy", Reward: GFRewardSpec{Coins: 1}}}},
+	}
+	spoken := w.Apply("a", Action{Kind: "speak", TargetID: "b", Text: "The shop opened"})
+	lawOK(t, spoken)
+	exchange := func() Event {
+		t.Helper()
+		events := w.Apply("a", Action{Kind: "gf_exchange", Text: "anomaly", Item: "buy", BasisEventID: spoken[0].ID})
+		for _, event := range events {
+			if event.Kind == "secret_caught_red_handed" {
+				requireEventCause(t, event, events[0])
+				if event.causalRoot() != spoken[0].ID {
+					t.Fatalf("exposure lost the cited root: %+v", event)
+				}
+				return event
+			}
+		}
+		t.Fatalf("missing exposure after exchange: %+v", events)
+		return Event{}
+	}
+	first := exchange()
+	lawOK(t, w.Apply("b", Action{Kind: "expose_secret", Item: first.Payload["secret_id"].(string)}))
+	second := exchange()
+	if second.Payload["secret_id"] == first.Payload["secret_id"] {
+		t.Fatal("a later exchange reused the exposed secret from the earlier exchange")
+	}
+}
 
 func TestChannelTransmittedDeathNewsFormsGrudge(t *testing.T) {
 	w := Village("remote-death-news")

@@ -4,6 +4,21 @@ import "fmt"
 
 // ValidatePhysicalRules validates external world definitions before any simulation.
 func (c Catalog) ValidatePhysicalRules(grid *FlowGridState) error {
+	if c.Planning != nil {
+		if err := c.Planning.Validate(); err != nil {
+			return err
+		}
+	}
+	for id, channel := range c.CommChannels {
+		if channel.DelayTicks < 0 {
+			return fmt.Errorf("communication channel %q requires a nonnegative delay", id)
+		}
+	}
+	for _, event := range c.WorldEvents {
+		if event.DurationTicks < 0 || event.Intensity < 0 {
+			return fmt.Errorf("world event %q needs nonnegative duration_ticks and intensity", event.ID)
+		}
+	}
 	if c.HouseWear != nil {
 		rule := c.HouseWear
 		if rule.ConditionLoss < 0 || rule.IntervalTicks < 0 || rule.ConditionLoss > 0 && rule.IntervalTicks == 0 || rule.Source == "" {

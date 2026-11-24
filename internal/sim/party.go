@@ -2,6 +2,7 @@ package sim
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 )
 
@@ -90,9 +91,20 @@ func (w *World) stepParties() []Event {
 		}
 		p.MemberIDs = alive
 		if !ActorHasTag(alive, p.LeaderID) {
-			sorted := append([]string(nil), alive...)
-			sort.Strings(sorted)
-			p.LeaderID = sorted[0]
+			previous := p.LeaderID
+			successor := w.actor(slices.Min(alive))
+			p.LeaderID = successor.ID
+			data := map[string]any{
+				"text":               fmt.Sprintf("%s succeeded %s as leader of %s", successor.Name, previous, p.Name),
+				"party_id":           p.ID,
+				"previous_leader_id": previous,
+				"leader_id":          p.LeaderID,
+			}
+			if leader := w.actor(previous); leader != nil {
+				data["cause_event_id"] = leader.DeathEventID
+				data["root_event_id"] = citedRoot(leader.Memories, leader.DeathEventID)
+			}
+			events = append(events, w.record(successor, Action{Kind: "wait"}, "party_leader_changed", data))
 		}
 		kept = append(kept, p)
 	}
@@ -127,12 +139,14 @@ func (w *World) perceivedParties(a Actor) []Party {
 	return out
 }
 
-func normalizePartyPurpose(raw string) string {
+func partyPurpose(raw string) string {
 	switch raw {
+	case "":
+		return "expedition"
 	case "expedition", "escort", "hunt", "relic_hunt":
 		return raw
 	default:
-		return "expedition"
+		return ""
 	}
 }
 
@@ -143,13 +157,10 @@ func (w *World) applyFormParty(tx *WorldTx, a *Actor, x Action) []Event {
 	if a.InsideHouse != "" {
 		return fail("step outdoors to form a party")
 	}
-	if a.Energy < 3 {
-		return fail("insufficient energy to form a party")
-	}
 	if w.ActorParty(a.ID) != nil {
 		return fail("already belongs to an active party")
 	}
-	purpose := normalizePartyPurpose(x.Item)
+	purpose := partyPurpose(x.Item)
 	targetDist := x.Location
 	if targetDist == "" {
 		targetDist = a.Location
@@ -169,7 +180,6 @@ func (w *World) applyFormParty(tx *WorldTx, a *Actor, x Action) []Event {
 			}
 		}
 	}
-	tx.setEnergy(a, a.Energy-3, x.Kind)
 	p := Party{
 		ID:             partyID,
 		Name:           fmt.Sprintf("%s's %s party", a.Name, purpose),
@@ -204,9 +214,6 @@ func (w *World) applyJoinParty(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
 		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
 	}
-	if a.Energy < 2 {
-		return fail("insufficient energy to join party")
-	}
 	if w.ActorParty(a.ID) != nil {
 		return fail("already belongs to an active party")
 	}
@@ -225,9 +232,6 @@ func (w *World) applyJoinParty(tx *WorldTx, a *Actor, x Action) []Event {
 		return fail("no matching active party to join")
 	}
 	p := &w.Parties[targetIdx]
-	if len(p.MemberIDs) >= 6 {
-		return fail("party is already full")
-	}
 	leader := w.actor(p.LeaderID)
 	if leader == nil || leader.Dead || leader.Location != a.Location {
 		return fail("must be in the same district as party leader to join")
@@ -235,7 +239,6 @@ func (w *World) applyJoinParty(tx *WorldTx, a *Actor, x Action) []Event {
 	if leader.Trust[a.ID] < -1 {
 		return fail("party leader does not trust applicant")
 	}
-	tx.setEnergy(a, a.Energy-2, x.Kind)
 	p.MemberIDs = appendUnique(p.MemberIDs, a.ID)
 	tx.MutateTrust(leader, a.ID, 1)
 	tx.MutateTrust(a, leader.ID, 1)
@@ -287,9 +290,7 @@ func (w *World) applyLeaveParty(tx *WorldTx, a *Actor, x Action) []Event {
 	} else {
 		p.MemberIDs = remaining
 		if p.LeaderID == a.ID {
-			sorted := append([]string(nil), remaining...)
-			sort.Strings(sorted)
-			p.LeaderID = sorted[0]
+			p.LeaderID = slices.Min(remaining)
 		}
 		w.Parties[partyIdx] = p
 	}
@@ -299,9 +300,6 @@ func (w *World) applyLeaveParty(tx *WorldTx, a *Actor, x Action) []Event {
 func (w *World) applyBetrayParty(tx *WorldTx, a *Actor, x Action) []Event {
 	fail := func(reason string) []Event {
 		return []Event{tx.record(a, x, "action_failed", map[string]any{"text": reason})}
-	}
-	if a.Energy < 6 {
-		return fail("insufficient energy to betray party")
 	}
 	partyIdx := -1
 	for i := range w.Parties {
@@ -343,7 +341,6 @@ func (w *World) applyBetrayParty(tx *WorldTx, a *Actor, x Action) []Event {
 		witnessIDs = append(witnessIDs, peer.ID)
 	}
 	observers = append(observers, target)
-	tx.setEnergy(a, a.Energy-6, x.Kind)
 	// Exact 0-error coin seizure from target to betrayer.
 	stolen := 0
 	if target.Money > 0 {

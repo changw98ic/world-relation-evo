@@ -30,8 +30,8 @@ func handleMoveAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
 	if a.Energy < effEnergy {
 		return actionFail(tx, a, x, "insufficient energy to walk to "+x.Location)
 	}
-	tx.setEnergy(a, a.Energy-effEnergy, x.Kind)
 	task := Task{Action: x, TotalTicks: effTicks, Remaining: effTicks - 1, StartedTick: w.Tick}
+	tx.startTaskWork(a, &task, effEnergy)
 	if task.Remaining <= 0 {
 		return w.finishTaskWithTx(tx, a, task)
 	}
@@ -93,13 +93,9 @@ func handleRepairHouseAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
 	if h.Condition >= MaxCondition {
 		return actionFail(tx, a, x, "house does not need repair")
 	}
-	if a.Energy < 8 {
-		return actionFail(tx, a, x, "insufficient energy to repair house")
-	}
 	if a.Items[repairItem] < 1 {
 		return actionFail(tx, a, x, "repairing a house requires 1 "+repairItem)
 	}
-	tx.setEnergy(a, a.Energy-8, x.Kind)
 	tx.ProduceOrConsumeItem(a, repairItem, -1, x.Kind)
 	task := Task{Action: x, TotalTicks: 3, Remaining: 2, StartedTick: w.Tick}
 	a.Task = &task
@@ -108,6 +104,22 @@ func handleRepairHouseAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
 		"house_id":        h.ID,
 		"remaining_ticks": task.Remaining,
 	})}
+}
+
+func (c Catalog) HouseRepairGain(a Actor) int {
+	builder := c.EffectiveEnvironment().BuilderProfession
+	levels := a.Professions[builder]
+	for _, profession := range c.Professions {
+		if profession.ID != builder && (profession.ParentProfession == builder ||
+			c.ProfessionGrantsCapability(profession, "repair_house") ||
+			c.ProfessionGrantsCapability(profession, "upgrade_house")) {
+			levels += a.Professions[profession.ID]
+		}
+	}
+	if levels > 0 {
+		return 30 + 5*levels
+	}
+	return 25
 }
 
 func handleUpgradeHouseAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
@@ -139,9 +151,6 @@ func handleUpgradeHouseAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
 	if a.Money < coins {
 		return actionFail(tx, a, x, fmt.Sprintf("renovation requires %d coins", coins))
 	}
-	if a.Energy < 12 {
-		return actionFail(tx, a, x, "insufficient energy to renovate")
-	}
 	tx.ProduceOrConsumeItem(a, repairItem, -materials, x.Kind)
 	if coins > 0 {
 		if len(w.Cohorts) > 0 {
@@ -151,7 +160,6 @@ func handleUpgradeHouseAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
 			tx.MintOrBurnCurrency(a, "coins", -int64(coins), x.Kind)
 		}
 	}
-	tx.setEnergy(a, a.Energy-12, x.Kind)
 	task := Task{Action: x, TotalTicks: 4, Remaining: 3, StartedTick: w.Tick}
 	a.Task = &task
 	return []Event{tx.record(a, x, "task_started", map[string]any{
@@ -171,11 +179,15 @@ func handleTransferHouseAction(tx *WorldTx, a, b *Actor, x Action) []Event {
 		return actionFail(tx, a, x, "recipient is not nearby")
 	}
 	h.OwnerID = b.ID
-	if !h.CanAccess(b.ID) {
-		h.Residents = append(h.Residents, b.ID)
+	h.Residents = removeString(h.Residents, a.ID)
+	if a.HomeID == h.ID {
+		tx.setHome(a, "")
+	}
+	if a.InsideHouse == h.ID {
+		tx.MoveActor(a, a.Location, a.VenueID, "")
 	}
 	if b.HomeID == "" {
-		b.HomeID = h.ID
+		tx.setHome(b, h.ID)
 	}
 	tx.MutateTrust(a, b.ID, 2)
 	tx.MutateTrust(b, a.ID, 2)

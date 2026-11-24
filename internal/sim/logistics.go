@@ -280,9 +280,9 @@ func (w *World) payFreightToCarriers(carrierTag string, feeCoins int64) *Populat
 	share := feeCoins / int64(len(carriers))
 	rem := feeCoins % int64(len(carriers))
 	for idx, c := range carriers {
-		c.MoneyPool += share
+		w.addCohortCurrency(c, "coins", share)
 		if idx == 0 {
-			c.MoneyPool += rem
+			w.addCohortCurrency(c, "coins", rem)
 		}
 	}
 	return carriers[0]

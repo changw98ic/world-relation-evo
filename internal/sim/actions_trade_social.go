@@ -10,6 +10,8 @@ func registerTradeSocialActions() {
 	registerBuiltinAction("offer", handleOfferAction)
 	registerBuiltinAction("accept", handleAcceptOrRejectOfferAction)
 	registerBuiltinAction("reject", handleAcceptOrRejectOfferAction)
+	registerBuiltinAction("market_buy", handleCohortMarketAction)
+	registerBuiltinAction("market_sell", handleCohortMarketAction)
 }
 
 func handleJoinFactionAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
@@ -72,29 +74,38 @@ func handleJoinProfessionAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
 func handlePracticeSkillAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
 	w := tx.World
 	spec, ok := w.Catalog.Skills[x.SkillID]
-	if !ok || a.Skills[x.SkillID] == 0 || a.Skills[x.SkillID] >= spec.EffectiveMaxLevel() || a.Energy < 4 {
-		return actionFail(tx, a, x, "practice requires a known skill below its maximum level and four energy")
+	if !ok || a.Skills[x.SkillID] == 0 || a.Skills[x.SkillID] >= spec.EffectiveMaxLevel() {
+		return actionFail(tx, a, x, "practice requires a known skill below its maximum level")
 	}
-	tx.setEnergy(a, a.Energy-4, x.Kind)
 	events := actionEmit(tx, a, x, "skill_practiced", fmt.Sprintf("%s practised %s", a.Name, spec.Name))
 	return append(events, w.grantSkillXP(tx, a, x, x.SkillID, 4)...)
 }
 
 func handleSpeakAction(tx *WorldTx, a, b *Actor, x Action) []Event {
 	w := tx.World
-	if b == nil || b.ID == a.ID || !SamePlace(*a, *b) || w.Tick < b.JailedUntil {
-		return actionFail(tx, a, x, "listener is not nearby")
+	data := map[string]any{"text": x.Text, "delivered_to": []string{b.ID}}
+	if x.Statement == nil || x.Statement.Topic != ConversationQuestion {
+		w.recordSocialContact(a, b)
 	}
-	if x.Text == "" {
-		return actionFail(tx, a, x, "empty speech")
+	if x.Statement != nil && x.Statement.Topic == ConversationReply {
+		data["cause_event_id"] = x.BasisEventID
 	}
-	if b.Task != nil && (b.Task.Action.Kind == "sleep" || b.Task.Dormant) {
-		return actionFail(tx, a, x, "listener cannot hear speech")
-	}
-	ev := tx.record(a, x, "speech", map[string]any{"text": x.Text, "delivered_to": []string{b.ID}}, b)
+	ev := tx.record(a, x, "speech", data, b)
 	return append([]Event{ev}, w.deliverSecretReport(x, payloadInt64(ev.Payload, "fact_event_id"), []*Actor{b})...)
 }
 
+func (w *World) recordSocialContact(people ...*Actor) {
+	for id, spec := range w.Catalog.StateSlots {
+		if spec.ConversationGain <= 0 {
+			continue
+		}
+		for _, actor := range people {
+			if _, eligible := w.Catalog.StateSlotValue(*actor, id); eligible {
+				w.addActorStateSlot(actor, id, spec.ConversationGain)
+			}
+		}
+	}
+}
 func handleOfferAction(tx *WorldTx, a, b *Actor, x Action) []Event {
 	w := tx.World
 	if x.OfferID != 0 {
@@ -129,14 +140,18 @@ func handleOfferAction(tx *WorldTx, a, b *Actor, x Action) []Event {
 		"currency": cur,
 	}, b)
 	w.Offers = append(w.Offers, Offer{
-		ID:       e.ID,
-		Seller:   a.ID,
-		Buyer:    b.ID,
-		Item:     x.Item,
-		Quantity: x.Quantity,
-		Price:    x.Price,
-		Currency: x.Currency,
-		Expires:  w.Tick + 12,
+		ID:          e.ID,
+		RootEventID: e.causalRoot(),
+		Seller:      a.ID,
+		Buyer:       b.ID,
+		Item:        x.Item,
+		Quantity:    x.Quantity,
+		Price:       x.Price,
+		Currency:    x.Currency,
+		Expires:     w.Tick + 12,
+		District:    a.Location,
+		Venue:       a.VenueID,
+		House:       a.InsideHouse,
 	})
 	return []Event{e}
 }
@@ -158,7 +173,8 @@ func handleAcceptOrRejectOfferAction(tx *WorldTx, a, _ *Actor, x Action) []Event
 			return []Event{tx.record(a, x, "trade_rejected", map[string]any{
 				"text":           a.Name + " rejected offer",
 				"cause_event_id": o.ID,
-				"root_event_id":  o.ID,
+				"root_event_id":  o.causalRoot(),
+				"trade":          o,
 			}, w.actor(o.ProposerID()))}
 		}
 		cur := o.Currency
@@ -168,17 +184,19 @@ func handleAcceptOrRejectOfferAction(tx *WorldTx, a, _ *Actor, x Action) []Event
 		if buyer == nil {
 			return actionFail(tx, a, x, "buyer is no longer available")
 		}
-		if reason := w.offerSettlementBlockReason(*buyer, o); reason != "" {
-			return actionFail(tx, a, x, reason)
+		other := w.actor(o.ProposerID())
+		effort := w.Catalog.tradeEnergy(o.Item, o.Quantity)
+		tx.setEnergy(other, other.Energy-effort, x.Kind)
+		if !tx.TransferItem(seller, buyer, o.Item, o.Quantity, x.Kind) {
+			return actionFail(tx, a, x, "buyer cannot receive offered items")
 		}
-		tx.TransferItem(seller, buyer, o.Item, o.Quantity, x.Kind)
 		taxCoins := w.offerTax(*buyer, o)
 		pol := w.EffectiveGoverningPolity(buyer.Location, buyer.VenueID)
 		if cur != "coins" && pol == nil {
 			taxCoins = 0
 		}
-		if netSeller := o.Price - taxCoins; netSeller > 0 {
-			tx.TransferCurrency(buyer, seller, cur, int64(netSeller), x.Kind)
+		if netSeller := o.Price - taxCoins; netSeller > 0 && !tx.TransferCurrency(buyer, seller, cur, int64(netSeller), x.Kind) {
+			return actionFail(tx, a, x, "seller cannot receive offered funds")
 		}
 		if taxCoins > 0 {
 			account := "treasury"
@@ -192,36 +210,30 @@ func handleAcceptOrRejectOfferAction(tx *WorldTx, a, _ *Actor, x Action) []Event
 				w.addPolityCurrency(pol, cur, int64(taxCoins))
 			}
 		}
-		tx.MutateTrust(buyer, seller.ID, 1)
-		tx.MutateTrust(seller, buyer.ID, 1)
 		w.Offers = append(w.Offers[:i], w.Offers[i+1:]...)
 		if len(w.Offers) == 0 {
 			w.Offers = nil
 		}
 		x.Item, x.Quantity, x.Price, x.Currency = o.Item, o.Quantity, o.Price, o.Currency
-		if w.actorFactionRelation(*buyer, *seller) == "allied" {
-			tx.MutateTrust(buyer, seller.ID, 1)
-			tx.MutateTrust(seller, buyer.ID, 1)
-		}
 		events := []Event{tx.record(a, x, "trade_completed", map[string]any{
-			"text":           fmt.Sprintf("%s bought %d %s from %s for %d %s", buyer.Name, o.Quantity, o.Item, seller.Name, o.Price, cur),
-			"item":           o.Item,
-			"quantity":       o.Quantity,
-			"seller_id":      seller.ID,
-			"price":          o.Price,
-			"currency":       cur,
-			"market_tax":     taxCoins,
-			"cause_event_id": o.ID,
-			"root_event_id":  o.ID,
+			"text":                fmt.Sprintf("%s bought %d %s from %s for %d %s", buyer.Name, o.Quantity, o.Item, seller.Name, o.Price, cur),
+			"item":                o.Item,
+			"quantity":            o.Quantity,
+			"seller_id":           seller.ID,
+			"buyer_id":            buyer.ID,
+			"seller_energy_spent": effort,
+			"buyer_energy_spent":  effort,
+			"price":               o.Price,
+			"currency":            cur,
+			"market_tax":          taxCoins,
+			"cause_event_id":      o.ID,
+			"root_event_id":       o.causalRoot(),
+			"district":            buyer.Location,
+			"trade":               o,
 		}, w.actor(o.ProposerID()))}
-		tier := w.Catalog.Items[o.Item].Tier
-		if tier < 1 {
-			tier = 1
-		}
-		if _, hasPeddler := w.Catalog.ProfessionByID("peddler"); hasPeddler {
-			events = append(events, w.grantProfessionXP(tx, seller, x, "peddler", tier*o.Quantity, tier)...)
-			events = append(events, w.grantProfessionXP(tx, buyer, x, "peddler", tier*o.Quantity, tier)...)
-		}
+		xp, influence := w.Catalog.TradeExperience(o.Item, o.Quantity)
+		events = append(events, w.grantProfessionXP(tx, seller, x, "peddler", xp, influence)...)
+		events = append(events, w.grantProfessionXP(tx, buyer, x, "peddler", xp, influence)...)
 		return events
 	}
 	return actionFail(tx, a, x, "offer not found")

@@ -68,7 +68,7 @@ func TestLawInformationResearchCostsWorkBeforePersonalDiscovery(t *testing.T) {
 	w.Catalog.Techs = map[string]TechSpec{"joinery": {ID: "joinery", ResearchTicks: 3, ResearchEnergyCost: 4, ResearchInputs: map[string]int{"wood": 1}, FacilityName: "better_bench", ProductionBonusPct: 50}}
 	w.Actors[0].Items["wood"] = 1
 	lawOK(t, w.Apply("a", Action{Kind: "research_tech", TechID: "joinery"}))
-	if w.Actors[0].Items["wood"] != 0 || w.Actors[0].Energy != 96 || w.KnowsTech("a", "joinery") {
+	if w.Actors[0].Items["wood"] != 0 || w.Actors[0].Energy != 98 || w.KnowsTech("a", "joinery") {
 		t.Fatal("research discovery preceded its declared materials, energy or work")
 	}
 	w.Tick++
@@ -78,7 +78,7 @@ func TestLawInformationResearchCostsWorkBeforePersonalDiscovery(t *testing.T) {
 	}
 	w.Tick++
 	lawOK(t, w.Advance("a"))
-	if !w.KnowsTech("a", "joinery") || w.KnowsTech("b", "joinery") || w.KnowsTech("c", "joinery") || w.FacilityProductionBonusPct(w.Actors[0]) != 0 {
+	if !w.KnowsTech("a", "joinery") || w.KnowsTech("b", "joinery") || w.KnowsTech("c", "joinery") || w.FacilityProductionBonusPct(w.Actors[0]) != 0 || w.Actors[0].Energy != 96 {
 		t.Fatal("personal discovery became global knowledge or a built physical facility")
 	}
 }
@@ -102,9 +102,14 @@ func TestLawInformationTeachingRequiresKnowledgeAndMeasuredChannel(t *testing.T)
 		t.Fatal("out-of-range teaching crossed the channel boundary")
 	}
 	w.Map.GeoRegions[1].Coord.X = 1
-	lawOK(t, w.Apply("a", x))
-	if !w.KnowsTech("b", "joinery") || w.KnowsTech("c", "joinery") || w.Actors[0].Energy != 97 || w.FacilityProductionBonusPct(w.Actors[1]) != 0 {
-		t.Fatal("exact-range transmission failed or built a facility merely by teaching it")
+	w.Actors[0].Energy = 6
+	lawRejected(t, w.Apply("a", x))
+	w.Actors[0].Energy = 7 // One lesson costs four energy and the radio costs three.
+	events := w.Apply("a", x)
+	lawOK(t, events)
+	if !w.KnowsTech("b", "joinery") || w.KnowsTech("c", "joinery") || w.Actors[0].Energy != 0 ||
+		payloadInt64(events[0].Payload, "energy_spent") != 7 || w.FacilityProductionBonusPct(w.Actors[1]) != 0 {
+		t.Fatal("exact-range teaching failed to settle its lesson and channel costs")
 	}
 }
 
@@ -135,5 +140,73 @@ func TestLawJusticeAppealUsesPersonalEvidenceAndLocalCourt(t *testing.T) {
 	lawOK(t, w.Apply("witness", Action{Kind: "file_appeal", TargetID: "b"}))
 	if w.Actors[1].JailedUntil != 0 || w.JusticeRevolt.CourtCases[0].Status != "overturned" || w.Actors[3].Energy != 96 {
 		t.Fatal("local informed appeal failed to release its actual victim")
+	}
+}
+
+func TestLawJusticeAppealAndSentenceCompletionReconcileStoredPeople(t *testing.T) {
+	for _, target := range []string{"", "a"} {
+		t.Run("target="+target, func(t *testing.T) {
+			w := lawWorld()
+			w.Tick = 12
+			w.Actors[0].Tags = append(w.Actors[0].Tags, "law")
+			w.Actors[1].FormID = "different_form"
+			if err := w.DehydrateActor("b"); err != nil {
+				t.Fatal(err)
+			}
+			w.actor("a").IllicitGain = 1
+			frame := w.Apply("a", Action{Kind: "frame_suspect", TargetID: "b"})
+			if len(frame) == 0 || frame[0].Kind != "wrongful_conviction" || w.storedActorCohort("b").Jailed != 1 {
+				t.Fatalf("stored victim was not accounted for after confinement: %+v", frame)
+			}
+			if err := w.DehydrateActor("a"); err != nil {
+				t.Fatal(err)
+			}
+			appeal := w.Apply("c", Action{Kind: "file_appeal", TargetID: target, BasisEventID: frame[0].ID})
+			lawOK(t, appeal)
+			if w.JusticeRevolt.CourtCases[0].Status != "overturned" || w.actor("b").JailedUntil != 0 || w.storedActorCohort("b").Jailed != 0 {
+				t.Fatalf("appeal failed to release and reconcile the stored victim: %+v", appeal)
+			}
+			until := w.actor("a").JailedUntil
+			if until <= w.Tick || w.storedActorCohort("a").Jailed != 1 {
+				t.Fatal("appeal did not count the stored magistrate's sentence")
+			}
+			w.JusticeRevolt.CourtCases = append(w.JusticeRevolt.CourtCases, CourtCase{SuspectID: "a", Status: "convicted"})
+			w.Tick = until
+			w.stepActorPhysiologyAndLifecycle()
+			w.stepActorPhysiologyAndLifecycle()
+			if w.actor("a").JailedUntil != 0 || w.storedActorCohort("a").Jailed != 0 || w.JusticeRevolt.CourtCases[1].Status != "served" {
+				t.Fatal("completed stored sentence did not settle the census and docket exactly once")
+			}
+		})
+	}
+}
+
+func TestLawJusticeAmnestySettlesOnlyReleasedPrisoners(t *testing.T) {
+	w := lawWorld()
+	w.Tick = 10
+	w.JusticeRevolt = NewJusticeRevoltState()
+	spec := w.effectiveJusticeSpec(w.JusticeRevolt)
+	if err := w.DehydrateActor("b"); err != nil {
+		t.Fatal(err)
+	}
+	w.actor("a").Tags = append(w.actor("a").Tags, spec.OutlawTag)
+	w.actor("a").JailedUntil = 20
+	w.actor("b").JailedUntil = 20
+	c := w.storedActorCohort("b")
+	c.Population, c.Adults, c.Jailed = 3, 3, 2
+	c.Residents = []ResidentBand{{Origin: c.ID, First: 1, Count: 1, Health: MaxHealth, Jailed: true}, {Origin: c.ID, First: 2, Count: 1, Health: MaxHealth}}
+	c.ResidentSeq = 2
+	w.JusticeRevolt.CourtCases = []CourtCase{
+		{SuspectID: "a", Status: "convicted", Wrongful: true},
+		{SuspectID: "b", Status: "convicted", Wrongful: true},
+		{SuspectID: c.ID, Status: "convicted", Wrongful: true, IsCohort: true, JailedCount: 1},
+	}
+	events := w.executeDynasticAmnesty(w.JusticeRevolt, spec, 0)
+	if len(events) != 1 || events[0].Payload["released"] != 2 || c.Jailed != 0 || w.actor("b").JailedUntil != 0 {
+		t.Fatalf("amnesty failed to release the stored person and anonymous resident: %+v", events)
+	}
+	cases := w.JusticeRevolt.CourtCases
+	if w.actor("a").JailedUntil != 20 || cases[0].Status != "convicted" || cases[1].Status != "overturned" || cases[2].Status != "overturned" {
+		t.Fatalf("amnesty changed a case whose prisoner remained in jail: %+v", cases)
 	}
 }

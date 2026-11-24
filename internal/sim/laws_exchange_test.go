@@ -120,6 +120,24 @@ func TestLawDebtRequiresBothDecisionsAndRepaymentMatchesCash(t *testing.T) {
 	lawRejected(t, w.Apply("b", Action{Kind: "repay_loan", OfferID: request.ID}))
 }
 
+func TestDebtSettlementUsesDeclaredTenantShare(t *testing.T) {
+	for _, share := range []int{980, 1000} {
+		w := lawWorld()
+		w.Cohorts = []PopulationCohort{
+			{ID: "debtor", District: "home", Population: 10},
+			{ID: "creditor", District: "home", Population: 10},
+		}
+		mc := NewMarketCreditState()
+		mc.Spec.MaxTenantSharePermille = share
+		mc.CohortEquityPermille["debtor"] = map[string]int{"creditor": 900}
+		mc.CohortDebts = []CohortDebtRecord{{ID: 1, CreditorID: "creditor", DebtorID: "debtor", Principal: 20, Status: "active"}}
+		w.StepMarketAndCredit(mc)
+		if got := mc.TotalAnnexedSharePermille("debtor"); got != share || mc.CohortDebts[0].Status != "annexed" {
+			t.Errorf("declared share %d‰ settled to %d‰, debt status %s", share, got, mc.CohortDebts[0].Status)
+		}
+	}
+}
+
 func TestLawDebtClockAndRepresentationCannotInventConsentOrCollateral(t *testing.T) {
 	for _, pledged := range []bool{false, true} {
 		w := lawWorld()

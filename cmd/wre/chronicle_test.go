@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,34 @@ import (
 	"github.com/changw98ic/world-relation-evo/internal/runtrace"
 	"github.com/changw98ic/world-relation-evo/internal/sim"
 )
+
+func TestCLILargeNDJSONWorksForChronicleInspectAndReplayInputs(t *testing.T) {
+	dir := t.TempDir()
+	const size = 16 * 1024 * 1024
+	content := strings.Repeat("a", size)
+	events := filepath.Join(dir, "events.ndjson")
+	raw := `{"id":1,"kind":"speech","payload":{"text":"` + content + `"}}` + "\n"
+	if err := os.WriteFile(events, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"inspect", "-kind", "lineage", "-event", "1", "-events-file", events},
+		{"chronicle", "-events-file", events, "-format", "json"},
+	} {
+		if err := runArgs(args, io.Discard, io.Discard); err != nil {
+			t.Fatalf("%s rejected a valid large record: %v", args[0], err)
+		}
+	}
+	decisions := filepath.Join(dir, "decisions.ndjson")
+	raw = `{"tick":0,"decisions":{"person":{"kind":"speak","text":"` + content + `"}}}` + "\n"
+	if err := os.WriteFile(decisions, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := readDecisionLogsFile(decisions)
+	if err != nil || len(logs) != 1 || len(logs[0].Decisions["person"].Text) != size {
+		t.Fatalf("replay did not read the full decision: logs=%d err=%v", len(logs), err)
+	}
+}
 
 func TestCLIChronicleSubcommandMarkdownAndJSON(t *testing.T) {
 	dir := t.TempDir()

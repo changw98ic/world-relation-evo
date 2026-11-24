@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/changw98ic/world-relation-evo/internal/runtrace"
@@ -24,44 +25,30 @@ func TestCLIRejectsUnexpectedArgumentsBeforeOpeningAnyWorld(t *testing.T) {
 	}
 }
 
-func TestCLILargePopulationUsesJevForEveryIdleDecision(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		var request struct {
-			Questions map[string]struct{ Criteria map[string]string }
-		}
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Error(err)
-			rw.WriteHeader(400)
-			return
-		}
-		for id, description := range request.Questions["decision"].Criteria {
-			if strings.Contains(description, `"kind":"wait"`) {
-				_ = json.NewEncoder(rw).Encode(map[string]any{"answers": map[string]any{"decision": map[string]string{"type": "choice", "choice": id}}})
-				return
-			}
-		}
-		t.Error("the local choice fixture did not receive a wait option")
-		rw.WriteHeader(400)
+func TestCLILargePopulationUsesLocalPlanning(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		http.Error(w, "unexpected model call", http.StatusBadRequest)
 	}))
 	defer server.Close()
-	for key, value := range map[string]string{"WRE_JEV_URL": server.URL, "WRE_JEV_KEY": "fixture", "WRE_JEV_MODEL": "fixture"} {
-		t.Setenv(key, value)
-	}
-	dir := filepath.Join(t.TempDir(), "all-jev-trace")
+	t.Setenv("WRE_JEV_URL", server.URL)
+	t.Setenv("WRE_JEV_KEY", "unused-model-fixture")
+	dir := filepath.Join(t.TempDir(), "planning-trace")
 	var out, stderr bytes.Buffer
-	if err := runArgs([]string{"-offline-run", "-decider", "jev", "-pop", "31", "-steps", "1", "-pace", "0", "-quiet", "-trace-dir", dir}, &out, &stderr); err != nil {
+	if err := runArgs([]string{"-offline-run", "-pop", "31", "-steps", "4", "-pace", "0", "-quiet", "-trace-dir", dir}, &out, &stderr); err != nil {
 		t.Fatal(err)
 	}
 	report, err := runtrace.Analyze(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Decisions <= 8 || report.JevResponses != report.Decisions {
-		t.Fatalf("idle actors bypassed model decisions: choices=%d recorded_decisions=%d", report.JevResponses, report.Decisions)
+	if calls.Load() != 0 || report.JevResponses != 0 || report.Decisions <= 8 {
+		t.Fatalf("local decisions=%d, external requests=%d", report.Decisions, calls.Load())
 	}
 	for _, finding := range report.Findings {
-		if finding.Rule == "decision_coverage" || finding.Rule == "model_evidence" || finding.Rule == "settled_decision" {
-			t.Fatalf("model routing was not fully evidenced: %+v", finding)
+		if finding.Status == "violation" || finding.Rule == "decision_coverage" {
+			t.Fatalf("missing or inconsistent planning evidence: %+v", finding)
 		}
 	}
 }
@@ -76,7 +63,7 @@ func TestCLIRecordedFlowCanBeReplayedWithoutModels(t *testing.T) {
 	replayed := filepath.Join(dir, "replayed.json")
 	trace := filepath.Join(dir, "trace")
 	var out, stderr bytes.Buffer
-	if err := runArgs([]string{"-pack", "../../packs/mortal_watershed.json", "-offline-run", "-decider", "rules", "-steps", "4", "-pace", "0", "-quiet", "-trace-dir", trace, "-out-checkpoint", checkpoint, "-out-decisions", decisions, "-out-state", state}, &out, &stderr); err != nil {
+	if err := runArgs([]string{"-pack", "../../packs/mortal_watershed.json", "-offline-run", "-steps", "4", "-pace", "0", "-quiet", "-trace-dir", trace, "-out-checkpoint", checkpoint, "-out-decisions", decisions, "-out-state", state}, &out, &stderr); err != nil {
 		t.Fatal(err)
 	}
 	if err := runArgs([]string{"replay", "-checkpoint-file", checkpoint, "-decisions-file", decisions, "-to-tick", "4", "-out-state", replayed}, &out, &stderr); err != nil {
@@ -109,51 +96,9 @@ func TestCLIRecordedFlowCanBeReplayedWithoutModels(t *testing.T) {
 	}
 }
 
-// Fault injection is deliberately local. It verifies that a failed external
-// dependency leaves reviewable evidence and cannot be reported as a completed run.
-func TestCLIProviderFailureLeavesOriginalTraceAndFailedRun(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "controlled provider outage", http.StatusServiceUnavailable)
-	}))
-	defer server.Close()
-	for key, value := range map[string]string{
-		"WRE_JEV_URL": server.URL, "WRE_JEV_KEY": "local-contract-key", "WRE_JEV_MODEL": "local-contract-model",
-	} {
-		t.Setenv(key, value)
-	}
-	trace := filepath.Join(t.TempDir(), "failed-trace")
-	var out, stderr bytes.Buffer
-	err := runArgs([]string{"-offline-run", "-decider", "jev", "-steps", "1", "-pace", "0", "-quiet", "-trace-dir", trace}, &out, &stderr)
-	if err == nil {
-		t.Fatal("provider failure was turned into a successful run")
-	}
-	report, err := runtrace.Analyze(trace)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if report.RunCompleted || !report.TraceComplete || report.RunError == "" || report.JevResponses == 0 {
-		t.Fatalf("failure evidence missing: %+v", report)
-	}
-	for _, row := range report.Timeline {
-		if row.After != nil {
-			t.Fatal("an aborted step must not invent an after-state")
-		}
-	}
-	raw, err := os.ReadFile(filepath.Join(trace, "trace.ndjson"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Contains(raw, []byte("controlled provider outage")) {
-		t.Fatal("original provider response was lost")
-	}
-	if bytes.Contains(raw, []byte("local-contract-key")) {
-		t.Fatal("trace exposed credentials")
-	}
-}
-
 func TestCLIRemovedModelRoutingFlagsFailBeforeWorldIO(t *testing.T) {
 	t.Setenv("DATABASE_URL", "invalid-database-url-for-argument-test")
-	for _, flag := range []string{"-focal-limit", "-focal-stride"} {
+	for _, flag := range []string{"-focal-limit", "-focal-stride", "-decider", "-playbook-dir", "-rulebook", "-rulebook-overlay"} {
 		var out, stderr bytes.Buffer
 		err := runArgs([]string{flag, "1"}, &out, &stderr)
 		if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") || out.Len() != 0 {

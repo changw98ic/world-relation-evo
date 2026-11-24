@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/changw98ic/world-relation-evo/internal/sim"
+	"github.com/lib/pq"
 )
 
 // This entry point is deliberately separate from the default suite. Missing
@@ -72,6 +73,92 @@ func persistedJSON(t *testing.T, value any) string {
 	return string(raw)
 }
 
+func TestPostgresInitValidatesExistingKeysAndReportsHistoricalOrphans(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		markedVersion int
+	}{{"unmigrated", 0}, {"previously_marked", 1}} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, ctx := boundaryPostgres(t)
+			var nonce [16]byte
+			if _, err := rand.Read(nonce[:]); err != nil {
+				t.Fatal(err)
+			}
+			isolated := pq.QuoteIdentifier("migration_" + hex.EncodeToString(nonce[:]))
+			s.db.SetMaxOpenConns(1)
+			if _, err := s.db.ExecContext(ctx, `CREATE SCHEMA `+isolated); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if _, err := s.db.ExecContext(ctx, `DROP SCHEMA `+isolated+` CASCADE`); err != nil {
+					t.Error(err)
+				}
+			})
+			if _, err := s.db.ExecContext(ctx, `SET search_path TO `+isolated); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.db.ExecContext(ctx, `
+				CREATE TABLE schema_migrations (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());
+				CREATE TABLE worlds (id text PRIMARY KEY, tick bigint NOT NULL, state jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());
+				CREATE TABLE world_checkpoints (world_id text NOT NULL, tick bigint NOT NULL, state jsonb NOT NULL, PRIMARY KEY(world_id, tick));
+				CREATE TABLE world_decision_logs (world_id text NOT NULL, tick bigint NOT NULL, decisions jsonb NOT NULL, PRIMARY KEY(world_id, tick));
+				INSERT INTO world_checkpoints VALUES ('checkpoint-world', 0, '{}');
+				INSERT INTO world_decision_logs VALUES ('decision-world', 0, '{"tick":0,"decisions":{}}');
+				ALTER TABLE world_checkpoints ADD CONSTRAINT world_checkpoints_world_id_fkey FOREIGN KEY (world_id) REFERENCES worlds(id) NOT VALID;
+				ALTER TABLE world_decision_logs ADD CONSTRAINT world_decision_logs_world_id_fkey FOREIGN KEY (world_id) REFERENCES worlds(id) NOT VALID;
+			`); err != nil {
+				t.Fatal(err)
+			}
+			if tc.markedVersion > 0 {
+				if _, err := s.db.ExecContext(ctx, `INSERT INTO schema_migrations (version) VALUES (2)`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, problem := range []struct{ constraint, world string }{
+				{"world_checkpoints_world_id_fkey", "checkpoint-world"},
+				{"world_decision_logs_world_id_fkey", "decision-world"},
+			} {
+				var dbErr *pq.Error
+				err := s.Init(ctx)
+				if !errors.As(err, &dbErr) || dbErr.Code != "23503" || dbErr.Constraint != problem.constraint {
+					t.Fatalf("expected orphan error from %s, got %v", problem.constraint, err)
+				}
+				var count int
+				err = s.db.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version = 2`).Scan(&count)
+				if err != nil || count != tc.markedVersion {
+					t.Fatalf("migration bookkeeping changed after failure: count=%d err=%v", count, err)
+				}
+				if _, err := s.db.ExecContext(ctx, `INSERT INTO worlds (id, tick, state) VALUES ($1, 0, '{}')`, problem.world); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := s.db.ExecContext(ctx, `
+			    UPDATE worlds SET state = '{"id":"checkpoint-world","actors":[{"id":"second","next_wake":{"tick":7,"reason":"review_due","version":1}},{"id":"first"}]}'
+			    WHERE id='checkpoint-world'`); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Init(ctx); err != nil {
+				t.Fatal(err)
+			}
+			var validated int
+			err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM pg_constraint WHERE convalidated AND contype = 'f'
+				AND conrelid IN ('world_checkpoints'::regclass, 'world_decision_logs'::regclass)`).Scan(&validated)
+			if err != nil || validated != 2 {
+				t.Fatalf("expected both keys to validate after restoring the two worlds: count=%d err=%v", validated, err)
+			}
+			migrated, err := s.Load(ctx, "checkpoint-world")
+			if err != nil || len(migrated.Actors) != 2 || migrated.Actors[0].ID != "second" ||
+				migrated.Actors[0].NextWake == nil || migrated.Actors[0].NextWake.Tick != 7 {
+				t.Fatalf("actor order or persisted wake was lost: %v %+v", err, migrated)
+			}
+			var actorCount int
+			if err := s.db.QueryRowContext(ctx, `SELECT jsonb_array_length(state->'actors') FROM worlds WHERE id='checkpoint-world'`).Scan(&actorCount); err != nil || actorCount != 0 {
+				t.Fatalf("duplicate actor data in the world root: %d %v", actorCount, err)
+			}
+		})
+	}
+}
+
 func TestPostgresSnapshotAndAllEventBatchesCommitTogether(t *testing.T) {
 	s, ctx := boundaryPostgres(t)
 	id := boundaryWorldID(t, s, ctx)
@@ -83,7 +170,10 @@ func TestPostgresSnapshotAndAllEventBatchesCommitTogether(t *testing.T) {
 	w.Continuity = &sim.ContinuityState{NextAgreementID: 8, Agreements: []sim.Agreement{{ID: 7, SupplierID: "owner", BuyerID: "buyer", Item: "parcel", Quantity: 3, Price: 7, Status: "active", DueTick: 100}}}
 	w.MarketCredit = sim.NewMarketCreditState()
 	w.MarketCredit.LoanRequests = []sim.LoanRequest{{ID: 9, BorrowerID: "owner", LenderID: "buyer", Principal: 5, Status: "pending"}}
-	first := sim.Event{ID: 1, Tick: 10, ActorID: "owner", Kind: "speech", Action: sim.Action{Kind: "speak", Statement: &sim.Statement{Quantity: 30}}, Payload: map[string]any{"quantity": 3}}
+	const exactID = int64(9007199254740993)
+	first := sim.Event{ID: 1, Tick: 10, ActorID: "owner", Kind: "speech", Action: sim.Action{Kind: "speak", Statement: &sim.Statement{Quantity: 30}}, Payload: map[string]any{
+		"quantity": 3, "root_event_id": exactID, "previous_offer_id": exactID, "case_id": exactID,
+	}}
 	if err := s.Save(ctx, w, []sim.Event{first}); err != nil {
 		t.Fatal(err)
 	}
@@ -112,6 +202,11 @@ func TestPostgresSnapshotAndAllEventBatchesCommitTogether(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].ID != 1 || persistedJSON(t, events[0]) != persistedJSON(t, first) {
 		t.Fatal("failed later batch left partial event history")
+	}
+	for _, field := range []string{"root_event_id", "previous_offer_id", "case_id"} {
+		if events[0].Payload[field] != exactID {
+			t.Fatalf("PostgreSQL round trip changed %s: %v", field, events[0].Payload[field])
+		}
 	}
 	batch[len(batch)-1].ID = 202
 	if err := s.Save(ctx, w, batch); err != nil {

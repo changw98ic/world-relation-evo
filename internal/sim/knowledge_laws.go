@@ -224,7 +224,6 @@ func (w *World) applyResearchTech(tx *WorldTx, a *Actor, x Action) []Event {
 	if can, reason := w.CanResearchTech(*a, tech); !can {
 		return fail(reason)
 	}
-	tx.setEnergy(a, a.Energy-tech.ResearchEnergyCost, x.Kind)
 	for _, itemID := range sortedProductionKeys(tech.ResearchInputs) {
 		qty := tech.ResearchInputs[itemID]
 		tx.ProduceOrConsumeItem(a, itemID, -qty, x.Kind)
@@ -234,6 +233,7 @@ func (w *World) applyResearchTech(tx *WorldTx, a *Actor, x Action) []Event {
 		ticks = 1
 	}
 	task := Task{Action: x, TotalTicks: ticks, Remaining: ticks - 1, StartedTick: w.Tick}
+	tx.startTaskWork(a, &task, tech.ResearchEnergyCost)
 	if task.Remaining <= 0 {
 		return w.finishTaskWithTx(tx, a, task)
 	}
@@ -361,9 +361,6 @@ func (w *World) applyTeachKnowledge(tx *WorldTx, a *Actor, x Action, b *Actor) [
 				return fail("student lacks receiver capability for channel " + ch.ID)
 			}
 		}
-		if a.Energy < ch.EnergyCost {
-			return fail("insufficient energy to teach over channel " + ch.ID)
-		}
 		_, senderShield := w.actorEnclosure(*a)
 		if senderShield > ch.PenetrationPower {
 			return fail("sender enclosure shielding blocks transmission on " + ch.ID)
@@ -375,7 +372,6 @@ func (w *World) applyTeachKnowledge(tx *WorldTx, a *Actor, x Action, b *Actor) [
 		if !w.communicationRangeAllows(*a, *b, ch.RangeKm) {
 			return fail("student is outside channel range or distance is unavailable for " + ch.ID)
 		}
-		tx.setEnergy(a, a.Energy-ch.EnergyCost, x.Kind)
 		usedChannel = ch.ID
 	}
 
@@ -525,14 +521,11 @@ func (w *World) applyTeachSkill(tx *WorldTx, a *Actor, x Action, b *Actor) []Eve
 	if !SamePlace(*a, *b) {
 		return fail("student must be co-located for skill mentorship")
 	}
-	if a.Energy < 4 {
-		return fail("insufficient energy to mentor skill " + skill.ID)
-	}
-	tx.setEnergy(a, a.Energy-4, x.Kind)
 	tx.MutateTrust(a, b.ID, 1)
 	tx.MutateTrust(b, a.ID, 2)
 	xpGain := 12 + teacherLv*2
 	skillEvents := w.grantSkillXP(tx, b, x, skill.ID, xpGain)
+	w.recordSocialContact(a, b)
 	newLv := b.Skills[skill.ID]
 	msgText := x.Text
 	if msgText == "" {
@@ -654,7 +647,6 @@ func (w *World) applyAdoptFacility(tx *WorldTx, a *Actor, x Action) []Event {
 			return fail(fmt.Sprintf("adopting %s requires %d %s", tech.ID, qty, itemID))
 		}
 	}
-	tx.setEnergy(a, a.Energy-tech.AdoptEnergyCost, x.Kind)
 	var prepaidItems map[string]int
 	for _, itemID := range sortedProductionKeys(tech.AdoptInputs) {
 		qty := tech.AdoptInputs[itemID]
@@ -672,7 +664,9 @@ func (w *World) applyAdoptFacility(tx *WorldTx, a *Actor, x Action) []Event {
 		ticks = 1
 	}
 	task := Task{Action: x, TotalTicks: ticks, Remaining: ticks - 1, StartedTick: w.Tick, PrepaidItems: prepaidItems}
+	tx.startTaskWork(a, &task, tech.AdoptEnergyCost)
 	if task.Remaining <= 0 {
+		task.PrepaidItems = nil
 		return w.finishTaskWithTx(tx, a, task)
 	}
 	a.Task = &task

@@ -1,8 +1,10 @@
 package sim
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"sort"
@@ -45,6 +47,7 @@ type Memory struct {
 	WitnessID    string       `json:"witness_id,omitempty"`
 	RootEventID  int64        `json:"root_event_id"`
 	Observation  *Observation `json:"observation,omitempty"`
+	Trade        *Offer       `json:"trade,omitempty"`
 	Statement    *Statement   `json:"statement,omitempty"`
 	Kind         string       `json:"kind"`
 	Channel      string       `json:"channel,omitempty"`
@@ -58,16 +61,20 @@ type Memory struct {
 }
 
 type Offer struct {
-	ProposedBy string `json:"proposed_by,omitempty"`
-	PreviousID int64  `json:"previous_id,omitempty"`
-	ID         int64  `json:"id"`
-	Seller     string `json:"seller"`
-	Buyer      string `json:"buyer"`
-	Item       string `json:"item"`
-	Quantity   int    `json:"quantity"`
-	Price      int    `json:"price"`
-	Currency   string `json:"currency,omitempty"`
-	Expires    int64  `json:"expires"`
+	ProposedBy  string `json:"proposed_by,omitempty"`
+	PreviousID  int64  `json:"previous_id,omitempty"`
+	RootEventID int64  `json:"root_event_id,omitempty"`
+	ID          int64  `json:"id"`
+	Seller      string `json:"seller"`
+	Buyer       string `json:"buyer"`
+	Item        string `json:"item"`
+	Quantity    int    `json:"quantity"`
+	Price       int    `json:"price"`
+	Currency    string `json:"currency,omitempty"`
+	Expires     int64  `json:"expires"`
+	District    string `json:"district,omitempty"`
+	Venue       string `json:"venue,omitempty"`
+	House       string `json:"house,omitempty"`
 }
 
 // Task tracks a multi-tick action currently in progress so busy actors advance deterministically across quarter-hours.
@@ -82,6 +89,9 @@ type Task struct {
 	FieldID           string           `json:"field_id,omitempty"`
 	SleepTenths       int              `json:"sleep_tenths,omitempty"`
 	StartEnergy       int              `json:"start_energy,omitempty"`
+	WorkEnergy        int              `json:"work_energy,omitempty"`
+	WorkPeriod        int              `json:"work_period,omitempty"`
+	WorkTicks         int              `json:"work_ticks,omitempty"`
 	Dormant           bool             `json:"dormant,omitempty"`
 	PrepaidCurrencies map[string]int64 `json:"prepaid_currencies,omitempty"`
 	PrepaidTreasury   bool             `json:"prepaid_treasury,omitempty"`
@@ -89,60 +99,69 @@ type Task struct {
 }
 
 type Actor struct {
-	Resting          bool              `json:"resting,omitempty"`
-	DigestedFood     int64             `json:"digested_food,omitempty"`
-	Plan             *PersonalPlan     `json:"plan,omitempty"`
-	ID               string            `json:"id"`
-	Name             string            `json:"name"`
-	Role             string            `json:"role"`
-	Tags             []string          `json:"tags"`
-	Attributes       Attributes        `json:"attributes"`
-	Professions      map[string]int    `json:"professions"`
-	ProfessionRanks  map[string]string `json:"profession_ranks,omitempty"`
-	ProfessionXP     map[string]int    `json:"profession_xp,omitempty"`
-	Skills           map[string]int    `json:"skills,omitempty"`
-	SkillXP          map[string]int    `json:"skill_xp,omitempty"`
-	Level            int               `json:"level"`
-	Guilds           []string          `json:"guilds,omitempty"`
-	GuildLevels      map[string]int    `json:"guild_levels,omitempty"`
-	Location         string            `json:"location"`
-	VenueID          string            `json:"venue_id,omitempty"`
-	InsideHouse      string            `json:"inside_house,omitempty"`
-	HomeID           string            `json:"home_id,omitempty"`
-	AgeYears         int               `json:"age_years,omitempty"`
-	Health           int               `json:"health"`
-	Energy           int               `json:"energy"`
-	NutritionReserve int64             `json:"nutrition_reserve,omitempty"`
-	Hunger           int               `json:"hunger"`
-	Thirst           int               `json:"thirst,omitempty"`
-	Waste            int               `json:"waste,omitempty"`
-	DiseaseID        string            `json:"disease_id,omitempty"`
-	DiseaseTicks     int               `json:"disease_ticks,omitempty"`
-	Dead             bool              `json:"dead,omitempty"`
-	DeathCause       string            `json:"death_cause,omitempty"`
-	DeathTick        int64             `json:"death_tick,omitempty"`
-	DeathEventID     int64             `json:"death_event_id,omitempty"`
-	EstateSettled    bool              `json:"estate_settled,omitempty"`
-	KnownHomicides   []int64           `json:"known_homicides,omitempty"`
-	WoundedTracked   bool              `json:"wounded_tracked,omitempty"`
-	JailedUntil      int64             `json:"jailed_until,omitempty"`
-	RestUntil        int64             `json:"rest_until,omitempty"`
-	SleepTrait       string            `json:"sleep_trait"`
-	Money            int               `json:"money"`
-	Currencies       map[string]int64  `json:"currencies,omitempty"`
-	IllicitGain      int               `json:"illicit_gain,omitempty"`
-	Items            map[string]int    `json:"items"`
-	Equipped         map[string]string `json:"equipped,omitempty"`
-	PinFocal         bool              `json:"pin_focal,omitempty"`
-	FormID           string            `json:"form_id,omitempty"`
-	StateSlots       map[string]int    `json:"state_slots,omitempty"`
-	Goal             string            `json:"goal"`
-	Personality      string            `json:"personality"`
-	Hobbies          []string          `json:"hobbies,omitempty"`
-	Trust            map[string]int    `json:"trust"`
-	Task             *Task             `json:"task,omitempty"`
-	Memories         []Memory          `json:"memories,omitempty"`
-	Ambitions        []ActorAmbition   `json:"ambitions,omitempty"`
+	KnownFacts           map[string]KnownFact  `json:"known_facts,omitempty"`
+	Habits               map[string]HabitState `json:"habits,omitempty"`
+	NextWake             *ScheduledWake        `json:"next_wake,omitempty"`
+	Behavior             *BehaviorState        `json:"behavior,omitempty"`
+	Preferences          []PreferenceState     `json:"preferences,omitempty"`
+	NeedWeights          map[string]float64    `json:"need_weights,omitempty"`
+	InertiaMargin        *float64              `json:"inertia_margin,omitempty"`
+	Resting              bool                  `json:"resting,omitempty"`
+	DigestedFood         int64                 `json:"digested_food,omitempty"`
+	Plan                 *PersonalPlan         `json:"plan,omitempty"`
+	ID                   string                `json:"id"`
+	Name                 string                `json:"name"`
+	Role                 string                `json:"role"`
+	Tags                 []string              `json:"tags"`
+	Attributes           Attributes            `json:"attributes"`
+	Professions          map[string]int        `json:"professions"`
+	ProfessionRanks      map[string]string     `json:"profession_ranks,omitempty"`
+	ProfessionXP         map[string]int        `json:"profession_xp,omitempty"`
+	Skills               map[string]int        `json:"skills,omitempty"`
+	SkillXP              map[string]int        `json:"skill_xp,omitempty"`
+	Level                int                   `json:"level"`
+	Guilds               []string              `json:"guilds,omitempty"`
+	GuildLevels          map[string]int        `json:"guild_levels,omitempty"`
+	Location             string                `json:"location"`
+	VenueID              string                `json:"venue_id,omitempty"`
+	InsideHouse          string                `json:"inside_house,omitempty"`
+	HomeID               string                `json:"home_id,omitempty"`
+	AgeYears             int                   `json:"age_years,omitempty"`
+	Health               int                   `json:"health"`
+	Energy               int                   `json:"energy"`
+	AwakeEnergyRemainder int64                 `json:"awake_energy_remainder,omitempty"`
+	sleptThroughTick     int64                 // Transient end tick of the interval settled as sleep.
+	NutritionReserve     int64                 `json:"nutrition_reserve,omitempty"`
+	Hunger               int                   `json:"hunger"`
+	Thirst               int                   `json:"thirst,omitempty"`
+	Waste                int                   `json:"waste,omitempty"`
+	DiseaseID            string                `json:"disease_id,omitempty"`
+	DiseaseTicks         int                   `json:"disease_ticks,omitempty"`
+	Dead                 bool                  `json:"dead,omitempty"`
+	DeathCause           string                `json:"death_cause,omitempty"`
+	DeathTick            int64                 `json:"death_tick,omitempty"`
+	DeathEventID         int64                 `json:"death_event_id,omitempty"`
+	EstateSettled        bool                  `json:"estate_settled,omitempty"`
+	KnownHomicides       []int64               `json:"known_homicides,omitempty"`
+	WoundedTracked       bool                  `json:"wounded_tracked,omitempty"`
+	JailedUntil          int64                 `json:"jailed_until,omitempty"`
+	RestUntil            int64                 `json:"rest_until,omitempty"`
+	SleepTrait           string                `json:"sleep_trait"`
+	Money                int                   `json:"money"`
+	Currencies           map[string]int64      `json:"currencies,omitempty"`
+	IllicitGain          int                   `json:"illicit_gain,omitempty"`
+	Items                map[string]int        `json:"items"`
+	Equipped             map[string]string     `json:"equipped,omitempty"`
+	PinFocal             bool                  `json:"pin_focal,omitempty"`
+	FormID               string                `json:"form_id,omitempty"`
+	StateSlots           map[string]int        `json:"state_slots,omitempty"`
+	Goal                 string                `json:"goal"`
+	Personality          string                `json:"personality"`
+	Hobbies              []string              `json:"hobbies,omitempty"`
+	Trust                map[string]int        `json:"trust"`
+	Task                 *Task                 `json:"task,omitempty"`
+	Memories             []Memory              `json:"memories,omitempty"`
+	Ambitions            []ActorAmbition       `json:"ambitions,omitempty"`
 }
 
 // IdentityTags returns the actor's social tags plus held profession IDs for economic profile lookups.
@@ -174,6 +193,10 @@ func SamePlace(a, b Actor) bool {
 }
 
 type World struct {
+	scheduler           *behaviorSchedule
+	PendingMessages     []ScheduledMessage       `json:"pending_messages,omitempty"`
+	RunSeed             int64                    `json:"run_seed,omitempty"`
+	PlanningVersion     int                      `json:"planning_version,omitempty"`
 	Production          ProductionState          `json:"production"`
 	Growth              []GrowthBatch            `json:"growth,omitempty"`
 	Shipments           []Shipment               `json:"shipments,omitempty"`
@@ -195,6 +218,8 @@ type World struct {
 	TotalBirthsCount    int64                    `json:"total_births_count,omitempty"`
 	PublicTreasury      int64                    `json:"public_treasury,omitempty"`
 	TreasuryLedger      TreasuryLedger           `json:"treasury_ledger,omitempty"`
+	EarnedWages         []EarnedWage             `json:"earned_wages,omitempty"`
+	DividendAccounts    []DividendAccount        `json:"dividend_accounts,omitempty"`
 	MarketCredit        *MarketCreditState       `json:"market_credit,omitempty"`
 	Relations           *RelationEvoState        `json:"relations,omitempty"`
 	JusticeRevolt       *JusticeRevoltState      `json:"justice_revolt,omitempty"`
@@ -202,23 +227,28 @@ type World struct {
 	ActiveEffects       []ActiveEffect           `json:"active_effects,omitempty"`
 	ActiveWorldEvents   []ActiveWorldEvent       `json:"active_world_events,omitempty"`
 	WorldEventLastEnded map[string]int64         `json:"world_event_last_ended,omitempty"`
-	Parties             []Party                  `json:"parties,omitempty"`
-	Diplomacy           *DiplomacyState          `json:"diplomacy,omitempty"`
-	Secrets             []ActorSecret            `json:"secrets,omitempty"`
-	FlowGrid            *FlowGridState           `json:"flow_grid,omitempty"`
-	LedgerAudit         *LedgerAuditState        `json:"ledger_audit,omitempty"`
-	Knowledge           *KnowledgeBook           `json:"knowledge,omitempty"`
-	GoldenFinger        *GoldenFingerState       `json:"golden_finger,omitempty"`
-	WorldLaws           map[string]int           `json:"world_laws,omitempty"`
+
+	EventFeatures map[string]map[string]int64 `json:"event_features,omitempty"`
+
+	Parties      []Party            `json:"parties,omitempty"`
+	Diplomacy    *DiplomacyState    `json:"diplomacy,omitempty"`
+	Secrets      []ActorSecret      `json:"secrets,omitempty"`
+	FlowGrid     *FlowGridState     `json:"flow_grid,omitempty"`
+	LedgerAudit  *LedgerAuditState  `json:"ledger_audit,omitempty"`
+	Knowledge    *KnowledgeBook     `json:"knowledge,omitempty"`
+	GoldenFinger *GoldenFingerState `json:"golden_finger,omitempty"`
+	WorldLaws    map[string]int     `json:"world_laws,omitempty"`
 }
 
 type Action struct {
+	Decision     *BehaviorDecision    `json:"decision,omitempty"`
 	DueTick      *int64               `json:"due_tick,omitempty"` // Optional delivery deadline; tick zero is a valid deadline.
 	AgreementID  int64                `json:"agreement_id,omitempty"`
 	BasisEventID int64                `json:"basis_event_id,omitempty"`
 	Statement    *Statement           `json:"statement,omitempty"`
 	Care         *GrowthCareAgreement `json:"care,omitempty"`
 	Kind         string               `json:"kind"`
+	WorkOrderID  string               `json:"work_order_id,omitempty"`
 	Channel      string               `json:"channel,omitempty"`
 	TargetID     string               `json:"target_id,omitempty"`
 	Location     string               `json:"location,omitempty"`
@@ -247,9 +277,87 @@ type Event struct {
 	Payload  map[string]any `json:"payload"`
 }
 
+func (e Event) causalRoot() int64 {
+	if root := payloadInt64(e.Payload, "root_event_id"); root != 0 {
+		return root
+	}
+	return e.ID
+}
+
+// DecodeEventPayload validates integer fields and preserves other JSON numbers verbatim.
+func DecodeEventPayload(data []byte) (map[string]any, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	if raw == nil {
+		return nil, nil
+	}
+	payload := make(map[string]any, len(raw))
+	for _, key := range sortedProductionKeys(raw) {
+		nonnegative := false
+		switch key {
+		case "basis_event_id", "cause_event_id", "root_event_id", "fact_event_id",
+			"previous_offer_id", "case_id", "quantity", "paid_coins":
+			nonnegative = true
+		case "actor_deaths", "actor_wounded", "attacker_deaths", "attacker_wounded",
+			"batches", "births", "bounty_coins", "bribe_coins", "bribe_released", "cargo_lost",
+			"coins", "compost_generated", "confiscated_coins", "couples", "cured", "damage",
+			"deaths", "defender_deaths", "defender_wounded", "elder_deaths", "embezzled_coins",
+			"freight_fee", "gross_tax", "healed", "intensity", "jailed", "jailed_deaths",
+			"jailed_until", "loss_qty", "medicine_used", "net_treasury", "new_sick", "principal",
+			"promoted_count", "protection_coins", "recoil", "released", "sick_died_other",
+			"surcharge_coins", "tax_assessed", "tax_skimmed", "tax_treasury", "tonic_used",
+			"wounded", "wounded_deaths", "yield_credit_before", "yield_credit_after":
+		default:
+			var value any
+			dec := json.NewDecoder(bytes.NewReader(raw[key]))
+			dec.UseNumber()
+			if err := dec.Decode(&value); err != nil {
+				return nil, fmt.Errorf("event payload %s: %w", key, err)
+			}
+			payload[key] = value
+			continue
+		}
+		var number *int64
+		if err := json.Unmarshal(raw[key], &number); err != nil {
+			return nil, fmt.Errorf("event payload %s: %w", key, err)
+		}
+		if number == nil {
+			return nil, fmt.Errorf("event payload %s must be an integer", key)
+		}
+		if nonnegative && *number < 0 {
+			return nil, fmt.Errorf("event payload %s must be nonnegative", key)
+		}
+		payload[key] = *number
+	}
+	return payload, nil
+}
+
+func (e *Event) UnmarshalJSON(data []byte) error {
+	type wire Event
+	decoded := struct {
+		*wire
+		Payload json.RawMessage `json:"payload"`
+	}{wire: (*wire)(e)}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	if decoded.Payload == nil {
+		return nil
+	}
+	payload, err := DecodeEventPayload(decoded.Payload)
+	if err != nil {
+		return fmt.Errorf("event %d: %w", e.ID, err)
+	}
+	e.Payload = payload
+	return nil
+}
+
 type Neighbor struct {
 	Married         bool           `json:"married,omitempty"`
 	KinshipToSelf   string         `json:"kinship_to_self,omitempty"`
+	PatronageToSelf string         `json:"patronage_to_self,omitempty"`
 	Resting         bool           `json:"resting,omitempty"`
 	ID              string         `json:"id"`
 	Name            string         `json:"name"`
@@ -299,6 +407,11 @@ type CohortView struct {
 }
 
 type Perception struct {
+	RunSeed                int64                 `json:"run_seed,omitempty"`
+	ObservationVersion     int64                 `json:"observation_version,omitempty"`
+	BehaviorChanged        bool                  `json:"behavior_changed,omitempty"`
+	Experiences            []Memory              `json:"experiences,omitempty"`
+	JusticeRules           *JusticeRevoltSpec    `json:"justice_rules,omitempty"`
 	LocalCases             []CaseView            `json:"local_cases,omitempty"`
 	KnownWrongfulCases     []KnownWrongfulLead   `json:"known_wrongful_cases,omitempty"`
 	KnownFeuds             []FeudView            `json:"known_feuds,omitempty"`
@@ -327,7 +440,11 @@ type Perception struct {
 	VenueRoutes            []VenueRouteView      `json:"venue_routes,omitempty"`
 	Polity                 *PolityPerceptionView `json:"polity,omitempty"`
 	Nearby                 []Neighbor            `json:"nearby,omitempty"`
+	OpenQuestions          map[string]Memory     `json:"open_questions,omitempty"`
+	CommunicationContacts  []string              `json:"communication_contacts,omitempty"`
 	LocalCohorts           []CohortView          `json:"local_cohorts,omitempty"`
+	MarketLots             []Action              `json:"market_lots,omitempty"`
+	PendingWages           []EarnedWage          `json:"pending_wages,omitempty"`
 	ActiveEffects          []ActiveEffect        `json:"active_effects,omitempty"`
 	ActiveWorldEvents      []ActiveWorldEvent    `json:"active_world_events,omitempty"`
 	Parties                []Party               `json:"parties,omitempty"`
@@ -345,6 +462,7 @@ type Perception struct {
 	ActiveGrudgeTargets    []string              `json:"active_grudge_targets,omitempty"`
 	ActiveGoldenFingers    []GoldenFingerView    `json:"active_golden_fingers,omitempty"`
 	ExpectedCraftYield     map[string]int        `json:"expected_craft_yield,omitempty"`
+	CraftingSpeedBonusPct  int                   `json:"crafting_speed_bonus_pct,omitempty"`
 	ProductionBlockReasons map[string]string     `json:"production_block_reasons,omitempty"`
 	DistrictController     string                `json:"district_controller,omitempty"`
 	DistrictGrievance      int                   `json:"district_grievance,omitempty"`
@@ -427,7 +545,12 @@ func CombatPowerWithCatalog(cat Catalog, a Actor) int {
 			continue
 		}
 		if prof, ok := cat.ProfessionByID(pid); ok && prof.CombatBonusPerLevel > 0 {
-			power += lv * prof.CombatBonusPerLevel
+			bonus := lv * prof.CombatBonusPerLevel
+			if spec, ok := cat.StateSlots[prof.PracticeSlot]; ok && spec.Max > spec.Min {
+				value, _ := cat.StateSlotValue(a, prof.PracticeSlot)
+				bonus = bonus * (value - spec.Min) / (spec.Max - spec.Min)
+			}
+			power += bonus
 		}
 	}
 	for itemID, qty := range a.Items {
@@ -736,6 +859,11 @@ func Village(id string) *World {
 }
 
 func (w *World) actor(id string) *Actor {
+	if s := w.scheduler; s != nil {
+		if i, ok := s.actors[id]; ok && i < len(w.Actors) && w.Actors[i].ID == id {
+			return &w.Actors[i]
+		}
+	}
 	for i := range w.Actors {
 		if w.Actors[i].ID == id {
 			return &w.Actors[i]
@@ -1025,6 +1153,10 @@ func (w *World) projectPerceptionContext(p *Perception, agreements []Agreement) 
 	a := p.Self
 
 	p.LoanRequests = w.MarketCredit.PendingLoanRequests(a.ID)
+	if w.JusticeRevolt != nil && w.JusticeRevolt.Spec != nil {
+		spec := *w.JusticeRevolt.Spec
+		p.JusticeRules = &spec
+	}
 	if w.SpotlightRumor != nil && w.SpotlightRumor.ActorSalience != nil {
 		p.SpotlightSalience = w.SpotlightRumor.ActorSalience[a.ID]
 	}
@@ -1270,12 +1402,14 @@ func isRelocationAction(kind string) bool {
 // In-place actions settle before departures (leave_house, enter_house, move) so co-located villagers
 // who perceived each other at the start of the tick can complete speech and trades before someone walks away.
 func (w *World) Step(ctx context.Context, d Decider) ([]Event, error) {
-	actions := make([]Action, len(w.Actors))
-	errs := make([]error, len(w.Actors))
-	wasBusy := make([]bool, len(w.Actors))
+	schedule := w.behaviorScheduler()
+	due := schedule.due(w.Tick)
+	actions := make([]Action, len(due))
+	errs := make([]error, len(due))
+	wasBusy := make([]bool, len(due))
 	var idle []int
-	for i := range w.Actors {
-		if w.Actors[i].Dead || w.Tick < w.Actors[i].JailedUntil || w.Actors[i].Task != nil {
+	for i, index := range due {
+		if a := &w.Actors[index]; a.Dead || w.Tick < a.JailedUntil || a.Task != nil {
 			wasBusy[i] = true
 		} else {
 			idle = append(idle, i)
@@ -1292,7 +1426,7 @@ func (w *World) Step(ctx context.Context, d Decider) ([]Event, error) {
 			go func() {
 				defer workers.Done()
 				for i := range jobs {
-					actions[i], errs[i] = d.Decide(ctx, w.viewIndexed(i, idx))
+					actions[i], errs[i] = d.Decide(ctx, w.viewIndexed(due[i], idx))
 				}
 			}()
 		}
@@ -1303,59 +1437,29 @@ func (w *World) Step(ctx context.Context, d Decider) ([]Event, error) {
 		workers.Wait()
 		for _, i := range idle {
 			if errs[i] != nil {
-				return nil, fmt.Errorf("actor %s: %w", w.Actors[i].ID, errs[i])
+				for _, index := range due {
+					a := &w.Actors[index]
+					at := w.Tick
+					if a.NextWake != nil {
+						at = a.NextWake.Tick
+					}
+					schedule.put(a.ID, at)
+				}
+				return nil, fmt.Errorf("actor %s: %w", w.Actors[due[i]].ID, errs[i])
 			}
 		}
 	}
 
-	events := w.stepFlowGrid()
-	for ci := range w.Cohorts {
-		c := &w.Cohorts[ci]
-		before := append([]Actor(nil), c.Members...)
-		for i := range c.Members {
-			if w.Tick >= c.Members[i].JailedUntil && c.Members[i].Task != nil {
-				events = append(events, w.Advance(c.Members[i].ID)...)
-			}
-		}
-		w.reconcileCohortMemberChanges(c, before)
+	schedule.floor = w.Tick + 1
+	for _, index := range due {
+		w.Actors[index].NextWake = nil
 	}
-	for i := range w.Actors {
-		if w.Actors[i].Dead {
-			continue
-		}
-		if w.Tick < w.Actors[i].JailedUntil {
-			if w.Actors[i].Energy < MaxEnergy {
-				w.Actors[i].Energy++
-			}
-			if w.Tick%4 == 0 && w.Actors[i].Health < MaxHealth && w.Actors[i].Hunger <= 2 && w.Actors[i].Thirst <= 1 {
-				adjustActorHealthBounded(&w.Actors[i], 1, 0)
-			}
-			continue
-		}
-		if wasBusy[i] {
-			if w.Actors[i].Task != nil {
-				events = append(events, w.Advance(w.Actors[i].ID)...)
-			}
-		} else if !isRelocationAction(actions[i].Kind) {
-			events = append(events, w.Apply(w.Actors[i].ID, actions[i])...)
-		}
+	events := runTickPhases(nil, w.preTickPhases(due, actions, wasBusy))
+	for i, index := range due {
+		w.acknowledgeWake(&w.Actors[index], actions[i])
 	}
-	for i := range w.Actors {
-		if !w.Actors[i].Dead && !wasBusy[i] && isRelocationAction(actions[i].Kind) {
-			events = append(events, w.Apply(w.Actors[i].ID, actions[i])...)
-		}
-	}
-	events = append(events, w.StepMarketAndCredit(w.ensureMarketCredit())...)
-	if len(w.Cohorts) > 0 {
-		events = append(events, w.stepCohorts()...)
-	}
-
 	w.Tick++
-	for _, phase := range w.postTickPhases() {
-		if phaseEvs := phase.Run(events); len(phaseEvs) > 0 {
-			events = append(events, phaseEvs...)
-		}
-	}
+	events = runTickPhases(events, w.postTickPhases())
 	return events, nil
 }
 
@@ -1364,8 +1468,13 @@ func (w *World) record(a *Actor, x Action, kind string, data map[string]any, obs
 }
 
 func (w *World) recordWithTx(tx *WorldTx, a *Actor, x Action, kind string, data map[string]any, observers ...*Actor) Event {
+	if tx != nil && kind == "action_failed" {
+		return Event{Tick: w.Tick, ActorID: a.ID, TargetID: x.TargetID, Kind: kind, Action: x, Payload: data}
+	}
+	prevNextID := w.NextID
 	e := Event{ID: w.NextID, Tick: w.Tick, ActorID: a.ID, TargetID: x.TargetID, Kind: kind, Action: x, Payload: data}
 	w.NextID++
+	tx.pushUndo(func() { w.NextID = prevNextID })
 	root := payloadInt64(data, "root_event_id")
 	if root == 0 {
 		root = citedRoot(a.Memories, x.BasisEventID)
@@ -1376,6 +1485,9 @@ func (w *World) recordWithTx(tx *WorldTx, a *Actor, x Action, kind string, data 
 	data["basis_event_id"] = x.BasisEventID
 	data["root_event_id"] = root
 	switch kind {
+	case "trade_completed", "agreement_fulfilled":
+		data["district"] = a.Location
+		data["price"] = x.Price
 	case "bribed", "stolen", "raided", "steal_foiled", "wrongful_conviction", "extorted", "party_betrayed", "blackmailed":
 		if _, exists := data["witnesses"]; !exists {
 			viewers := w.awakeSamePlaceObservers(*a, a.ID)
@@ -1400,6 +1512,9 @@ func (w *World) recordWithTx(tx *WorldTx, a *Actor, x Action, kind string, data 
 		CauseEventID: payloadInt64(data, "cause_event_id"),
 		RootEventID:  root,
 	}
+	if trade, ok := data["trade"].(Offer); ok {
+		m.Trade = &trade
+	}
 	if kind == "speech" && x.Statement != nil {
 		v := *x.Statement
 		m.Statement = &v
@@ -1415,12 +1530,20 @@ func (w *World) recordWithTx(tx *WorldTx, a *Actor, x Action, kind string, data 
 	}
 	m.search = newMemorySearchCache(m)
 	tx.RecordMemory(a, m)
+	if tx == nil {
+		w.observeForBehavior(a, m)
+	}
 	for _, b := range observers {
 		if b != nil && b.ID != a.ID {
 			tx.RecordMemory(b, m)
+			if tx == nil {
+				w.observeForBehavior(b, m)
+			}
 		}
 	}
-	w.ObserveContinuity(e)
+	if kind != "action_failed" {
+		w.observeContinuityWithTx(tx, e)
+	}
 	return e
 }
 
@@ -1576,7 +1699,7 @@ func removeString(slice []string, val string) []string {
 
 func canonicalDeathCause(cause string) string {
 	switch cause {
-	case "old_age", "disease", "disaster", "accident", "beast", "starvation", "dehydration", "cold", "combat":
+	case "old_age", "disease", "disaster", "accident", "beast", "starvation", "dehydration", "cold", "combat", "transition_failure":
 		return cause
 	default:
 		return "combat"
@@ -1594,11 +1717,7 @@ func (w *World) markDeadIfZeroWithTx(tx *WorldTx, target *Actor, killer *Actor, 
 	deathData := map[string]any{}
 	if len(direct) > 0 {
 		deathData["cause_event_id"] = direct[0].ID
-		root := payloadInt64(direct[0].Payload, "root_event_id")
-		if root == 0 {
-			root = direct[0].ID
-		}
-		deathData["root_event_id"] = root
+		deathData["root_event_id"] = direct[0].causalRoot()
 	}
 	wasSick := target.DiseaseID != ""
 	wasJailed := target.JailedUntil > w.Tick
@@ -1611,7 +1730,7 @@ func (w *World) markDeadIfZeroWithTx(tx *WorldTx, target *Actor, killer *Actor, 
 	target.DiseaseID = ""
 	target.DiseaseTicks = 0
 	target.Task = nil
-	target.JailedUntil = 0
+	tx.setSentence(target, 0)
 	target.IllicitGain = 0
 	filtered := w.Offers[:0]
 	for _, o := range w.Offers {
@@ -1714,6 +1833,7 @@ func (w *World) markDeadIfZeroWithTx(tx *WorldTx, target *Actor, killer *Actor, 
 }
 
 func (w *World) applySleepTick(tx *WorldTx, a *Actor, carryTenths int) (newCarry int, factors string) {
+	a.sleptThroughTick = w.Tick + 1
 	var h *House
 	if a.InsideHouse != "" {
 		h = w.house(a.InsideHouse)
@@ -1727,14 +1847,8 @@ func (w *World) applySleepTick(tx *WorldTx, a *Actor, carryTenths int) (newCarry
 		rem = 0
 		a.Resting = false
 	}
-	if a.Health < MaxHealth && !a.Dead && a.Hunger <= 2 {
-		if h != nil {
-			if w.Tick%4 == 0 {
-				tx.adjustHealth(a, 1, 0, "sleep")
-			}
-		} else if w.Tick%8 == 0 {
-			tx.adjustHealth(a, 1, 0, "sleep")
-		}
+	if a.SleepHealsAt(w.Tick, h != nil) {
+		tx.adjustHealth(a, 1, 0, "sleep")
 	}
 	return rem, notes
 }
@@ -1747,25 +1861,24 @@ func (w *World) Advance(id string) []Event {
 	}
 	t := a.Task
 	x := t.Action
-	if c := w.storedActorCohort(x.TargetID); c != nil && x.TargetID != id {
-		before := append([]Actor(nil), c.Members...)
-		defer w.reconcileCohortMemberChanges(c, before)
-	}
 
 	if x.Kind == "sleep" {
-		carry, factors := w.applySleepTick(nil, a, t.SleepTenths)
+		tx := w.BeginTx(a.ID, ActionIntent{Action: x})
+		tx.trackStoredActor(id)
+		carry, factors := w.applySleepTick(tx, a, t.SleepTenths)
 		t.SleepTenths = carry
 		t.Remaining--
 		if t.Remaining <= 0 || (a.Energy >= MaxEnergy && a.Health >= MaxHealth) {
 			gained := a.Energy - t.StartEnergy
 			a.Task = nil
-			return []Event{w.record(a, x, "slept", map[string]any{
+			return tx.commitEvents([]Event{tx.record(a, x, "slept", map[string]any{
 				"text":          fmt.Sprintf("%s woke up with %d energy (+%d) and %d health", a.Name, a.Energy, gained, a.Health),
 				"energy_gained": gained,
 				"health":        a.Health,
 				"sleep_factors": factors,
-			})}
+			})}).Events
 		}
+		tx.Commit()
 		return nil
 	}
 
@@ -1780,6 +1893,25 @@ func (w *World) Advance(id string) []Event {
 			"remaining_ticks": t.Remaining,
 		})}
 	}
+	if t.WorkTicks > 0 {
+		energy := t.nextWorkEnergy()
+		tx := w.BeginTx(a.ID, ActionIntent{Action: x})
+		tx.trackStoredActor(id)
+		if a.Energy < energy {
+			a.Task = nil
+			w.refundTaskPrepayments(tx, a, *t)
+			if a.Behavior != nil {
+				a.Behavior.Steps = nil
+				a.Behavior.ReviewAt = w.Tick + 1
+			}
+			events := actionFail(tx, a, x, "too exhausted to continue the task")
+			t.recordWork(events)
+			return tx.commitEvents(events).Events
+		}
+		tx.setEnergy(a, a.Energy-energy, x.Kind)
+		t.WorkTicks++
+		tx.Commit()
+	}
 	if x.Kind == "craft" {
 		w.advanceCraftingWork(a, t)
 	} else {
@@ -1789,7 +1921,15 @@ func (w *World) Advance(id string) []Event {
 		return nil
 	}
 	a.Task = nil
-	return w.finishTask(a, *t)
+	events := w.finishTask(a, *t)
+	for _, event := range events {
+		if (event.Kind == "action_failed" || event.Kind == "travel_interrupted") && a.Behavior != nil {
+			a.Behavior.Steps = nil
+			a.Behavior.ReviewAt = w.Tick + 1
+			break
+		}
+	}
+	return events
 }
 
 // craftingTaskOperational checks sustained site requirements without consuming the
@@ -1809,7 +1949,11 @@ func (w *World) advanceCraftingWork(a *Actor, t *Task) {
 
 func (w *World) finishTask(a *Actor, t Task) []Event {
 	tx := w.BeginTx(a.ID, ActionIntent{Action: t.Action})
-	return tx.commitEvents(w.finishTaskWithTx(tx, a, t)).Events
+	tx.trackStoredActor(a.ID)
+	tx.trackStoredActor(t.Action.TargetID)
+	events := w.finishTaskWithTx(tx, a, t)
+	t.recordWork(events)
+	return tx.commitEvents(events).Events
 }
 
 func (w *World) finishTaskWithTx(tx *WorldTx, a *Actor, t Task) []Event {
@@ -1873,20 +2017,23 @@ func (w *World) finishTaskWithTx(tx *WorldTx, a *Actor, t Task) []Event {
 		}
 		before := w.yieldCredit("actor", a.ID, r.ID)
 		delivered, next := settleYieldCredit(before, t.FundedHundredths)
+		quantity := int(delivered)
+		if delivered < 0 || int64(quantity) != delivered || (quantity > 0 && !tx.ProduceOrConsumeItem(a, r.OutputItem, quantity, x.Kind)) {
+			w.refundTaskPrepayments(tx, a, t)
+			return actionFail(tx, a, x, "crafted output cannot fit in the actor's inventory")
+		}
 		w.setYieldCredit("actor", a.ID, r.ID, next)
-		t.Yield = int(delivered)
-		tx.ProduceOrConsumeItem(a, r.OutputItem, t.Yield, x.Kind)
 		tier := w.Catalog.Items[r.OutputItem].Tier
 		if tier < 1 {
 			tier = 1
 		}
-		obs := Observation{Kind: "item_produced", Item: r.OutputItem, Location: a.Location, Quantity: t.Yield}
+		obs := Observation{Kind: "item_produced", Item: r.OutputItem, Location: a.Location, Quantity: quantity}
 		events := []Event{tx.record(a, x, "crafted", map[string]any{
-			"text":                fmt.Sprintf("%s completed %s (+%d %s)", a.Name, r.ID, t.Yield, r.OutputItem),
+			"text":                fmt.Sprintf("%s completed %s (+%d %s)", a.Name, r.ID, quantity, r.OutputItem),
 			"recipe_id":           r.ID,
 			"item":                r.OutputItem,
 			"tier":                tier,
-			"quantity":            t.Yield,
+			"quantity":            quantity,
 			"yield_credit_before": before,
 			"yield_credit_after":  next,
 			"observation":         obs,
@@ -2064,19 +2211,7 @@ func (w *World) finishTaskWithTx(tx *WorldTx, a *Actor, t Task) []Event {
 			return nil
 		}
 		builderProf := w.Catalog.EffectiveEnvironment().BuilderProfession
-		restore := 25
-		builderLevels := a.Professions[builderProf]
-		for _, prof := range w.Catalog.Professions {
-			if prof.ID != builderProf && (prof.ParentProfession == builderProf ||
-				w.Catalog.ProfessionGrantsCapability(prof, "repair_house") ||
-				w.Catalog.ProfessionGrantsCapability(prof, "upgrade_house")) {
-				builderLevels += a.Professions[prof.ID]
-			}
-		}
-		if builderLevels > 0 {
-			restore = 30 + 5*builderLevels
-		}
-		h.Condition += restore
+		h.Condition += w.Catalog.HouseRepairGain(*a)
 		if h.Condition > MaxCondition {
 			h.Condition = MaxCondition
 		}
@@ -2121,63 +2256,59 @@ func (w *World) finishTaskWithTx(tx *WorldTx, a *Actor, t Task) []Event {
 		return w.finishAdoptFacility(tx, a, t)
 	default:
 		if spec, ok := w.Catalog.ActionSpecs[x.Kind]; ok {
-			return w.finishDeclarativeAction(tx, a, t, spec)
+			return w.finishDeclarativeAction(tx, a, t, spec, true)
 		}
 		return nil
 	}
 }
 
 func (w *World) Apply(id string, x Action) []Event {
+	decision := x.Decision
+	x.Decision = nil
 	result := (DefaultActionExecutor{}).execute(w, id, ActionIntent{Action: x})
+	if a := w.actor(id); a != nil && decision != nil {
+		a.applyBehaviorDecision(decision)
+		if !result.Succeeded {
+			a.Behavior.Steps = nil
+			a.Behavior.ReviewAt = w.Tick + 1
+		} else if decision.RoutineCue != "" && len(result.Events) > 0 {
+			a.learnHabit(decision.RoutineCue, x, result.Events[0])
+		}
+	}
+	if a := w.actor(id); a != nil && w.scheduler != nil && a.Task != nil {
+		w.setWake(a, w.Tick, "task_progress")
+	}
 	return result.Events
 }
 
 func (w *World) apply(tx *WorldTx, a *Actor, x Action) []Event {
-	id := a.ID
-	if a.Items == nil {
-		a.Items = map[string]int{}
+	result := w.checkActorAction(a, x, tx.relationState())
+	if !result.Allowed {
+		if x.BasisEventID != 0 && ValidateCitation(a.Memories, x.BasisEventID, x.Statement) != nil {
+			x.BasisEventID = 0
+		}
+		if result.routeUnavailable {
+			if observation := w.observedRouteClosure(*a, x); observation != nil {
+				return []Event{tx.record(a, x, "action_failed", map[string]any{
+					"text": result.BlockReason, "observation": *observation,
+				})}
+			}
+		}
+		return actionFail(tx, a, x, result.BlockReason)
 	}
-	if a.Trust == nil {
-		a.Trust = map[string]int{}
-	}
-	emit := func(kind, text string, observers ...*Actor) []Event {
-		return []Event{tx.record(a, x, kind, map[string]any{"text": text}, observers...)}
-	}
-	fail := func(reason string) []Event { return emit("action_failed", reason) }
-
-	if w.storedActorCohort(id) != nil {
-		return fail("actor must be hydrated before taking an individual action")
-	}
-	if c := w.storedActorCohort(x.TargetID); c != nil {
-		before := append([]Actor(nil), c.Members...)
-		defer w.reconcileCohortMemberChanges(c, before)
-	}
-	if a.Dead {
-		return fail("actor is dead")
-	}
-	if w.Tick < a.JailedUntil {
-		return fail("actor is in custody")
-	}
-	if a.Task != nil {
-		return fail("actor is already busy with " + a.Task.Action.Kind)
-	}
-	if !w.ActorCapabilities(*a)[x.Kind] {
-		return fail("identity tags do not grant action: " + x.Kind)
-	}
-	if blocked, reason := w.IsActionBlockedByWorldLaw(*a, x); blocked {
-		return fail(reason)
-	}
-	if err := ValidateCitation(a.Memories, x.BasisEventID, x.Statement); err != nil {
-		x.BasisEventID = 0
-		return fail(err.Error())
-	}
-
 	b := w.actor(x.TargetID)
 	if handler, ok := builtinActionHandlers[x.Kind]; ok {
-		return handler(tx, a, b, x)
+		if result.workRate.energy > 0 {
+			tx.setEnergy(a, a.Energy-result.workRate.energyAfter(1), x.Kind)
+		}
+		events := handler(tx, a, b, x)
+		if a.Task != nil {
+			a.Task.beginWork(result.workRate)
+		}
+		return events
 	}
 	if spec, ok := w.Catalog.ActionSpecs[x.Kind]; ok {
 		return w.applyDeclarativeAction(tx, a, x, spec)
 	}
-	return fail("unknown action: " + x.Kind)
+	return actionFail(tx, a, x, "unknown action: "+x.Kind)
 }

@@ -71,20 +71,14 @@ func (w *World) projectLocalFacts(p *Perception) {
 		p.LaborUsed = w.Production.LaborUsed[holderKey("actor", a.ID)]
 	}
 	w.projectTradeAndCare(p)
+	w.projectCohortMarket(p)
 	if w.Relations != nil {
 		kin := w.Relations.Kinship[a.ID]
 		for i := range p.Nearby {
 			n := &p.Nearby[i]
 			peer := w.Relations.Kinship[n.ID]
 			n.Married = peer != nil && peer.SpouseID != ""
-			switch {
-			case kin != nil && kin.SpouseID == n.ID:
-				n.KinshipToSelf = "spouse"
-			case kin != nil && (ActorHasTag(kin.ParentIDs, n.ID) || ActorHasTag(kin.ChildIDs, n.ID)):
-				n.KinshipToSelf = "family"
-			case kin != nil && ActorHasTag(kin.SwornIDs, n.ID) || peer != nil && ActorHasTag(peer.SwornIDs, a.ID):
-				n.KinshipToSelf = "sworn"
-			}
+			n.KinshipToSelf, n.PatronageToSelf = personalRelationship(a.ID, n.ID, kin, peer)
 		}
 		for i := range p.Factions {
 			f := &p.Factions[i]
@@ -115,6 +109,24 @@ func (w *World) projectLocalFacts(p *Perception) {
 	p.Interactions = BuildInteractionViews(*p)
 	p.ProductionBlockReasons = w.ProductionStartBlockReasons(a)
 	p.ActivePlan = BuildPlanDirective(*p)
+}
+
+func personalRelationship(actorID, peerID string, kin, peer *ActorKinship) (kinship, patronage string) {
+	switch {
+	case kin != nil && kin.SpouseID == peerID:
+		kinship = "spouse"
+	case kin != nil && (ActorHasTag(kin.ParentIDs, peerID) || ActorHasTag(kin.ChildIDs, peerID)):
+		kinship = "family"
+	case kin != nil && ActorHasTag(kin.SwornIDs, peerID) || peer != nil && ActorHasTag(peer.SwornIDs, actorID):
+		kinship = "sworn"
+	}
+	switch {
+	case kin != nil && kin.PatronID == peerID || peer != nil && ActorHasTag(peer.ProtegeIDs, actorID):
+		patronage = "patron"
+	case peer != nil && peer.PatronID == actorID || kin != nil && ActorHasTag(kin.ProtegeIDs, peerID):
+		patronage = "protege"
+	}
+	return kinship, patronage
 }
 
 func (p Perception) localNeighbor(id string) *Neighbor {

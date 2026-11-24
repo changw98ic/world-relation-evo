@@ -53,15 +53,19 @@ func TestFoodMarketFeedsAnEmptyProducerFromActualMerchantStock(t *testing.T) {
 	w.Actors = nil
 	w.Catalog.Professions = []Profession{{ID: "farmer"}, {ID: "merchant", TradeMargin: true}}
 	w.Catalog.TagProfiles = map[string]TagProfile{"farmer": {Produces: []string{"grain"}}}
-	w.Catalog.Items["grain"] = ItemSpec{ID: "grain", Edible: true, NutritionUnits: 1, Tradeable: true, BatchQty: 2, BatchPrice: 1}
+	w.Catalog.Items["grain"] = ItemSpec{ID: "grain", Edible: true, NutritionUnits: 1, MassUnits: 1, Tradeable: true, BatchQty: 2, BatchPrice: 1}
 	w.Cohorts = []PopulationCohort{
-		{ID: "dealer", District: "home", Profession: "merchant", Population: 1, Adults: 1, ItemPool: map[string]int64{"grain": 12}},
-		{ID: "farm", District: "home", Profession: "farmer", Population: 1, Adults: 1, AvgHunger: 3, MoneyPool: 3},
+		{ID: "dealer", District: "home", Profession: "merchant", Population: 1, Adults: 1, AvgEnergy: 9, ItemPool: map[string]int64{"grain": 12}},
+		{ID: "farm", District: "home", Profession: "farmer", Population: 1, Adults: 1, AvgEnergy: 9, AvgHunger: 3, MoneyPool: 3},
 	}
 	w.InitLedgerAudit()
-	w.clearRegionalCohortMarket()
+	events := w.clearRegionalCohortMarket()
 	if w.Cohorts[0].ItemPool["grain"] != 6 || w.Cohorts[1].ItemPool["grain"] != 6 || w.Cohorts[0].MoneyPool != 3 || w.Cohorts[1].MoneyPool != 0 {
 		t.Fatalf("owning a food-producing profession prevented buying a meal, or a merchant could not resell a small real stock: %+v", w.Cohorts)
+	}
+	if w.Cohorts[0].AvgEnergy != 0 || w.Cohorts[1].AvgEnergy != 0 || len(events) != 1 ||
+		payloadInt64(events[0].Payload, "seller_energy_spent") != 9 || payloadInt64(events[0].Payload, "buyer_energy_spent") != 9 {
+		t.Fatalf("three settled batches of two grain should consume nine energy per party: %+v", events)
 	}
 	if err := w.VerifyLedgerConservation(); err != nil {
 		t.Fatal(err)
@@ -82,19 +86,21 @@ func TestCohortSubsistenceIsSharedByRetailReliefRentAndAdvancedFarmers(t *testin
 		spec.Tradeable, spec.BatchQty, spec.BatchPrice = true, 2, 1
 		w.Catalog.Items["grain"] = spec
 		w.Catalog.TagProfiles = map[string]TagProfile{"farmer": {Produces: []string{"grain"}}, "agronomist": {Produces: []string{"grain"}}}
-		w.Cohorts = []PopulationCohort{{ID: "farm", District: "home", Profession: profession, ProfLevel: 1, Population: 2, Adults: 2, ItemPool: map[string]int64{"grain": 722}}, {ID: "landlord", District: "home", Population: 1, Adults: 1}}
+		w.Cohorts = []PopulationCohort{{ID: "farm", District: "home", Profession: profession, ProfLevel: 1, Population: 2, Adults: 2, AvgEnergy: 2, ItemPool: map[string]int64{"grain": 722}}, {ID: "landlord", District: "home", Population: 1, Adults: 1}}
 		w.Production.Fields = []FieldAsset{{ID: "plots", District: "home", AreaM2: 2000, OwnerKind: "cohort", OwnerID: "farm", UserKind: "cohort", UserID: "farm"}}
 		w.MarketCredit = NewMarketCreditState()
 		w.MarketCredit.CohortEquityPermille["farm"] = map[string]int{"landlord": 1000}
 		w.PublicTreasury = 10
 		w.Actors[0].Hunger = 3
-		w.clearFocalActorCohortTrades()
+		buy := Action{Kind: "market_buy", TargetID: "farm", Location: "home", Item: "grain", Quantity: 2, Price: 1}
+		w.Apply(w.Actors[0].ID, buy)
+		w.settleFocalRelief()
 		w.stepDailyCreditAndAnnexation(w.MarketCredit, DefaultMarketCreditSpec())
 		if w.Cohorts[0].ItemPool["grain"] != 722 || w.Actors[0].Items["grain"] != 0 || w.Cohorts[1].ItemPool["grain"] != 0 {
 			t.Fatalf("%s lost food required before the next actual crop: %+v", profession, w.Cohorts)
 		}
 		w.Cohorts[0].ItemPool["grain"] += 2
-		w.clearFocalActorCohortTrades()
+		lawOK(t, w.Apply(w.Actors[0].ID, buy))
 		if w.Cohorts[0].ItemPool["grain"] != 722 || w.Actors[0].Items["grain"] != 2 {
 			t.Fatalf("an exact surplus trade lot was blocked: profession=%s surplus=%d actor=%+v cohorts=%+v", profession, w.cohortFoodSurplus(w.Cohorts[0], "grain"), w.Actors[0], w.Cohorts)
 		}

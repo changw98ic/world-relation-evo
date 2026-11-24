@@ -1,81 +1,14 @@
 package agent
 
 import (
-	"context"
-	"errors"
 	"fmt"
-	"net/url"
 	"sort"
 	"strings"
 
-	"github.com/changw98ic/world-relation-evo/internal/runtrace"
 	"github.com/changw98ic/world-relation-evo/internal/sim"
 )
 
-type Option struct {
-	ID     string     `json:"id"`
-	Label  string     `json:"label"`
-	Action sim.Action `json:"action"`
-}
-
-type Selector interface {
-	Select(context.Context, sim.Perception, []Option) (string, error)
-}
-
-type Pipeline struct {
-	Selector Selector
-	Trace    *runtrace.Writer
-}
-
-func (p Pipeline) Decide(ctx context.Context, view sim.Perception) (sim.Action, error) {
-	pipeline := DecisionPipeline{Trace: p.Trace}
-	switch selector := p.Selector.(type) {
-	case RuleSelector:
-		pipeline.Selector = RuleDecisionSelector{Selector: selector}
-	case *RuleSelector:
-		pipeline.Selector = RuleDecisionSelector{Selector: *selector}
-	case Jev:
-		pipeline.Selector = JevDecisionSelector{Jev: selector}
-	case *Jev:
-		pipeline.Selector = JevDecisionSelector{Jev: *selector}
-	case *RulebookSelector:
-		pipeline.Selector = RulebookDecisionSelector{Selector: selector}
-	case *PlaybookSelector:
-		pipeline.Selector = PlaybookDecisionSelector{Selector: selector}
-	default:
-		pipeline.Selector = optionDecisionSelector{selector}
-	}
-	return pipeline.Decide(ctx, view)
-}
-
-// modelRequestError preserves the original error chain without exposing endpoint
-// credentials through Pipeline's decision_error record.
-type modelRequestError struct {
-	cause   error
-	message string
-}
-
-func (e modelRequestError) Error() string { return e.message }
-func (e modelRequestError) Unwrap() error { return e.cause }
-
-func recordModelError(trace *runtrace.Writer, kind string, p sim.Perception, endpoint, apiKey string, err error) error {
-	if err == nil || trace == nil {
-		return err
-	}
-	message := err.Error()
-	var requestErr *url.Error
-	if errors.As(err, &requestErr) {
-		// net/http includes the full request URL in url.Error.Error(). Omit it.
-		message = requestErr.Op + ": " + requestErr.Err.Error()
-	}
-	for _, secret := range []string{endpoint, apiKey} {
-		if secret != "" {
-			message = strings.ReplaceAll(message, secret, "[redacted]")
-		}
-	}
-	safeErr := modelRequestError{cause: err, message: message}
-	return errors.Join(safeErr, trace.Record(kind, p.Tick, p.Self.ID, map[string]any{"error": message}))
-}
+type Option = sim.Candidate
 
 func requirementSummary(req map[string]int) string {
 	if len(req) == 0 {
@@ -94,6 +27,13 @@ func requirementSummary(req map[string]int) string {
 }
 
 func Options(p sim.Perception) []Option {
+	return buildBaseCandidates(p)
+}
+
+// buildBaseCandidates constructs the canonical legal Candidate list directly from
+// Perception and Catalog (built-in engine actions + declarative ActionSpecs),
+// gated by Capabilities() and single-source Perception.CheckAction().
+func buildBaseCandidates(p sim.Perception) []sim.Candidate {
 	p.Self.Plan = sim.ClonePersonalPlan(p.Self.Plan)
 	sim.SyncActorPlan(&p.Self, p.Tick, p.Catalog)
 	if p.ActivePlan == nil && p.Self.Plan != nil && p.Self.Plan.Status == "active" {
@@ -102,18 +42,32 @@ func Options(p sim.Perception) []Option {
 	a := p.Self
 	dir := p.ActivePlan
 	allowed := p.Capabilities()
-	var options []Option
+	check := p.ActionChecker()
+	var candidates []sim.Candidate
 	add := func(label string, action sim.Action) {
 		if !allowed[action.Kind] {
-			return
-		}
-		if res := p.CheckAction(action); !res.Allowed {
 			return
 		}
 		if action.Text == "" && (action.Kind == "speak" || action.Kind == "transmit_message" || action.Kind == "issue_decree") {
 			action = buildCommunicationAction(p, action)
 		}
-		options = append(options, Option{ID: fmt.Sprintf("o%03d", len(options)), Label: label, Action: action})
+		if res := check(action); !res.Allowed {
+			return
+		}
+		source := "builtin"
+		if meta, ok := p.Catalog.ActionMetadataByKind(action.Kind); ok && meta.Declarative {
+			source = "action_spec"
+		}
+		id := fmt.Sprintf("o%03d", len(candidates))
+		candidates = append(candidates, sim.Candidate{ID: id, Label: label, Source: source, Action: action})
+		for _, order := range p.WorkOrdersFor(action) {
+			paid := action
+			paid.WorkOrderID = order.ID
+			candidates = append(candidates, sim.Candidate{
+				ID: fmt.Sprintf("o%03d", len(candidates)), Label: fmt.Sprintf("%s · %d coins, %s pay", order.Name, order.Wage, order.PayCycle),
+				Source: source, Action: paid,
+			})
+		}
 	}
 
 	for _, n := range p.EnergyNodes {
@@ -121,6 +75,9 @@ func Options(p sim.Perception) []Option {
 			qty := min(int64(a.Items[n.Source.FuelItem]), n.Source.UnitsPerCycle)
 			add(fmt.Sprintf("Refuel %s with %d %s", n.ID, qty, n.Source.FuelItem), sim.Action{Kind: "refuel", TargetID: n.ID, Quantity: int(qty)})
 		}
+	}
+	for _, lot := range p.MarketLots {
+		add(fmt.Sprintf("%s %d %s at %s for %d coins", lot.Kind, lot.Quantity, lot.Item, lot.TargetID, lot.Price), lot)
 	}
 	for _, action := range growthCareActions(p) {
 		label := action.Kind + " " + action.TargetID
@@ -136,7 +93,7 @@ func Options(p sim.Perception) []Option {
 		}
 		add(label, action)
 	}
-	add("Wait 15m and catch breath (+1 energy)", sim.Action{Kind: "wait"})
+	add("Wait 15m", sim.Action{Kind: "wait"})
 	if a.Resting {
 		add("End the planned rest", sim.Action{Kind: "end_rest"})
 	} else if a.Energy < sim.MaxEnergy {
@@ -281,10 +238,7 @@ func Options(p sim.Perception) []Option {
 	}
 
 	if a.Energy < sim.MaxEnergy || a.Health < sim.MaxHealth {
-		sleepTicks := 8
-		if p.Clock.IsNight || sim.SleepWindowAligned(a.SleepTrait, p.Clock.Hour) || a.Energy < 40 || a.Health < 70 {
-			sleepTicks = 20
-		}
+		sleepTicks := sleepDuration(a, p.Clock)
 		if p.CurrentHouse != nil {
 			add(fmt.Sprintf("Sleep and recuperate in %s (comfort %d, condition %d/100, up to %dm)", p.CurrentHouse.Name, p.CurrentHouse.Comfort, p.CurrentHouse.Condition, sleepTicks*15), sim.Action{Kind: "sleep", Quantity: sleepTicks})
 		} else if a.Energy < 35 || a.Health < 55 || p.Clock.IsNight {
@@ -476,7 +430,7 @@ func Options(p sim.Perception) []Option {
 		add("Claim district sovereignty for "+a.Guilds[0], sim.Action{Kind: "claim_turf", FactionID: a.Guilds[0], Location: a.Location})
 	}
 
-	if report, ok := informationAction(p); ok && report.Kind == "speak" && ruleOptionID(report, options) == "" {
+	if report, ok := informationAction(p); ok && report.Kind == "speak" && candidateIDForAction(report, candidates) == "" {
 		add(report.Text, report)
 	}
 	for _, action := range caseActions(p) {
@@ -620,14 +574,14 @@ func Options(p sim.Perception) []Option {
 			}
 		}
 	}
-	if !p.HasActiveLoan && !pendingBorrow && a.Money < 10 {
+	if !p.HasActiveLoan && !pendingBorrow {
 		collateral := ""
 		if deed, known := p.KnownHouse(a.HomeID); known && deed.OwnerID == a.ID {
 			collateral = deed.ID
 		}
 		for _, peer := range p.Nearby {
 			if canRequestLoan(peer, p.CreditTerms) {
-				add(fmt.Sprintf("Request 12 coins from %s: interest %d per mille/day, term %d ticks, collateral %s", peer.ID, p.CreditTerms.DailyLoanInterestPermille, p.CreditTerms.LoanTermTicks, collateral), sim.Action{Kind: "borrow_loan", TargetID: peer.ID})
+				add(fmt.Sprintf("Request a loan from %s: interest %d per mille/day, term %d ticks, collateral %s", peer.ID, p.CreditTerms.DailyLoanInterestPermille, p.CreditTerms.LoanTermTicks, collateral), sim.Action{Kind: "borrow_loan", TargetID: peer.ID})
 			}
 		}
 	}
@@ -637,48 +591,13 @@ func Options(p sim.Perception) []Option {
 			chKeys = append(chKeys, k)
 		}
 		sort.Strings(chKeys)
-		tags := selfEffTags
 		for _, chID := range chKeys {
 			ch := p.Catalog.CommChannels[chID]
-			if a.Energy < ch.EnergyCost {
-				continue
-			}
-			if len(ch.GrantedByTags) > 0 {
-				granted := false
-				for _, gt := range ch.GrantedByTags {
-					if sim.ActorHasTag(tags, gt) {
-						granted = true
-						break
-					}
-				}
-				if !granted {
-					continue
-				}
-			}
 			if ch.Broadcast {
 				add(fmt.Sprintf("Broadcast message over %s (range %dkm, -%d energy)", ch.Name, ch.RangeKm, ch.EnergyCost),
 					sim.Action{Kind: "transmit_message", Channel: ch.ID})
 			} else {
-				peerSet := map[string]bool{}
-				for peerID := range a.Trust {
-					if peerID != "" && peerID != a.ID {
-						peerSet[peerID] = true
-					}
-				}
-				for _, m := range a.Memories {
-					if m.Source != "" && m.Source != "world" && m.Source != a.ID {
-						peerSet[m.Source] = true
-					}
-					if m.TargetID != "" && m.TargetID != a.ID {
-						peerSet[m.TargetID] = true
-					}
-				}
-				peers := make([]string, 0, len(peerSet))
-				for pid := range peerSet {
-					peers = append(peers, pid)
-				}
-				sort.Strings(peers)
-				for _, pid := range peers {
+				for _, pid := range p.CommunicationContacts {
 					add(fmt.Sprintf("Transmit message to %s via %s (-%d energy)", pid, ch.Name, ch.EnergyCost),
 						sim.Action{Kind: "transmit_message", Channel: ch.ID, TargetID: pid})
 				}
@@ -731,25 +650,6 @@ func Options(p sim.Perception) []Option {
 					chKeys = append(chKeys, k)
 				}
 				sort.Strings(chKeys)
-				peerSet := map[string]bool{}
-				for peerID := range a.Trust {
-					if peerID != "" && peerID != a.ID && !nearbySet[peerID] {
-						peerSet[peerID] = true
-					}
-				}
-				for _, m := range a.Memories {
-					if m.Source != "" && m.Source != "world" && m.Source != a.ID && !nearbySet[m.Source] {
-						peerSet[m.Source] = true
-					}
-					if m.TargetID != "" && m.TargetID != a.ID && !nearbySet[m.TargetID] {
-						peerSet[m.TargetID] = true
-					}
-				}
-				peers := make([]string, 0, len(peerSet))
-				for pid := range peerSet {
-					peers = append(peers, pid)
-				}
-				sort.Strings(peers)
 				for _, chID := range chKeys {
 					ch := p.Catalog.CommChannels[chID]
 					if a.Energy < ch.EnergyCost {
@@ -767,7 +667,10 @@ func Options(p sim.Perception) []Option {
 							continue
 						}
 					}
-					for _, pid := range peers {
+					for _, pid := range p.CommunicationContacts {
+						if nearbySet[pid] {
+							continue
+						}
 						add(fmt.Sprintf("Teach %s to %s via %s (-%d energy)", tech.Name, pid, ch.Name, ch.EnergyCost),
 							sim.Action{Kind: "teach_knowledge", TechID: tech.ID, TargetID: pid, Channel: ch.ID})
 					}
@@ -983,7 +886,7 @@ func Options(p sim.Perception) []Option {
 	addPartyOptions(p, allowed, add)
 	addDiplomacyOptions(p, allowed, add)
 	addAmbitionOptions(p, allowed, add)
-	return options
+	return candidates
 }
 
 func actionSpecCostSummary(spec sim.ActionSpec) string {
@@ -1186,15 +1089,7 @@ func holdsAllItems(inv map[string]int, req map[string]int) bool {
 }
 
 func canDrawFreeWater(p sim.Perception) bool {
-	if p.DistrictState == nil {
-		return false
-	}
-	for id, spec := range p.Catalog.Resources {
-		if spec.PotableWater && p.DistrictState.AvailableResource(id) > 0 {
-			return true
-		}
-	}
-	return false
+	return p.HasPotableWater()
 }
 
 func cheapestMedicinalItem(cat sim.Catalog, a sim.Actor, itemKeys []string) string {
@@ -1216,56 +1111,36 @@ func totalEdibleItems(cat sim.Catalog, a sim.Actor) int {
 	return int(cat.AvailableNutrition(a))
 }
 
-// RuleSelector is explicitly the offline baseline, never a Jev substitute.
-type RuleSelector struct{ trace *runtrace.Writer }
-
-func (r RuleSelector) Select(_ context.Context, p sim.Perception, options []Option) (string, error) {
-	var id string
-	var unavailable []sim.Action
-	(rulesPolicy{options: options}).preferences(p, func(desired sim.Action) bool {
-		id = ruleOptionID(desired, options)
-		if id == "" && r.trace != nil {
-			unavailable = append(unavailable, desired)
-		}
-		return id != ""
-	})
-	if len(unavailable) > 0 {
-		if err := r.trace.Record("rule_unavailable", p.Tick, p.Self.ID, map[string]any{"preferences": unavailable}); err != nil {
-			return "", err
-		}
-	}
-	if id == "" {
-		return "", fmt.Errorf("no available action matches the rules for %s at tick %d", p.Self.ID, p.Tick)
-	}
-	return id, nil
+func actionMatchesDesired(a, desired sim.Action) bool {
+	return a.Kind == desired.Kind && a.WorkOrderID == desired.WorkOrderID &&
+		((desired.Kind != "speak" && desired.Kind != "transmit_message" && desired.Kind != "channel_message") ||
+			desired.Statement == nil && desired.BasisEventID == 0 ||
+			a.BasisEventID == desired.BasisEventID && sameStatement(a.Statement, desired.Statement)) &&
+		(desired.Channel == "" || a.Channel == desired.Channel) &&
+		a.Location == desired.Location &&
+		a.HouseID == desired.HouseID &&
+		a.FactionID == desired.FactionID &&
+		a.ProfessionID == desired.ProfessionID &&
+		a.RecipeID == desired.RecipeID &&
+		(desired.TechID == "" || a.TechID == desired.TechID) &&
+		(desired.SkillID == "" || a.SkillID == desired.SkillID) &&
+		(desired.Currency == "" || a.Currency == desired.Currency) &&
+		(desired.TransitionID == "" || a.TransitionID == desired.TransitionID) &&
+		a.OfferID == desired.OfferID &&
+		a.AgreementID == desired.AgreementID &&
+		(desired.Kind != "mediate_feud" || a.Text == desired.Text && a.Price == desired.Price) &&
+		((desired.Kind != "gf_exchange" && desired.Kind != "gf_simulate") || desired.Text == "" || a.Text == desired.Text) &&
+		((desired.Kind != "propose_agreement" && desired.Kind != "offer" && desired.Kind != "rewrite_world_law" &&
+			desired.Kind != "market_buy" && desired.Kind != "market_sell") || (a.Price == desired.Price && a.Quantity == desired.Quantity)) &&
+		(desired.Care == nil || a.Care != nil && *a.Care == *desired.Care) &&
+		(desired.Item == "" || a.Item == desired.Item) &&
+		(a.TargetID == desired.TargetID || a.OfferID != 0)
 }
 
-func ruleOptionID(desired sim.Action, options []Option) string {
-	for _, o := range options {
-		a := o.Action
-		if a.Kind == desired.Kind &&
-			((desired.Kind != "speak" && desired.Kind != "transmit_message" && desired.Kind != "channel_message") ||
-				desired.Statement == nil && desired.BasisEventID == 0 ||
-				a.BasisEventID == desired.BasisEventID && sameStatement(a.Statement, desired.Statement)) &&
-			(desired.Channel == "" || a.Channel == desired.Channel) &&
-			a.Location == desired.Location &&
-			a.HouseID == desired.HouseID &&
-			a.FactionID == desired.FactionID &&
-			a.ProfessionID == desired.ProfessionID &&
-			a.RecipeID == desired.RecipeID &&
-			(desired.TechID == "" || a.TechID == desired.TechID) &&
-			(desired.SkillID == "" || a.SkillID == desired.SkillID) &&
-			(desired.Currency == "" || a.Currency == desired.Currency) &&
-			(desired.TransitionID == "" || a.TransitionID == desired.TransitionID) &&
-			a.OfferID == desired.OfferID &&
-			a.AgreementID == desired.AgreementID &&
-			(desired.Kind != "mediate_feud" || a.Text == desired.Text && a.Price == desired.Price) &&
-			((desired.Kind != "gf_exchange" && desired.Kind != "gf_simulate") || desired.Text == "" || a.Text == desired.Text) &&
-			((desired.Kind != "propose_agreement" && desired.Kind != "offer" && desired.Kind != "rewrite_world_law") || (a.Price == desired.Price && a.Quantity == desired.Quantity)) &&
-			(desired.Care == nil || a.Care != nil && *a.Care == *desired.Care) &&
-			(desired.Item == "" || a.Item == desired.Item) &&
-			(a.TargetID == desired.TargetID || a.OfferID != 0) {
-			return o.ID
+func candidateIDForAction(desired sim.Action, candidates []sim.Candidate) string {
+	for _, c := range candidates {
+		if actionMatchesDesired(c.Action, desired) {
+			return c.ID
 		}
 	}
 	return ""
@@ -1297,6 +1172,24 @@ func buildCommunicationAction(p sim.Perception, a sim.Action) sim.Action {
 	}
 	if a.Kind != "speak" && a.Kind != "transmit_message" {
 		return a
+	}
+	if a.Kind == "speak" && p.Catalog.HasConversationNeeds() {
+		if question, open := p.OpenQuestions[a.TargetID]; open && question.Source == a.TargetID {
+			a.Statement = &sim.Statement{Topic: sim.ConversationReply}
+			a.BasisEventID = question.EventID
+			a.Text = "近来还好，多谢你惦记。"
+			if p.Self.Health < sim.MaxHealth {
+				a.Text = "这几天身子有些不爽利，还得歇一歇。"
+			}
+			return a
+		}
+		for _, peer := range p.Nearby {
+			if peer.ID == a.TargetID {
+				a.Statement = &sim.Statement{Topic: sim.ConversationQuestion}
+				a.Text = fmt.Sprintf("%s，近来可好？", peer.Name)
+				return a
+			}
+		}
 	}
 	alreadyToldTarget := func(rootID int64) bool {
 		if rootID == 0 {
@@ -1572,4 +1465,4 @@ func reportFromMemory(m sim.Memory, self sim.Actor, listenerID string) (speechDr
 	return speechDraft{}, false
 }
 
-func Offline() Pipeline { return Pipeline{Selector: RuleSelector{}} }
+func Offline() Planner { return Planner{} }

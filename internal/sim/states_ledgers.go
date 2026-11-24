@@ -2,6 +2,7 @@ package sim
 
 import (
 	"fmt"
+	"math"
 	"sort"
 )
 
@@ -16,10 +17,55 @@ type StateSlotSpec struct {
 	Max                  int    `json:"max,omitempty"`
 	Default              int    `json:"default,omitempty"`
 	RegenPerTick         int    `json:"regen_per_tick,omitempty"`
+	ConversationGain     int    `json:"conversation_gain,omitempty"`
 	AmbientFieldKey      string `json:"ambient_field_key,omitempty"`
 	AmbientAbsorbDivisor int    `json:"ambient_absorb_divisor,omitempty"`
 	OverflowThreshold    int    `json:"overflow_threshold,omitempty"`
 	OverflowTransitionID string `json:"overflow_transition_id,omitempty"`
+}
+
+func (s StateSlotSpec) Bounds() (int, int) {
+	if s.Max > s.Min {
+		return s.Min, s.Max
+	}
+	return s.Min, math.MaxInt
+}
+
+func (s StateSlotSpec) passiveChange(metabolism int, fields map[string]int) int {
+	change := s.RegenPerTick + metabolism
+	if s.AmbientFieldKey != "" {
+		change += fields[s.AmbientFieldKey] / max(s.AmbientAbsorbDivisor, 1)
+	}
+	return change
+}
+
+func (p Perception) StateSlotChangePerTick(id string) int {
+	spec, declared := p.Catalog.StateSlots[id]
+	form := p.Catalog.Forms[p.Self.FormID]
+	if !declared {
+		return form.SlotMetabolism[id]
+	}
+	if spec.RequiredTag != "" && !ActorHasTag(p.Self.IdentityTags(), spec.RequiredTag) {
+		return 0
+	}
+	var fields map[string]int
+	if spec.AmbientFieldKey != "" {
+		region, _ := p.Map.GeoRegionByID(p.Map.GeoRegionIDForLocation(p.Self.Location, p.Self.VenueID))
+		fields = region.AmbientFields
+	}
+	return spec.passiveChange(form.SlotMetabolism[id], fields)
+}
+
+func (c Catalog) StateSlotValue(a Actor, id string) (int, bool) {
+	value, held := a.StateSlots[id]
+	spec, defined := c.StateSlots[id]
+	if held {
+		return value, true
+	}
+	if defined && (spec.RequiredTag == "" || ActorHasTag(a.IdentityTags(), spec.RequiredTag)) {
+		return spec.Default, true
+	}
+	return 0, false
 }
 
 // FormSpec declaratively defines an actor's physiological/ontological form or power realm
@@ -99,6 +145,10 @@ type TransitionSpec struct {
 	FailureHealthLoss   int            `json:"failure_health_loss,omitempty"`
 	FailureWipeMemories bool           `json:"failure_wipe_memories,omitempty"`
 	FailureHostileTag   string         `json:"failure_hostile_tag,omitempty"`
+}
+
+func (t TransitionSpec) SuccessPermille(a Actor) int {
+	return min(1000, max(0, t.BaseSuccessPermille+a.Attributes.Spirit*t.SpiritBonusPermille))
 }
 
 // CurrencySpec declaratively defines an economic currency medium (e.g. spirit_credit,
@@ -194,6 +244,7 @@ func cloneInt64Map(m map[string]int64) map[string]int64 {
 
 // CloneActor isolates every mutable part of a person's state from its source.
 func CloneActor(a Actor) Actor {
+	a.cloneBehaviorState()
 	a.Ambitions = append([]ActorAmbition(nil), a.Ambitions...)
 	a.KnownHomicides = append([]int64(nil), a.KnownHomicides...)
 	a.Tags = append([]string(nil), a.Tags...)
@@ -226,6 +277,10 @@ func CloneActor(a Actor) Actor {
 			if m.Observation != nil {
 				observation := *m.Observation
 				m.Observation = &observation
+			}
+			if m.Trade != nil {
+				trade := *m.Trade
+				m.Trade = &trade
 			}
 			if m.Statement != nil {
 				statement := *m.Statement
@@ -382,18 +437,10 @@ func itemAcceptsCurrency(spec ItemSpec, currency string) bool {
 
 func clampSlotValue(val int, spec StateSlotSpec, hasSpec bool) int {
 	if !hasSpec {
-		if val < 0 {
-			return 0
-		}
-		return val
+		return max(0, val)
 	}
-	if val < spec.Min {
-		val = spec.Min
-	}
-	if spec.Max > spec.Min && val > spec.Max {
-		val = spec.Max
-	}
-	return val
+	lower, upper := spec.Bounds()
+	return max(lower, min(upper, val))
 }
 
 func setActorSlotValue(a *Actor, slotID string, val int) {
@@ -439,16 +486,8 @@ func (w *World) stepCohortStateSlots(c *PopulationCohort, slotKeys []string) {
 	if c == nil || c.Population <= 0 || len(slotKeys) == 0 {
 		return
 	}
-	var form FormSpec
-	hasForm := false
-	if c.FormID != "" {
-		form, hasForm = w.Catalog.Forms[c.FormID]
-	}
-	var reg GeoRegion
-	hasReg := false
-	if regID := w.Map.GeoRegionIDForLocation(c.District, ""); regID != "" {
-		reg, hasReg = w.Map.GeoRegionByID(regID)
-	}
+	form := w.Catalog.Forms[c.FormID]
+	reg, _ := w.Map.GeoRegionByID(w.Map.GeoRegionIDForLocation(c.District, ""))
 	tags, _ := w.cohortEffectiveTagsAndCaps(*c)
 	for _, slotID := range slotKeys {
 		spec := w.Catalog.StateSlots[slotID]
@@ -459,19 +498,7 @@ func (w *World) stepCohortStateSlots(c *PopulationCohort, slotKeys []string) {
 		if !existed && spec.Default != 0 {
 			cur = spec.Default
 		}
-		delta := spec.RegenPerTick
-		if hasForm && form.SlotMetabolism != nil {
-			delta += form.SlotMetabolism[slotID]
-		}
-		if spec.AmbientFieldKey != "" && hasReg && reg.AmbientFields != nil {
-			if ambient := reg.AmbientFields[spec.AmbientFieldKey]; ambient != 0 {
-				div := spec.AmbientAbsorbDivisor
-				if div <= 0 {
-					div = 1
-				}
-				delta += ambient / div
-			}
-		}
+		delta := spec.passiveChange(form.SlotMetabolism[slotID], reg.AmbientFields)
 		if !existed && delta == 0 && spec.Default == 0 {
 			continue
 		}
@@ -488,16 +515,12 @@ func (w *World) stepActorStateSlotsAndForm(a *Actor, slotKeys []string) []Event 
 	}
 	var events []Event
 	form, hasForm := w.actorFormSpec(*a)
-	var reg GeoRegion
-	hasReg := false
-	if regID := w.Map.GeoRegionIDForLocation(a.Location, a.VenueID); regID != "" {
-		reg, hasReg = w.Map.GeoRegionByID(regID)
-	}
+	reg, _ := w.Map.GeoRegionByID(w.Map.GeoRegionIDForLocation(a.Location, a.VenueID))
 
 	// Update every slot before evaluating transitions, so prerequisites never depend on key order.
 	handled := make(map[string]bool, len(slotKeys))
 	var overflowTransitions []string
-	actorTags := w.actorWithEffectTags(*a).Tags
+	actorTags := w.actorWithEffectTags(*a).IdentityTags()
 	for _, slotID := range slotKeys {
 		if a.Dead {
 			break
@@ -511,20 +534,7 @@ func (w *World) stepActorStateSlotsAndForm(a *Actor, slotKeys []string) []Event 
 		if !existed && spec.Default != 0 {
 			cur = spec.Default
 		}
-		delta := spec.RegenPerTick
-		if hasForm && form.SlotMetabolism != nil {
-			delta += form.SlotMetabolism[slotID]
-		}
-		if spec.AmbientFieldKey != "" && hasReg && reg.AmbientFields != nil {
-			ambient := reg.AmbientFields[spec.AmbientFieldKey]
-			if ambient != 0 {
-				div := spec.AmbientAbsorbDivisor
-				if div <= 0 {
-					div = 1
-				}
-				delta += ambient / div
-			}
-		}
+		delta := spec.passiveChange(form.SlotMetabolism[slotID], reg.AmbientFields)
 
 		next := cur + delta
 		overflowed := spec.OverflowThreshold > 0 && next >= spec.OverflowThreshold
@@ -645,18 +655,12 @@ func (w *World) executeTransition(tx *WorldTx, a *Actor, x Action, transID strin
 	if !ok {
 		return nil
 	}
-	chance := trans.BaseSuccessPermille + a.Attributes.Spirit*trans.SpiritBonusPermille
-	if chance < 0 {
-		chance = 0
-	}
-	if chance > 1000 {
-		chance = 1000
-	}
+	chance := trans.SuccessPermille(*a)
 	succeeded := false
 	if chance >= 1000 {
 		succeeded = true
 	} else if chance > 0 {
-		roll := int(worldHash(w.ID, w.Tick, "transition:"+a.ID+":"+trans.ID) % 1000)
+		roll := int(w.settlementRandom(w.Tick, "transition:"+a.ID+":"+trans.ID) % 1000)
 		succeeded = roll < chance
 	}
 
@@ -719,7 +723,7 @@ func (w *World) executeTransition(tx *WorldTx, a *Actor, x Action, transID strin
 		tx.clearActorMemoriesAndTrust(a)
 	}
 	events := []Event{ev}
-	events = append(events, w.markDeadIfZeroWithTx(tx, a, nil, x, "transition_failure")...)
+	events = append(events, w.markDeadIfZeroWithTx(tx, a, nil, x, "transition_failure", ev)...)
 	return events
 }
 
@@ -1616,6 +1620,9 @@ func (w *World) adjustCohortItem(c *PopulationCohort, itemID string, delta int64
 		if c.ItemPool[itemID] <= 0 {
 			delete(c.ItemPool, itemID)
 		}
+		if len(c.ItemPool) == 0 {
+			c.ItemPool = nil
+		}
 	}
 	if trackLedger {
 		w.recordLedgerItemConsumed(itemID, -delta)
@@ -1660,10 +1667,7 @@ func (w *World) removeActorEquippedItem(a *Actor, slot string, trackLedger bool)
 	if !ok || itemID == "" {
 		return false
 	}
-	delete(a.Equipped, slot)
-	if len(a.Equipped) == 0 {
-		a.Equipped = nil
-	}
+	setActorEquippedItem(a, slot, "")
 	if trackLedger {
 		w.recordLedgerItemConsumed(itemID, 1)
 	}

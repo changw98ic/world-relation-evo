@@ -132,7 +132,7 @@ func decodeData(e Entry, out any) error {
 func Analyze(dir string) (Report, error) {
 	report := Report{Findings: []Finding{}, Timeline: []DecisionReview{},
 		Correctness:       "not_established",
-		ReviewRequirement: "必须结合原始模型返回和人物时间线检查动机、资源来源、空间及因果；流程完成或未检出问题不代表模拟正确。"}
+		ReviewRequirement: "结合决策理由和人物时间线检查需求、已知事实、资源来源和实际结果。"}
 	initial, err := os.ReadFile(filepath.Join(dir, "initial.json"))
 	if err != nil {
 		return report, fmt.Errorf("read trace initial state: %w", err)
@@ -227,7 +227,7 @@ func Analyze(dir string) (Report, error) {
 			}
 		case "rule_unavailable":
 			d, ok := decisions[key]
-			if !ok || d.input.DecisionSource != "rules" {
+			if !ok || (d.input.DecisionSource != "rules" && d.input.DecisionSource != "rulebook" && d.input.DecisionSource != "playbook") {
 				return report, fmt.Errorf("rule preferences without rule input at %d", e.Seq)
 			}
 			var data struct{ Preferences []sim.Action }
@@ -271,7 +271,9 @@ func Analyze(dir string) (Report, error) {
 			if err := decodeData(e, &data); err != nil {
 				return report, err
 			}
-			if !reflect.DeepEqual(d.row.Action, data.Action) {
+			action := data.Action
+			action.Decision = nil
+			if !reflect.DeepEqual(d.row.Action, action) {
 				add(e, "content_authority", "violation", "准备执行的动作改变了已选定的系统动作", d.row.InputSeq)
 			}
 			d.row.Action, d.row.ReadySeq = data.Action, e.Seq
@@ -292,6 +294,21 @@ func Analyze(dir string) (Report, error) {
 					add(e, "speech_locality", "violation", "当面讲话的目标不在人物当时可接触的邻居中", d.row.InputSeq)
 				}
 			}
+		case "behavior_continued", "behavior_repaired", "behavior_habit":
+			var data struct {
+				Action sim.Action `json:"action"`
+			}
+			if err := decodeData(e, &data); err != nil {
+				return report, err
+			}
+			actor, exists := lookupActor(&before, e.ActorID)
+			if !exists || decisions[key] != nil || data.Action.Decision == nil {
+				return report, fmt.Errorf("invalid behavior transition at %d", e.Seq)
+			}
+			decisions[key] = &decisionEvidence{row: DecisionReview{
+				Source: e.Kind, Tick: e.Tick, ActorID: e.ActorID, Goal: actor.Goal,
+				InputSeq: e.Seq, ReadySeq: e.Seq, Before: actorState(actor), Action: data.Action, Outcomes: []string{},
+			}}
 		case "jev_request":
 			d, ok := decisions[key]
 			if !ok {
@@ -415,12 +432,12 @@ func Analyze(dir string) (Report, error) {
 				if event.Kind != "crafted" {
 					continue
 				}
-				quantity, ok := event.Payload["quantity"].(float64)
+				quantity, ok := event.Payload["quantity"].(int64)
 				if !ok {
 					add(Entry{Seq: e.Seq, Tick: e.Tick, ActorID: event.ActorID}, "production_evidence", "observed_error", fmt.Sprintf("完成事件%d缺少可读取的实际产出数量", event.ID))
 				} else if quantity == 0 {
-					before, beforeOK := event.Payload["yield_credit_before"].(float64)
-					after, afterOK := event.Payload["yield_credit_after"].(float64)
+					before, beforeOK := event.Payload["yield_credit_before"].(int64)
+					after, afterOK := event.Payload["yield_credit_after"].(int64)
 					if !(beforeOK && afterOK && after > before) {
 						add(Entry{Seq: e.Seq, Tick: e.Tick, ActorID: event.ActorID}, "zero_output", "needs_review", fmt.Sprintf("完成事件%d记录产出为0，且没有把已支付的分数产量记入余量；需对照开工成本、资源扣除和整数舍入，不能以完成事件证明目标有进展", event.ID))
 					}

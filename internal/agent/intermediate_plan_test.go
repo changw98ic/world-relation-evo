@@ -22,11 +22,12 @@ func TestRequiredMaterialDoesNotBecomeItsOwnSalesIntention(t *testing.T) {
 	}
 	w.Catalog.Items["clay_deposit"] = sim.ItemSpec{ID: "clay_deposit", MassUnits: 1}
 	w.Actors[0].Items["clay_deposit"] = 2
+	w.Actors[0].NeedWeights = map[string]float64{"stock:pottery": 1.2}
 	action, err := Offline().Decide(context.Background(), w.View("alice"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if action.Kind != "craft" || action.RecipeID != "dig_clay" {
+	if action.Kind != "craft" || action.RecipeID != "dig_clay" || action.Decision.Behavior.Strategy != "produce/fire_pottery" {
 		t.Fatalf("making clay for pottery became an unrelated intention to sell clay: %+v", action)
 	}
 	boundaryApply(t, w, "alice", action)
@@ -34,7 +35,7 @@ func TestRequiredMaterialDoesNotBecomeItsOwnSalesIntention(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if action.Kind != "start_plan" || action.RecipeID != "fire_pottery" {
-		t.Fatalf("the final specialty product could not keep its own sale intention: %+v", action)
+	if action.Kind != "craft" || action.RecipeID != "fire_pottery" || action.Decision.Behavior.Strategy != "produce/fire_pottery" {
+		t.Fatalf("the production strategy did not move from material to final product: %+v", action)
 	}
 }

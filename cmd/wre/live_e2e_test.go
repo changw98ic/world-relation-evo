@@ -19,17 +19,17 @@ import (
 
 // This is an external workflow probe, not a proof that the model's behavior or
 // the simulated world is reasonable. It launches the real executable twice,
-// calls the configured Jev/content providers, persists to PostgreSQL, and replays
+// chooses actions with world rules, persists to PostgreSQL, and replays
 // persisted decisions. The 16+16 steps exercise a restart and the checkpoint at
 // step 24; they are an observation window, not an application limit or a claim
 // about long-term survival. Original evidence remains on disk after the test.
-func TestLiveModelWorkflowRecordsEvidenceAcrossDatabaseRestart(t *testing.T) {
+func TestLiveRuleWorkflowRecordsEvidenceAcrossDatabaseRestart(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
 	loadDotEnv(filepath.Join(root, ".env"))
-	for _, key := range []string{"WRE_JEV_KEY", "DATABASE_URL"} {
+	for _, key := range []string{"DATABASE_URL"} {
 		if os.Getenv(key) == "" {
 			t.Fatalf("live workflow requires %s; this is a failure, not a skipped model test", key)
 		}
@@ -50,8 +50,8 @@ func TestLiveModelWorkflowRecordsEvidenceAcrossDatabaseRestart(t *testing.T) {
 	defer func() {
 		summary := map[string]any{"world_id": worldID, "workflow_completed": finished, "replay_equal": replayed,
 			"test_failed": t.Failed(), "simulation_correctness": "not_established",
-			"review_required": "Review original model calls and actor timelines; successful workflow execution is not simulation validity.",
-			"scenario":        "Nine active characters from mortal_watershed; anonymous cohorts removed to keep this live fixture small. Every idle character uses Jev. Two real processes run 16 steps each, checkpoint interval 24."}
+			"review_required": "Review need contributions and actor timelines.",
+			"scenario":        "Nine active characters from mortal_watershed; anonymous cohorts removed to keep this live fixture small. Active characters use local planning. Two real processes run 16 steps each, checkpoint interval 24."}
 		raw, err := json.MarshalIndent(summary, "", "  ")
 		if err != nil {
 			t.Error(err)
@@ -109,7 +109,7 @@ func TestLiveModelWorkflowRecordsEvidenceAcrossDatabaseRestart(t *testing.T) {
 	}
 	for _, segment := range []string{"first", "resumed"} {
 		traceDir := filepath.Join(dir, segment)
-		args := []string{"-world", worldID, "-decider", "jev", "-steps", "16", "-pace", "0", "-quiet", "-checkpoint-every", "24", "-trace-dir", traceDir}
+		args := []string{"-world", worldID, "-steps", "16", "-pace", "0", "-quiet", "-checkpoint-every", "24", "-trace-dir", traceDir}
 		if segment == "first" {
 			args = append(args, "-pack", fixture)
 		}
@@ -125,12 +125,12 @@ func TestLiveModelWorkflowRecordsEvidenceAcrossDatabaseRestart(t *testing.T) {
 		if !report.RunCompleted || !report.TraceComplete || report.TicksSettled != 16 || report.PersistedTicks != 16 {
 			t.Fatalf("%s workflow/evidence incomplete; inspect %s", segment, traceDir)
 		}
-		if report.Decisions == 0 || report.JevResponses < report.Decisions {
-			t.Fatalf("%s did not call Jev for every recorded active decision (decisions=%d jev_responses=%d); inspect %s", segment, report.Decisions, report.JevResponses, traceDir)
+		if report.Decisions == 0 || report.JevResponses != 0 {
+			t.Fatalf("%s has invalid local decision evidence (decisions=%d jev_responses=%d); inspect %s", segment, report.Decisions, report.JevResponses, traceDir)
 		}
 		for _, row := range report.Timeline {
-			if row.Source != "jev" {
-				t.Fatalf("%s recorded non-Jev decision source %q for %s at tick %d; inspect %s", segment, row.Source, row.ActorID, row.Tick, traceDir)
+			if row.Source != "planning" && row.Source != "behavior_continued" && row.Source != "behavior_repaired" && row.Source != "behavior_habit" {
+				t.Fatalf("%s recorded unexpected decision source %q for %s at tick %d; inspect %s", segment, row.Source, row.ActorID, row.Tick, traceDir)
 			}
 		}
 		for _, f := range report.Findings {

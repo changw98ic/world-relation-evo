@@ -3,6 +3,7 @@ package optiongen
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -27,7 +28,7 @@ type ExpandConfig struct {
 }
 
 // ExpandWorld builds the complete dossier for each character in w, makes
-// exactly one DS request per character, and persists per-actor JSON plus
+// one DS request per character without a matching saved response, and persists per-actor JSON plus
 // summary.json and overview.md into cfg.OutDir.
 func ExpandWorld(ctx context.Context, w *sim.World, client Client, cfg ExpandConfig) (*WorldExpansionSummary, error) {
 	if w == nil {
@@ -41,6 +42,10 @@ func ExpandWorld(ctx context.Context, w *sim.World, client Client, cfg ExpandCon
 	}
 	if strings.TrimSpace(cfg.OutDir) == "" {
 		return nil, fmt.Errorf("output directory is required")
+	}
+	endpointURL, err := client.chatEndpoint()
+	if err != nil {
+		return nil, err
 	}
 
 	actorsDir := filepath.Join(cfg.OutDir, "actors")
@@ -64,6 +69,7 @@ func ExpandWorld(ctx context.Context, w *sim.World, client Client, cfg ExpandCon
 
 	started := time.Now().UTC()
 	records := make([]ActorExpansionRecord, len(targets))
+	requested := make([]bool, len(targets))
 	errs := make([]error, len(targets))
 
 	sem := make(chan struct{}, cfg.Concurrency)
@@ -76,18 +82,6 @@ func ExpandWorld(ctx context.Context, w *sim.World, client Client, cfg ExpandCon
 			defer wg.Done()
 
 			outPath := filepath.Join(actorsDir, a.ID+".json")
-			if cfg.Resume {
-				if existing, ok := loadExistingRecord(outPath, a.ID); ok {
-					records[idx] = existing
-					if cfg.Progress != nil {
-						logMu.Lock()
-						fmt.Fprintf(cfg.Progress, "[%d/%d] resumed %s (%s): %d options from %s\n",
-							idx+1, len(targets), a.ID, a.Name, len(existing.Catalog.Options), outPath)
-						logMu.Unlock()
-					}
-					return
-				}
-			}
 
 			select {
 			case sem <- struct{}{}:
@@ -103,13 +97,7 @@ func ExpandWorld(ctx context.Context, w *sim.World, client Client, cfg ExpandCon
 				return
 			}
 
-			if cfg.Progress != nil {
-				logMu.Lock()
-				fmt.Fprintf(cfg.Progress, "[%d/%d] requesting ds for %s (%s, %s)...\n", idx+1, len(targets), a.ID, a.Name, a.Role)
-				logMu.Unlock()
-			}
-
-			rec, err := client.ExpandActor(ctx, dossier)
+			rec, sent, err := client.expandActor(ctx, dossier, outPath, cfg.Resume)
 			if err != nil {
 				errs[idx] = err
 				if cfg.Progress != nil {
@@ -120,16 +108,17 @@ func ExpandWorld(ctx context.Context, w *sim.World, client Client, cfg ExpandCon
 				return
 			}
 
-			if err := writeJSONFile(outPath, rec); err != nil {
-				errs[idx] = err
-				return
-			}
 			records[idx] = rec
+			requested[idx] = sent
 
 			if cfg.Progress != nil {
+				status := "resumed"
+				if sent {
+					status = "generated"
+				}
 				logMu.Lock()
-				fmt.Fprintf(cfg.Progress, "[%d/%d] done %s (%s): %d options, %d tokens, %dms -> %s\n",
-					idx+1, len(targets), a.ID, a.Name, len(rec.Catalog.Options), rec.TotalTokens, rec.DurationMS, outPath)
+				fmt.Fprintf(cfg.Progress, "[%d/%d] %s %s (%s): %d options -> %s\n",
+					idx+1, len(targets), status, a.ID, a.Name, len(rec.Catalog.Options), outPath)
 				logMu.Unlock()
 			}
 		}(i, actor)
@@ -138,25 +127,29 @@ func ExpandWorld(ctx context.Context, w *sim.World, client Client, cfg ExpandCon
 
 	for i, err := range errs {
 		if err != nil {
-			return nil, fmt.Errorf("actor %s failed: %w", targets[i].ID, err)
+			errs[i] = fmt.Errorf("actor %s failed: %w", targets[i].ID, err)
 		}
 	}
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
 
-	endpointURL, _ := client.chatEndpoint()
 	summary := &WorldExpansionSummary{
-		WorldID:       w.ID,
-		PackPath:      cfg.PackPath,
-		HorizonDays:   cfg.HorizonDays,
-		Model:         client.Model,
-		Endpoint:      endpointURL,
-		StartedAt:     started,
-		CompletedAt:   time.Now().UTC(),
-		TotalActors:   len(targets),
-		TotalRequests: len(targets),
-		Actors:        make([]ActorExpansionBrief, 0, len(targets)),
+		WorldID:     w.ID,
+		PackPath:    cfg.PackPath,
+		HorizonDays: cfg.HorizonDays,
+		Model:       strings.TrimSpace(client.Model),
+		Endpoint:    endpointURL,
+		StartedAt:   started,
+		CompletedAt: time.Now().UTC(),
+		TotalActors: len(targets),
+		Actors:      make([]ActorExpansionBrief, 0, len(targets)),
 	}
 
 	for i, rec := range records {
+		if requested[i] {
+			summary.TotalRequests++
+		}
 		byCat := map[string]int{}
 		newPrimSet := map[string]struct{}{}
 		for _, opt := range rec.Catalog.Options {
@@ -200,25 +193,10 @@ func ExpandWorld(ctx context.Context, w *sim.World, client Client, cfg ExpandCon
 	return summary, nil
 }
 
-func loadExistingRecord(path, expectedActorID string) (ActorExpansionRecord, bool) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return ActorExpansionRecord{}, false
-	}
-	var rec ActorExpansionRecord
-	if err := json.Unmarshal(raw, &rec); err != nil {
-		return ActorExpansionRecord{}, false
-	}
-	if rec.ActorID != expectedActorID || len(rec.Catalog.Options) == 0 {
-		return ActorExpansionRecord{}, false
-	}
-	return rec, true
-}
-
 func writeJSONFile(path string, v any) error {
 	raw, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("encode %s: %w", path, err)
 	}
 	raw = append(raw, '\n')
 	return os.WriteFile(path, raw, 0o644)
@@ -228,9 +206,9 @@ func renderOverviewMarkdown(s *WorldExpansionSummary, records []ActorExpansionRe
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s — %d 天角色选项扩充总览\n\n", s.WorldID, s.HorizonDays)
 	fmt.Fprintf(&b, "- 模型：`%s`\n", s.Model)
-	fmt.Fprintf(&b, "- 角色数 / DS 请求数：`%d` / `%d`（每角色 1 次请求）\n", s.TotalActors, s.TotalRequests)
+	fmt.Fprintf(&b, "- 角色数 / 本次模型请求数：`%d` / `%d`\n", s.TotalActors, s.TotalRequests)
 	fmt.Fprintf(&b, "- 生成总选项数：`%d`\n", s.TotalOptions)
-	fmt.Fprintf(&b, "- 总 Token 消耗：`%d`\n\n", s.TotalTokens)
+	fmt.Fprintf(&b, "- 产物累计 Token：`%d`\n\n", s.TotalTokens)
 
 	b.WriteString("| 角色 ID | 角色名 | 身份 | 初始地点 | 选项数 | 耗时 (ms) | 建议新原语数 |\n")
 	b.WriteString("| --- | --- | --- | --- | ---: | ---: | ---: |\n")

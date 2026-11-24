@@ -6,9 +6,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/changw98ic/world-relation-evo/internal/agent"
@@ -79,8 +81,11 @@ func TestExpandWorldRulebook_MockDeepSeekAndAudit(t *testing.T) {
 	seenDomains := map[string]bool{}
 	seenCalibration := false
 	var promptLeak string
+	var invalidBehavior atomic.Bool
+	var calls atomic.Int64
 
 	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
 		body, _ := io.ReadAll(r.Body)
 		bodyStr := string(body)
 		mu.Lock()
@@ -248,6 +253,9 @@ func TestExpandWorldRulebook_MockDeepSeekAndAudit(t *testing.T) {
 				},
 			},
 		}
+		if invalidBehavior.Load() && domID == "trade_economy" {
+			payload.ProactiveRules[0].Behavior.EngineKind = "new_primitive:typo"
+		}
 		contentBytes, _ := json.Marshal(payload)
 		env := map[string]any{
 			"choices": []map[string]any{
@@ -322,5 +330,47 @@ func TestExpandWorldRulebook_MockDeepSeekAndAudit(t *testing.T) {
 	rawLoaded, _ := json.Marshal(loaded)
 	if strings.Contains(string(rawLoaded), "forbidden_hero_id") || strings.Contains(string(rawLoaded), "严禁硬编码名") {
 		t.Fatalf("saved rulebook.json still contained leaked actor identity!")
+	}
+	cfg := RulebookExpandConfig{OutDir: outDir, Resume: true}
+	resumed, _, err := ExpandWorldRulebook(context.Background(), w, client, cfg)
+	if err != nil || calls.Load() != 6 || resumed.TotalRequests != 0 || resumed.TotalProactiveRules != sum.TotalProactiveRules {
+		t.Fatalf("identical rulebook did not resume: calls=%d summary=%+v err=%v", calls.Load(), resumed, err)
+	}
+	otherWorld := *w
+	otherWorld.ID = "another-world"
+	if _, _, err := ExpandWorldRulebook(context.Background(), &otherWorld, client, cfg); err == nil ||
+		!strings.Contains(err.Error(), "does not match the current request") || !strings.Contains(err.Error(), "_trait_calibration.json") || calls.Load() != 6 {
+		t.Fatalf("different world accepted old rules or calibration: calls=%d err=%v", calls.Load(), err)
+	}
+	blockedOutput := t.TempDir()
+	for _, name := range []string{"_trait_calibration.json", "trade_economy.json"} {
+		if err := os.MkdirAll(filepath.Join(blockedOutput, "domains", name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, book, err := ExpandWorldRulebook(context.Background(), w, client, RulebookExpandConfig{OutDir: blockedOutput}); err == nil || book != nil ||
+		!strings.Contains(err.Error(), "_trait_calibration.json") || !strings.Contains(err.Error(), "trade_economy.json") {
+		t.Fatalf("raw output write errors were hidden: %v", err)
+	}
+
+	invalidBehavior.Store(true)
+	if _, _, err := ExpandWorldRulebook(context.Background(), w, client, RulebookExpandConfig{OutDir: t.TempDir(), Concurrency: 6}); err == nil || !strings.Contains(err.Error(), `unknown engine_kind "new_primitive:typo"`) {
+		t.Fatalf("expected generated unknown action to fail compilation, got %v", err)
+	}
+}
+
+func TestExpandRulebookDoesNotRetryUnauthorizedRequests(t *testing.T) {
+	w := sim.Village("unauthorized")
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		http.Error(rw, "invalid credentials", http.StatusUnauthorized)
+	}))
+	defer server.Close()
+	client := Client{Endpoint: server.URL, Model: "test"}
+	_, _, err := ExpandWorldRulebook(context.Background(), w, client, RulebookExpandConfig{OutDir: t.TempDir()})
+	want := int64(len(DefaultRulebookDomains(BuildWorldOntology(w))) + 1)
+	if err == nil || !strings.Contains(err.Error(), "http 401") || calls.Load() != want {
+		t.Fatalf("unauthorized generation: got %d requests, want %d, err=%v", calls.Load(), want, err)
 	}
 }

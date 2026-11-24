@@ -1,7 +1,6 @@
 package runtrace
 
 import (
-	"fmt"
 	"sort"
 
 	"github.com/changw98ic/world-relation-evo/internal/sim"
@@ -50,56 +49,19 @@ func ProjectWorldMetadata(w *sim.World) *WorldMetadataSnapshot {
 	snap.LedgerConserved = cons.LedgerConserved
 	snap.LedgerError = cons.LedgerError
 
-	mentorCount := map[string]int{}
-	grudgeCount := map[string]int{}
-	if w.Relations != nil {
-		for _, m := range w.Relations.Mentorships {
-			mentorCount[m.MentorID]++
-			mentorCount[m.ApprenticeID]++
-		}
-		for _, g := range w.Relations.Grudges {
-			if !g.Resolved {
-				grudgeCount[g.AggrievedID]++
-			}
-		}
-	}
-
 	actorsSorted := append([]sim.Actor(nil), w.Actors...)
 	sort.Slice(actorsSorted, func(i, j int) bool { return actorsSorted[i].ID < actorsSorted[j].ID })
 	for _, a := range actorsSorted {
-		var skillList []string
-		skKeys := make([]string, 0, len(a.Skills))
-		for k, lv := range a.Skills {
-			if lv > 0 {
-				skKeys = append(skKeys, k)
-			}
-		}
-		sort.Strings(skKeys)
-		for _, k := range skKeys {
-			skillList = append(skillList, fmt.Sprintf("%s:lv%d", k, a.Skills[k]))
-		}
-		var ambList []string
-		for _, amb := range a.Ambitions {
-			status := "active"
-			if amb.Completed {
-				status = "done"
-			}
-			ambList = append(ambList, fmt.Sprintf("%s(%s)", amb.Kind, status))
-		}
 		snap.Actors = append(snap.Actors, ActorBiography{
-			ID:              a.ID,
-			Name:            a.Name,
-			Role:            a.Role,
-			FormID:          w.Catalog.PerceivedFormID(a),
-			PowerTier:       w.Catalog.PerceivedPowerTier(a),
-			Alive:           !a.Dead,
-			DeathCause:      a.DeathCause,
-			DeathTick:       a.DeathTick,
-			Guilds:          append([]string(nil), a.Guilds...),
-			TopSkills:       skillList,
-			ActiveAmbitions: ambList,
-			MentorshipCount: mentorCount[a.ID],
-			ActiveGrudges:   grudgeCount[a.ID],
+			ID:         a.ID,
+			Name:       a.Name,
+			Role:       a.Role,
+			FormID:     w.Catalog.PerceivedFormID(a),
+			PowerTier:  w.Catalog.PerceivedPowerTier(a),
+			Alive:      !a.Dead,
+			DeathCause: a.DeathCause,
+			DeathTick:  a.DeathTick,
+			Guilds:     append([]string(nil), a.Guilds...),
 		})
 	}
 

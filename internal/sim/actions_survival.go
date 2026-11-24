@@ -14,10 +14,7 @@ func registerSurvivalActions() {
 	registerBuiltinAction("heal", handleHealAction)
 }
 
-func handleWaitAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
-	if a.Energy < MaxEnergy {
-		tx.setEnergy(a, a.Energy+1, x.Kind)
-	}
+func handleWaitAction(*WorldTx, *Actor, *Actor, Action) []Event {
 	return nil
 }
 
@@ -73,16 +70,7 @@ func handleEatAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
 	w := tx.World
 	itemID := x.Item
 	if itemID == "" {
-		for k, spec := range w.Catalog.Items {
-			if w.Catalog.ActorAcceptsFood(*a, spec) && a.Items[k] > 0 {
-				if itemID == "" || spec.NutritionUnits > w.Catalog.Items[itemID].NutritionUnits || spec.NutritionUnits == w.Catalog.Items[itemID].NutritionUnits && k < itemID {
-					itemID = k
-				}
-			}
-		}
-		if itemID == "" {
-			itemID = "food"
-		}
+		itemID = bestHeldFood(w.Catalog, *a)
 		x.Item = itemID
 	}
 	spec, ok := w.Catalog.Items[itemID]
@@ -100,6 +88,20 @@ func handleEatAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
 	}
 	w.consumeHeldFood(tx, a, itemID)
 	return actionEmit(tx, a, x, "ate", fmt.Sprintf("%s ate 1 %s", a.Name, itemID))
+}
+
+func bestHeldFood(catalog Catalog, a Actor) string {
+	var best string
+	for id, spec := range catalog.Items {
+		if a.Items[id] <= 0 || !catalog.ActorAcceptsFood(a, spec) {
+			continue
+		}
+		if best == "" || spec.NutritionUnits > catalog.Items[best].NutritionUnits ||
+			spec.NutritionUnits == catalog.Items[best].NutritionUnits && id < best {
+			best = id
+		}
+	}
+	return best
 }
 
 func handleDrinkAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
@@ -128,11 +130,7 @@ func handleDrinkAction(tx *WorldTx, a, _ *Actor, x Action) []Event {
 		return actionFail(tx, a, x, "no "+itemID)
 	}
 	tx.ProduceOrConsumeItem(a, itemID, -1, x.Kind)
-	relief := spec.ThirstRelief
-	if relief <= 0 {
-		relief = 2
-	}
-	a.Thirst -= relief
+	a.Thirst -= spec.DrinkingRelief()
 	if a.Thirst < 0 {
 		a.Thirst = 0
 	}

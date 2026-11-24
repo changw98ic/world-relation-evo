@@ -25,7 +25,7 @@ func runExpandRulebook(args []string, stdout, stderr io.Writer) error {
 	worldID := fs.String("world", "village-30", "world ID when not using -pack")
 	outDir := fs.String("out", "", "output directory for generic rulebook.json and domain audit files (defaults to .artifacts/rulebook-<world>-<timestamp>)")
 	concurrency := fs.Int("concurrency", 6, "maximum concurrent DS domain and trait calibration requests")
-	resume := fs.Bool("resume", false, "reuse valid existing domains/<domain>.json files in -out without re-calling DS")
+	resume := fs.Bool("resume", false, "reuse saved domain and calibration responses only when the model request matches")
 	maxTokens := fs.Int("max-tokens", 32768, "max_tokens per DS domain request")
 	reasoningEffort := fs.String("reasoning-effort", "low", "optional reasoning_effort hint for reasoning models")
 	modelURL := fs.String("model-url", "", "override WRE_MODEL_URL")

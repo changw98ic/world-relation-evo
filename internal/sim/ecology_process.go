@@ -334,7 +334,7 @@ func (w *World) ecologyExpectedCount64(population, numerator, denominator int64,
 	}
 	n := population * numerator
 	count := n / denominator
-	if rem := n % denominator; rem > 0 && int64(worldHash(w.ID, w.Tick, salt)%uint64(denominator)) < rem {
+	if rem := n % denominator; rem > 0 && int64(w.settlementRandom(w.Tick, salt)%uint64(denominator)) < rem {
 		count++
 	}
 	return count
@@ -370,7 +370,7 @@ func (w *World) applyEcologyActorExposure(a *Actor, wn, dn, denominator int64, d
 	}
 	dn = min(dn, denominator)
 	wn = min(wn, denominator-dn)
-	roll := int64(worldHash(w.ID, w.Tick, salt+":"+a.ID) % uint64(denominator))
+	roll := int64(w.settlementRandom(w.Tick, salt+":"+a.ID) % uint64(denominator))
 	if roll < dn {
 		setActorHealthBounded(a, 0, 0)
 		return 0, 1, w.markDeadIfZero(a, nil, Action{Kind: "wait"}, cause, source...)
@@ -382,7 +382,7 @@ func (w *World) applyEcologyActorExposure(a *Actor, wn, dn, denominator int64, d
 		data := map[string]any{"text": "environmental exposure injured " + a.Name,
 			"cause": cause, "previous_health": previousHealth, "health": a.Health}
 		if len(source) > 0 {
-			data["root_event_id"] = payloadInt64(source[0].Payload, "root_event_id")
+			data["root_event_id"] = source[0].causalRoot()
 			data["cause_event_id"] = source[0].ID
 		}
 		injury := w.record(a, Action{Kind: "wait"}, "actor_environment_injured", data)

@@ -63,6 +63,7 @@ func TestP5LODPinningBarrierImmunityWorldEventShockAndHydrateConservation(t *tes
 		{Origin: "cohort_militia", First: 2, Count: 99, Health: MaxHealth, Items: map[string]int{"food": 2}},
 	}
 	w.Cohorts[1].Wounded = 1
+	w.Cohorts[1].ItemPool = map[string]int64{"food": 100}
 	w.InitLedgerAudit()
 
 	// Low-tier attacker (tier 1) vs nascent_soul cohort (tier 4) => immune!
@@ -96,8 +97,8 @@ func TestP5LODPinningBarrierImmunityWorldEventShockAndHydrateConservation(t *tes
 	if hydrated.Health != MaxHealth {
 		t.Fatalf("expected HydrateActor to pop healthy resident (HP %d), got HP %d", MaxHealth, hydrated.Health)
 	}
-	if hydrated.Items["food"] < 2 {
-		t.Fatalf("expected HydrateActor to preserve ResidentBand.Items (food>=2), got %v", hydrated.Items)
+	if hydrated.Items["food"] != 3 {
+		t.Fatalf("expected HydrateActor to add resident and pool food (2+1), got %v", hydrated.Items)
 	}
 	if w.Cohorts[1].Wounded != 1 {
 		t.Fatalf("expected cohort Wounded count to remain 1, got %d", w.Cohorts[1].Wounded)
@@ -181,5 +182,32 @@ func TestBlock3LODGenreNeutralConflictsImmortalCohortStateSlotsAndGini(t *testin
 	// 4. Ledger conservation holds after genre-neutral conflict & payroll.
 	if err := w.VerifyLedgerConservation(); err != nil {
 		t.Fatalf("ledger conservation failed in Block 3: %v", err)
+	}
+}
+
+func TestQuakeStrikesStoredActorsWithoutExposingDistantTerrain(t *testing.T) {
+	w := Village("earthquake-shock")
+	active := &w.Actors[0]
+	active.Location, active.VenueID, active.InsideHouse = "market_street", "", ""
+	active.Health = MaxHealth
+	distant := &w.Actors[1]
+	distant.Location, distant.VenueID, distant.InsideHouse = "crossroads", "", ""
+	stored := Actor{ID: "stored", Location: active.Location, Health: MaxHealth, Energy: MaxEnergy}
+	w.Cohorts = []PopulationCohort{{ID: "members", District: active.Location, Population: 1, Adults: 1, Members: []Actor{stored}}}
+	if err := w.InitCohortResidents(); err != nil {
+		t.Fatal(err)
+	}
+	w.Catalog.WorldEvents = []WorldEventSpec{{
+		ID: "quake", Category: "terrain_shift", DurationTicks: 8, Intensity: 20,
+		CasualtyPermille: 1000, Damage: 15, AddFeatures: []string{"rift"}, SeverMedium: "road",
+	}}
+	roads := len(w.View(distant.ID).Roads)
+	w.TriggerWorldEvent("quake", active.Location)
+	if active.Health >= MaxHealth || len(w.Cohorts[0].Members) != 1 || w.Cohorts[0].Members[0].Health >= MaxHealth {
+		t.Fatalf("shock missed an exact actor: active=%d stored=%+v", active.Health, w.Cohorts[0].Members)
+	}
+	view := w.View(distant.ID)
+	if len(view.ActiveWorldEvents) != 0 || len(view.Roads) != roads || view.Map.DistrictHasFeature(active.Location, "rift") {
+		t.Fatal("distant actor perceived the hidden event, route closure, or terrain feature")
 	}
 }

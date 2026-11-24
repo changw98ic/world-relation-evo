@@ -35,8 +35,10 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) Init(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, schema)
-	return err
+	if _, err := s.db.ExecContext(ctx, schema); err != nil {
+		return fmt.Errorf("initialize PostgreSQL schema: %w", err)
+	}
+	return nil
 }
 
 // Lock reserves a world for one runner. The lock belongs to this dedicated
@@ -72,7 +74,17 @@ func (s *Store) Lock(ctx context.Context, id string) (func(), error) {
 
 func (s *Store) Load(ctx context.Context, id string) (*sim.World, error) {
 	var data []byte
-	if err := s.db.QueryRowContext(ctx, `SELECT state FROM worlds WHERE id=$1`, id).Scan(&data); err != nil {
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT w.state || jsonb_build_object('actors', COALESCE((
+		    SELECT jsonb_agg(e.state ORDER BY ordinal) FROM world_entities e
+		    WHERE e.world_id=w.id AND e.kind='actor'
+		), w.state->'actors', 'null'::jsonb))
+		|| COALESCE((
+		    SELECT jsonb_build_object('cohorts', jsonb_agg(e.state ORDER BY ordinal))
+		    FROM world_entities e WHERE e.world_id=w.id AND e.kind='cohort'
+		    HAVING COUNT(*) > 0
+		), '{}'::jsonb)
+		FROM worlds w WHERE w.id=$1`, id).Scan(&data); err != nil {
 		return nil, err
 	}
 	w, err := sim.DecodeWorldSnapshot(data)
@@ -95,7 +107,20 @@ func (s *Store) SaveTick(ctx context.Context, w *sim.World, events []sim.Event, 
 	if w == nil {
 		return fmt.Errorf("world is nil")
 	}
-	state, err := json.Marshal(w)
+	shell := *w
+	if w.Actors != nil {
+		shell.Actors = []sim.Actor{}
+	}
+	shell.Cohorts = nil
+	state, err := json.Marshal(&shell)
+	if err != nil {
+		return err
+	}
+	actors, err := json.Marshal(w.Actors)
+	if err != nil {
+		return err
+	}
+	cohorts, err := json.Marshal(w.Cohorts)
 	if err != nil {
 		return err
 	}
@@ -107,6 +132,25 @@ func (s *Store) SaveTick(ctx context.Context, w *sim.World, events []sim.Event, 
 	if _, err := tx.ExecContext(ctx, `INSERT INTO worlds (id,tick,state) VALUES ($1,$2,$3)
         ON CONFLICT (id) DO UPDATE SET tick=EXCLUDED.tick,state=EXCLUDED.state,updated_at=now()`, w.ID, w.Tick, string(state)); err != nil {
 		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		WITH input AS (
+		    SELECT sources.kind, entity.state->>'id' AS entity_id, entity.ordinal, entity.state
+		    FROM (VALUES ('actor', $2::jsonb), ('cohort', $3::jsonb)) sources(kind, entities)
+		    CROSS JOIN LATERAL jsonb_array_elements(
+		        CASE WHEN sources.entities = 'null'::jsonb THEN '[]'::jsonb ELSE sources.entities END
+		    ) WITH ORDINALITY entity(state, ordinal)
+		), removed AS (
+		    DELETE FROM world_entities old WHERE old.world_id=$1 AND NOT EXISTS (
+		        SELECT 1 FROM input WHERE input.kind=old.kind AND input.entity_id=old.entity_id
+		    )
+		)
+		INSERT INTO world_entities (world_id, kind, entity_id, ordinal, state)
+		SELECT $1, kind, entity_id, ordinal, state FROM input
+		ON CONFLICT (world_id, kind, entity_id) DO UPDATE SET ordinal=EXCLUDED.ordinal, state=EXCLUDED.state
+		WHERE world_entities.ordinal IS DISTINCT FROM EXCLUDED.ordinal OR world_entities.state IS DISTINCT FROM EXCLUDED.state`,
+		w.ID, string(actors), string(cohorts)); err != nil {
+		return fmt.Errorf("persist entities for world %q: %w", w.ID, err)
 	}
 	const batchSize = 200
 	for start := 0; start < len(events); start += batchSize {
@@ -152,11 +196,15 @@ func (s *Store) SaveTick(ctx context.Context, w *sim.World, events []sim.Event, 
 		}
 	}
 	if saveCheckpoint {
+		full, err := json.Marshal(w)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO world_checkpoints (world_id, tick, state, created_at)
 			VALUES ($1, $2, $3::jsonb, now())
 			ON CONFLICT (world_id, tick) DO UPDATE
-			SET state = EXCLUDED.state, created_at = now()`, w.ID, w.Tick, string(state)); err != nil {
+			SET state = EXCLUDED.state, created_at = now()`, w.ID, w.Tick, string(full)); err != nil {
 			return err
 		}
 	}
@@ -270,7 +318,8 @@ func (s *Store) LoadEvents(ctx context.Context, worldID string, fromTick, toTick
 			}
 		}
 		if len(payloadRaw) > 0 {
-			if err := json.Unmarshal(payloadRaw, &ev.Payload); err != nil {
+			ev.Payload, err = sim.DecodeEventPayload(payloadRaw)
+			if err != nil {
 				return nil, fmt.Errorf("unmarshal event %d payload: %w", ev.ID, err)
 			}
 		}

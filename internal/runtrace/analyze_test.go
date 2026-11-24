@@ -144,7 +144,7 @@ func TestTraceReviewAcceptsZeroDeliveryThatRetainsPaidCredit(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, finding := range report.Findings {
-		if finding.Rule == "zero_output" {
+		if finding.Rule == "zero_output" || finding.Rule == "production_evidence" {
 			t.Fatalf("retained funded fraction was treated as discarded output: %+v", finding)
 		}
 	}

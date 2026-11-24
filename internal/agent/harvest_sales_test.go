@@ -39,6 +39,7 @@ func TestNextCropIsPlantedWhileExistingHarvestIsBeingSold(t *testing.T) {
 	a.Location, a.InsideHouse = "south_fields", ""
 	a.Health, a.Energy, a.Hunger = 100, 100, 0
 	a.Items = map[string]int{"food": 1080, "seeds": 1, "water": 1}
+	a.NeedWeights = map[string]float64{"progress": 4}
 	a.Plan = &sim.PersonalPlan{RecipeID: "farm_grain", Item: "food", Quantity: 1200, Status: "active"}
 	w.Growth = nil
 	selected, err := Offline().Decide(context.Background(), w.View(a.ID))

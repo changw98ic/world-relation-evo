@@ -2,16 +2,13 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/changw98ic/world-relation-evo/internal/sim"
 )
 
-func TestActivePersonalPlanUnlocksSubThresholdOfferAndExposesJevDirective(t *testing.T) {
+func TestActivePersonalPlanUnlocksSubThresholdOffer(t *testing.T) {
 	w := boundaryWorld()
 	spec := w.Catalog.Items["plank"]
 	spec.BatchQty = 2
@@ -50,44 +47,8 @@ func TestActivePersonalPlanUnlocksSubThresholdOfferAndExposesJevDirective(t *tes
 		t.Fatalf("expected active plan in sell stage to generate offer option below OfferThreshold")
 	}
 
-	// Verify Jev receives state.active_plan, directive instructions, and marked criteria.
-	var capturedState sim.Perception
-	var capturedInstructions string
-	var capturedCriteria map[string]string
-	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		var payload struct {
-			State     sim.Perception `json:"state"`
-			Questions map[string]struct {
-				Instructions string            `json:"instructions"`
-				Criteria     map[string]string `json:"criteria"`
-			} `json:"questions"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Error(err)
-			rw.WriteHeader(400)
-			return
-		}
-		capturedState = payload.State
-		capturedInstructions = payload.Questions["decision"].Instructions
-		capturedCriteria = payload.Questions["decision"].Criteria
-		_ = json.NewEncoder(rw).Encode(map[string]any{
-			"answers": map[string]any{"decision": map[string]string{"type": "choice", "choice": offerID}},
-		})
-	}))
-	defer server.Close()
-
-	chosen, err := (Jev{Endpoint: server.URL, APIKey: "fixture", Client: server.Client()}).Select(context.Background(), view, opts)
-	if err != nil || chosen != offerID {
-		t.Fatalf("Jev.Select failed: chosen=%q err=%v", chosen, err)
-	}
-	if capturedState.ActivePlan == nil || capturedState.ActivePlan.Stage != "sell" || capturedState.ActivePlan.RemainingToSell != 2 {
-		t.Fatalf("Jev state missing active_plan directive: %+v", capturedState.ActivePlan)
-	}
-	if !strings.Contains(capturedInstructions, "Active plan directive: stage=sell item=plank") {
-		t.Fatalf("Jev instructions missing active plan summary: %q", capturedInstructions)
-	}
-	if !strings.Contains(capturedCriteria[offerID], "[active plan sale") {
-		t.Fatalf("Jev criteria missing active plan marker: %q", capturedCriteria[offerID])
+	if view.ActivePlan == nil || view.ActivePlan.Stage != "sell" || view.ActivePlan.RemainingToSell != 2 {
+		t.Fatalf("the observed plan does not describe the pending sale: %+v", view.ActivePlan)
 	}
 }
 

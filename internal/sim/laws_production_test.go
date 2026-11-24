@@ -14,8 +14,8 @@ func TestLawProductionMaterialAndWorkPrecedeOutput(t *testing.T) {
 			a := &w.Actors[0]
 			a.Items["wood"], a.Professions["worker"] = 3, skill
 			lawOK(t, w.Apply("a", Action{Kind: "craft", RecipeID: "board"}))
-			if a.Items["wood"] != 0 || a.Energy != 96 || a.Items["board"] != 0 || a.Task == nil {
-				t.Fatalf("start must pay three wood/four energy without finished output: %+v", a)
+			if a.Items["wood"] != 0 || a.Energy != 98 || a.Items["board"] != 0 || a.Task == nil {
+				t.Fatalf("start must pay for three wood and one work interval: %+v", a)
 			}
 			w.Tick++
 			lawOK(t, w.Advance("a"))
@@ -53,7 +53,7 @@ func TestLawProductionShortageHasNoPartialPayment(t *testing.T) {
 			}
 			a.Items["wood"], a.Energy = 3, 4
 			lawOK(t, w.Apply("a", Action{Kind: "craft", RecipeID: "board"}))
-			if a.Items["wood"] != 0 || a.Energy != 0 || a.Task == nil {
+			if a.Items["wood"] != 0 || a.Energy != 2 || a.Task == nil {
 				t.Fatal("exact declared inputs and energy must start the job")
 			}
 		})
@@ -80,7 +80,7 @@ func TestLawProductionWorkstationIsExclusiveAndPowerPausePreservesMaterials(t *t
 		w.Tick++
 		w.Advance("a")
 	}
-	if w.Actors[0].Task == nil || w.Actors[0].Task.Remaining != 2 || w.Actors[0].Items["board"] != 0 || w.Actors[0].Items["wood"] != 0 {
+	if w.Actors[0].Task == nil || w.Actors[0].Task.Remaining != 2 || w.Actors[0].Items["board"] != 0 || w.Actors[0].Items["wood"] != 0 || w.Actors[0].Energy != 98 {
 		t.Fatal("unpowered work progressed or prepaid materials changed")
 	}
 	w.FlowGrid.Nodes[0].Powered = true
@@ -88,7 +88,7 @@ func TestLawProductionWorkstationIsExclusiveAndPowerPausePreservesMaterials(t *t
 		w.Tick++
 		lawOK(t, w.Advance("a"))
 	}
-	if w.Actors[0].Items["board"] != 1 {
+	if w.Actors[0].Items["board"] != 1 || w.Actors[0].Energy != 96 {
 		t.Fatal("restored power failed to complete paid work")
 	}
 	lawOK(t, w.Apply("b", Action{Kind: "craft", RecipeID: "board"}))
@@ -135,7 +135,7 @@ func TestLawProductionScarceYieldKeepsTheFundedFraction(t *testing.T) {
 	}
 	started := w.Apply("a", Action{Kind: "craft", RecipeID: "draw"})
 	lawOK(t, started)
-	if started[0].Payload["expected_yield"] != 0 || w.Actors[0].Items["water"] != 0 || w.DistrictStates["home"].Resources["freshwater"] != 19 || w.Actors[0].Energy != 95 {
+	if started[0].Payload["expected_yield"] != 0 || w.Actors[0].Items["water"] != 0 || w.DistrictStates["home"].Resources["freshwater"] != 19 || w.Actors[0].Energy != 97 {
 		t.Fatalf("start paid the resource and energy but published a different expectation: %+v energy=%d", started, w.Actors[0].Energy)
 	}
 	if w.yieldCredit("actor", "a", "draw") != 0 || w.Actors[0].Task.FundedHundredths != 80 {
@@ -190,8 +190,13 @@ func TestLawProductionScarceYieldKeepsTheFundedFraction(t *testing.T) {
 	exact := lawEnvDrawWorld(1, 100)
 	exact.Actors[0].Energy = 5
 	lawOK(t, exact.Apply("a", Action{Kind: "craft", RecipeID: "draw"}))
-	if exact.Actors[0].Energy != 0 || exact.DistrictStates["home"].Resources["freshwater"] != 0 || exact.Actors[0].Task == nil {
+	if exact.Actors[0].Energy != 2 || exact.DistrictStates["home"].Resources["freshwater"] != 0 || exact.Actors[0].Task == nil {
 		t.Fatal("exact declared resource and energy were refused")
+	}
+	exact.Tick++
+	lawOK(t, exact.Advance("a"))
+	if exact.Actors[0].Energy != 0 || exact.Actors[0].Items["water"] != 2 {
+		t.Fatal("the exact remaining energy did not complete the funded work")
 	}
 
 	boosted := lawEnvDrawWorld(80, 100)

@@ -110,6 +110,7 @@ type Profession struct {
 	YieldEvery             int            `json:"yield_every,omitempty"`
 	BaseYieldBonus         int            `json:"base_yield_bonus,omitempty"`
 	CombatBonusPerLevel    int            `json:"combat_bonus_per_level,omitempty"`
+	PracticeSlot           string         `json:"practice_slot,omitempty"`
 	StealthBonusPerLevel   int            `json:"stealth_bonus_per_level,omitempty"`
 	VigilanceBonusPerLevel int            `json:"vigilance_bonus_per_level,omitempty"`
 	ExtortionBonusPerLevel int            `json:"extortion_bonus_per_level,omitempty"`
@@ -232,6 +233,8 @@ type TagProfile struct {
 
 // Catalog holds all declarative rules for capabilities, items, professions, recipes, ecology, logistics, rituals, and lifecycle.
 type Catalog struct {
+	Planning               *PlanningRules                `json:"planning,omitempty"`
+	WorkOrders             []WorkOrder                   `json:"work_orders,omitempty"`
 	HouseWear              *HouseWearRule                `json:"house_wear,omitempty"`
 	Production             ProductionSpec                `json:"production"`
 	TagActions             map[string][]string           `json:"tag_actions"`
@@ -956,6 +959,12 @@ func (c Catalog) Capabilities(a Actor) map[string]bool {
 	if result["move"] {
 		result["move_venue"] = true
 	}
+	if result["accept"] {
+		result["market_buy"] = true
+	}
+	if result["offer"] {
+		result["market_sell"] = true
+	}
 	for _, execTag := range []string{"ruler", "governor", "magistrate", "commander", "polity_leader"} {
 		if ActorHasTag(idTags, execTag) {
 			result["issue_decree"] = true
@@ -1215,6 +1224,12 @@ func (c Catalog) CraftXP(r Recipe) int {
 	return tier * ticks
 }
 
+// TradeExperience returns the peddler experience and guild influence from a settled lot.
+func (c Catalog) TradeExperience(item string, quantity int) (xp, influence int) {
+	influence = max(1, c.Items[item].Tier)
+	return influence * quantity, influence
+}
+
 // SalePrice returns the asking price for a batch, raised by merchant profession levels and advanced merchant rank.
 func (c Catalog) SalePrice(a Actor, itemID string) int {
 	spec, ok := c.Items[itemID]
@@ -1296,6 +1311,8 @@ func (c Catalog) DesiredStock(tags []string, item string) int {
 
 func CloneCatalog(c Catalog) Catalog {
 	out := Catalog{
+		Planning:               clonePlanningRules(c.Planning),
+		WorkOrders:             append([]WorkOrder(nil), c.WorkOrders...),
 		Production:             c.Production,
 		TagActions:             make(map[string][]string, len(c.TagActions)),
 		Items:                  make(map[string]ItemSpec, len(c.Items)),

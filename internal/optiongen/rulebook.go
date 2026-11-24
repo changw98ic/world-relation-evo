@@ -1,13 +1,12 @@
 package optiongen
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -94,31 +93,17 @@ type TraitCalibrationOutput struct {
 
 // TraitCalibrationRecord stores the full offline audit trail for the global trait calibration request.
 type TraitCalibrationRecord struct {
-	WorldID          string                 `json:"world_id"`
-	Model            string                 `json:"model"`
-	Endpoint         string                 `json:"endpoint"`
-	RequestedAt      time.Time              `json:"requested_at"`
-	DurationMS       int64                  `json:"duration_ms"`
-	PromptTokens     int                    `json:"prompt_tokens,omitempty"`
-	CompletionTokens int                    `json:"completion_tokens,omitempty"`
-	TotalTokens      int                    `json:"total_tokens,omitempty"`
-	Output           TraitCalibrationOutput `json:"output"`
-	RawResponse      string                 `json:"raw_response"`
+	generationOutput
+	WorldID string                 `json:"world_id"`
+	Output  TraitCalibrationOutput `json:"output"`
 }
 
 // DomainRulebookRecord stores the full offline synthesis audit trail for one domain.
 type DomainRulebookRecord struct {
-	WorldID          string               `json:"world_id"`
-	Domain           RulebookDomainSpec   `json:"domain"`
-	Model            string               `json:"model"`
-	Endpoint         string               `json:"endpoint"`
-	RequestedAt      time.Time            `json:"requested_at"`
-	DurationMS       int64                `json:"duration_ms"`
-	PromptTokens     int                  `json:"prompt_tokens,omitempty"`
-	CompletionTokens int                  `json:"completion_tokens,omitempty"`
-	TotalTokens      int                  `json:"total_tokens,omitempty"`
-	Output           DomainRulebookOutput `json:"output"`
-	RawResponse      string               `json:"raw_response"`
+	generationOutput
+	WorldID string               `json:"world_id"`
+	Domain  RulebookDomainSpec   `json:"domain"`
+	Output  DomainRulebookOutput `json:"output"`
 }
 
 // RulebookAuditReport records programmatic safety & generality checks on the generated rulebook.
@@ -878,28 +863,7 @@ func BuildTraitCalibrationSystemPrompt(ont WorldOntology) string {
 	)
 }
 
-// GenerateTraitCalibration sends ONE anonymized DeepSeek request to calibrate all personality
-// stance weights, 4-channel event encounter modifiers, and hobby action weights for the world.
-func (c Client) GenerateTraitCalibration(ctx context.Context, ont WorldOntology) (TraitCalibrationRecord, error) {
-	url, err := c.chatEndpoint()
-	if err != nil {
-		return TraitCalibrationRecord{}, err
-	}
-	model := strings.TrimSpace(c.Model)
-	if model == "" {
-		return TraitCalibrationRecord{}, fmt.Errorf("optiongen: model is required")
-	}
-
-	maxTokens := c.MaxTokens
-	if maxTokens <= 0 {
-		maxTokens = 32768
-	}
-	temp := c.Temperature
-	if temp <= 0 {
-		temp = 0.3
-	}
-
-	sysPrompt := BuildTraitCalibrationSystemPrompt(ont)
+func (c Client) generateTraitCalibration(ctx context.Context, ont WorldOntology, path string, resume bool) (TraitCalibrationRecord, bool, error) {
 	userPayload := map[string]any{
 		"world_id":               ont.WorldID,
 		"theme":                  ont.Environment.Theme,
@@ -911,106 +875,28 @@ func (c Client) GenerateTraitCalibration(ctx context.Context, ont WorldOntology)
 		"allowed_engine_actions": ont.AllowedEngineActions,
 		"stances":                DefaultReactionStances,
 	}
-	rawUser, _ := json.Marshal(userPayload)
-	userPrompt := fmt.Sprintf("请根据以下匿名世界词表（不含任何具体人物姓名与ID），为全部 %d 个性格词与 %d 个爱好生成完整的 trait_calibration JSON：\n\n%s",
-		len(ont.PersonalityTraits), len(ont.Hobbies), string(rawUser))
-
-	reqBody := map[string]any{
-		"model": model,
-		"messages": []map[string]string{
-			{"role": "system", "content": sysPrompt},
-			{"role": "user", "content": userPrompt},
-		},
-		"temperature":     temp,
-		"max_tokens":      maxTokens,
-		"response_format": map[string]string{"type": "json_object"},
-	}
-	if effort := strings.TrimSpace(c.ReasoningEffort); effort != "" {
-		reqBody["reasoning_effort"] = effort
-	}
-	rawReq, err := json.Marshal(reqBody)
+	rawUser, err := json.Marshal(userPayload)
 	if err != nil {
-		return TraitCalibrationRecord{}, err
+		return TraitCalibrationRecord{}, false, fmt.Errorf("marshal trait glossary: %w", err)
 	}
-
-	httpClient := c.HTTPClient
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 10 * time.Minute}
+	prompt := generationPrompt{
+		system: BuildTraitCalibrationSystemPrompt(ont),
+		user: fmt.Sprintf("请根据以下匿名世界词表（不含任何具体人物姓名与ID），为全部 %d 个性格词与 %d 个爱好生成完整的 trait_calibration JSON：\n\n%s",
+			len(ont.PersonalityTraits), len(ont.Hobbies), rawUser),
+		maxTokens:   32768,
+		temperature: 0.3,
 	}
-
-	started := time.Now().UTC()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(rawReq))
-	if err != nil {
-		return TraitCalibrationRecord{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if strings.TrimSpace(c.APIKey) != "" {
-		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(c.APIKey))
-	}
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return TraitCalibrationRecord{}, fmt.Errorf("request ds for trait_calibration: %w", err)
-	}
-	defer resp.Body.Close()
-
-	rawResp, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return TraitCalibrationRecord{}, fmt.Errorf("read ds response for trait_calibration: %w", err)
-	}
-	durationMS := time.Since(started).Milliseconds()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		snippet := string(rawResp)
-		if len(snippet) > 400 {
-			snippet = snippet[:400] + "..."
+	return generateRecord(ctx, c, path, resume, prompt, func(out generationOutput) (TraitCalibrationRecord, error) {
+		calibration, err := decodeTraitCalibrationOutput(out.RawResponse)
+		if err != nil {
+			return TraitCalibrationRecord{}, err
 		}
-		return TraitCalibrationRecord{}, fmt.Errorf("ds http %d for trait_calibration: %s", resp.StatusCode, snippet)
-	}
-
-	var envelope struct {
-		Choices []struct {
-			FinishReason string `json:"finish_reason"`
-			Message      struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-		Usage struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
-		} `json:"usage"`
-	}
-	if err := json.Unmarshal(rawResp, &envelope); err != nil {
-		return TraitCalibrationRecord{}, fmt.Errorf("decode ds envelope for trait_calibration: %w", err)
-	}
-	if len(envelope.Choices) == 0 {
-		return TraitCalibrationRecord{}, fmt.Errorf("ds returned empty choices for trait_calibration")
-	}
-
-	content := envelope.Choices[0].Message.Content
-	out, err := decodeTraitCalibrationOutput(content)
-	if err != nil {
-		tail := content
-		if len(tail) > 240 {
-			tail = "..." + tail[len(tail)-240:]
-		}
-		return TraitCalibrationRecord{}, fmt.Errorf("parse ds trait_calibration (finish_reason=%s len=%d): %w | tail=%q",
-			envelope.Choices[0].FinishReason, len(content), err, tail)
-	}
-
-	return TraitCalibrationRecord{
-		WorldID:          ont.WorldID,
-		Model:            model,
-		Endpoint:         url,
-		RequestedAt:      started,
-		DurationMS:       durationMS,
-		PromptTokens:     envelope.Usage.PromptTokens,
-		CompletionTokens: envelope.Usage.CompletionTokens,
-		TotalTokens:      envelope.Usage.TotalTokens,
-		Output:           out,
-		RawResponse:      content,
-	}, nil
+		return TraitCalibrationRecord{
+			generationOutput: out,
+			WorldID:          ont.WorldID,
+			Output:           calibration,
+		}, nil
+	})
 }
 
 func decodeTraitCalibrationOutput(raw string) (TraitCalibrationOutput, error) {
@@ -1025,134 +911,32 @@ func decodeTraitCalibrationOutput(raw string) (TraitCalibrationOutput, error) {
 	return out, nil
 }
 
-// GenerateDomainRules sends ONE DeepSeek request for one generic interaction domain using ONLY anonymized WorldOntology.
-func (c Client) GenerateDomainRules(ctx context.Context, ont WorldOntology, domain RulebookDomainSpec) (DomainRulebookRecord, error) {
-	url, err := c.chatEndpoint()
-	if err != nil {
-		return DomainRulebookRecord{}, err
-	}
-	model := strings.TrimSpace(c.Model)
-	if model == "" {
-		return DomainRulebookRecord{}, fmt.Errorf("optiongen: model is required")
-	}
-
+func (c Client) generateDomainRules(ctx context.Context, ont WorldOntology, domain RulebookDomainSpec, path string, resume bool) (DomainRulebookRecord, bool, error) {
 	ontJSON, err := json.Marshal(ont)
 	if err != nil {
-		return DomainRulebookRecord{}, fmt.Errorf("marshal world ontology: %w", err)
+		return DomainRulebookRecord{}, false, fmt.Errorf("marshal world ontology: %w", err)
 	}
-
-	maxTokens := c.MaxTokens
-	if maxTokens <= 0 {
-		maxTokens = 32768
+	prompt := generationPrompt{
+		system: BuildRulebookSystemPrompt(ont, domain),
+		user: fmt.Sprintf(
+			"以下是当前世界的匿名本体结构（仅包含职业原型、标签、能力、地点特征与词表，不包含任何具体人物姓名与ID）。请为领域「%s」（%s）生成 100%% 通用的 proactive_rules 与 reaction_rules JSON：\n\n%s",
+			domain.Title, domain.ID, ontJSON,
+		),
+		maxTokens:   32768,
+		temperature: 0.35,
 	}
-	temp := c.Temperature
-	if temp <= 0 {
-		temp = 0.35
-	}
-
-	sysPrompt := BuildRulebookSystemPrompt(ont, domain)
-	userPrompt := fmt.Sprintf(
-		"以下是当前世界的匿名本体结构（仅包含职业原型、标签、能力、地点特征与词表，不包含任何具体人物姓名与ID）。请为领域「%s」（%s）生成 100%% 通用的 proactive_rules 与 reaction_rules JSON：\n\n%s",
-		domain.Title, domain.ID, string(ontJSON),
-	)
-
-	reqBody := map[string]any{
-		"model": model,
-		"messages": []map[string]string{
-			{"role": "system", "content": sysPrompt},
-			{"role": "user", "content": userPrompt},
-		},
-		"temperature":     temp,
-		"max_tokens":      maxTokens,
-		"response_format": map[string]string{"type": "json_object"},
-	}
-	if effort := strings.TrimSpace(c.ReasoningEffort); effort != "" {
-		reqBody["reasoning_effort"] = effort
-	}
-	rawReq, err := json.Marshal(reqBody)
-	if err != nil {
-		return DomainRulebookRecord{}, err
-	}
-
-	httpClient := c.HTTPClient
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 10 * time.Minute}
-	}
-
-	started := time.Now().UTC()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(rawReq))
-	if err != nil {
-		return DomainRulebookRecord{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if strings.TrimSpace(c.APIKey) != "" {
-		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(c.APIKey))
-	}
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return DomainRulebookRecord{}, fmt.Errorf("request ds for domain %s: %w", domain.ID, err)
-	}
-	defer resp.Body.Close()
-
-	rawResp, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return DomainRulebookRecord{}, fmt.Errorf("read ds response for domain %s: %w", domain.ID, err)
-	}
-	durationMS := time.Since(started).Milliseconds()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		snippet := string(rawResp)
-		if len(snippet) > 400 {
-			snippet = snippet[:400] + "..."
+	return generateRecord(ctx, c, path, resume, prompt, func(out generationOutput) (DomainRulebookRecord, error) {
+		rules, err := decodeDomainRulebookOutput(out.RawResponse, domain.ID)
+		if err != nil {
+			return DomainRulebookRecord{}, err
 		}
-		return DomainRulebookRecord{}, fmt.Errorf("ds http %d for domain %s: %s", resp.StatusCode, domain.ID, snippet)
-	}
-
-	var envelope struct {
-		Choices []struct {
-			FinishReason string `json:"finish_reason"`
-			Message      struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-		Usage struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
-		} `json:"usage"`
-	}
-	if err := json.Unmarshal(rawResp, &envelope); err != nil {
-		return DomainRulebookRecord{}, fmt.Errorf("decode ds envelope for domain %s: %w", domain.ID, err)
-	}
-	if len(envelope.Choices) == 0 {
-		return DomainRulebookRecord{}, fmt.Errorf("ds returned empty choices for domain %s", domain.ID)
-	}
-
-	content := envelope.Choices[0].Message.Content
-	out, err := decodeDomainRulebookOutput(content, domain.ID)
-	if err != nil {
-		tail := content
-		if len(tail) > 240 {
-			tail = "..." + tail[len(tail)-240:]
-		}
-		return DomainRulebookRecord{}, fmt.Errorf("parse ds rulebook for domain %s (finish_reason=%s len=%d): %w | tail=%q",
-			domain.ID, envelope.Choices[0].FinishReason, len(content), err, tail)
-	}
-
-	return DomainRulebookRecord{
-		WorldID:          ont.WorldID,
-		Domain:           domain,
-		Model:            model,
-		Endpoint:         url,
-		RequestedAt:      started,
-		DurationMS:       durationMS,
-		PromptTokens:     envelope.Usage.PromptTokens,
-		CompletionTokens: envelope.Usage.CompletionTokens,
-		TotalTokens:      envelope.Usage.TotalTokens,
-		Output:           out,
-		RawResponse:      content,
-	}, nil
+		return DomainRulebookRecord{
+			generationOutput: out,
+			WorldID:          ont.WorldID,
+			Domain:           domain,
+			Output:           rules,
+		}, nil
+	})
 }
 
 func decodeDomainRulebookOutput(raw, domainID string) (DomainRulebookOutput, error) {
@@ -1631,6 +1415,10 @@ func ExpandWorldRulebook(ctx context.Context, w *sim.World, client Client, cfg R
 	if strings.TrimSpace(cfg.OutDir) == "" {
 		return RulebookExpandSummary{}, nil, fmt.Errorf("out directory is required")
 	}
+	endpointURL, err := client.chatEndpoint()
+	if err != nil {
+		return RulebookExpandSummary{}, nil, err
+	}
 	concurrency := cfg.Concurrency
 	if concurrency <= 0 {
 		concurrency = 6
@@ -1643,19 +1431,13 @@ func ExpandWorldRulebook(ctx context.Context, w *sim.World, client Client, cfg R
 	domains := DefaultRulebookDomains(ont)
 	started := time.Now().UTC()
 
-	type domainResult struct {
-		idx int
-		rec DomainRulebookRecord
-		err error
-	}
-	type calResult struct {
-		rec TraitCalibrationRecord
-		err error
-	}
-
 	sem := make(chan struct{}, concurrency)
-	resCh := make(chan domainResult, len(domains))
-	calCh := make(chan calResult, 1)
+	records := make([]DomainRulebookRecord, len(domains))
+	requested := make([]bool, len(domains))
+	errs := make([]error, len(domains))
+	var calibration TraitCalibrationRecord
+	var calibrationRequested bool
+	var calibrationErr error
 	var wg sync.WaitGroup
 	var logMu sync.Mutex
 
@@ -1668,118 +1450,62 @@ func ExpandWorldRulebook(ctx context.Context, w *sim.World, client Client, cfg R
 		fmt.Fprintf(cfg.Progress, format, args...)
 	}
 
-	// Launch dedicated global trait & encounter calibration concurrently alongside domains.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		calFile := filepath.Join(cfg.OutDir, "domains", "_trait_calibration.json")
-		if cfg.Resume {
-			if raw, err := os.ReadFile(calFile); err == nil {
-				var cached TraitCalibrationRecord
-				if json.Unmarshal(raw, &cached) == nil && len(cached.Output.ProfessionEncounterModifiers) > 0 && (len(cached.Output.PersonalityStanceWeights) > 0 || len(cached.Output.PersonalityEncounterModifiers) > 0) {
-					logProgress("[rulebook cal] resume cached trait_calibration (%d professions, %d stance traits, %d encounter traits, %d hobbies)\n",
-						len(cached.Output.ProfessionEncounterModifiers), len(cached.Output.PersonalityStanceWeights), len(cached.Output.PersonalityEncounterModifiers), len(cached.Output.HobbyActionWeights))
-					calCh <- calResult{rec: cached}
-					return
-				}
-			}
-		}
-
-		sem <- struct{}{}
-		defer func() { <-sem }()
-
-		logProgress("[rulebook cal] requesting DS for global profession/trait/encounter calibration (%d professions, %d traits, %d hobbies)...\n",
-			len(ont.Glossaries.Professions), len(ont.PersonalityTraits), len(ont.Hobbies))
-		var rec TraitCalibrationRecord
-		var lastErr error
-		for attempt := 1; attempt <= 2; attempt++ {
-			rec, lastErr = client.GenerateTraitCalibration(ctx, ont)
-			if lastErr == nil {
-				break
-			}
-			if attempt < 2 && ctx.Err() == nil {
-				logProgress("[rulebook cal] retry trait_calibration after error: %v\n", lastErr)
-				time.Sleep(2 * time.Second)
-			}
-		}
-		if lastErr != nil {
-			calCh <- calResult{err: lastErr}
+		select {
+		case sem <- struct{}{}:
+			defer func() { <-sem }()
+		case <-ctx.Done():
+			calibrationErr = ctx.Err()
 			return
 		}
-		if raw, err := json.MarshalIndent(rec, "", "  "); err == nil {
-			_ = os.WriteFile(calFile, raw, 0o644)
+
+		path := filepath.Join(cfg.OutDir, "domains", "_trait_calibration.json")
+		calibration, calibrationRequested, calibrationErr = client.generateTraitCalibration(ctx, ont, path, cfg.Resume)
+		if calibrationErr == nil {
+			logProgress("[rulebook cal] trait_calibration: %d professions, %d stance traits, %d encounter traits, %d hobbies\n",
+				len(calibration.Output.ProfessionEncounterModifiers), len(calibration.Output.PersonalityStanceWeights),
+				len(calibration.Output.PersonalityEncounterModifiers), len(calibration.Output.HobbyActionWeights))
 		}
-		logProgress("[rulebook cal] done trait_calibration: %d professions, %d stance traits, %d encounter traits, %d hobbies (%dms, %d tokens)\n",
-			len(rec.Output.ProfessionEncounterModifiers), len(rec.Output.PersonalityStanceWeights), len(rec.Output.PersonalityEncounterModifiers), len(rec.Output.HobbyActionWeights), rec.DurationMS, rec.TotalTokens)
-		calCh <- calResult{rec: rec}
 	}()
 
 	for i, d := range domains {
 		wg.Add(1)
 		go func(idx int, dom RulebookDomainSpec) {
 			defer wg.Done()
-			domFile := filepath.Join(cfg.OutDir, "domains", dom.ID+".json")
-			if cfg.Resume {
-				if raw, err := os.ReadFile(domFile); err == nil {
-					var cached DomainRulebookRecord
-					if json.Unmarshal(raw, &cached) == nil && (len(cached.Output.ProactiveRules) > 0 || len(cached.Output.ReactionRules) > 0) {
-						logProgress("[rulebook %d/%d] resume cached %s (%d proactive, %d reaction)\n",
-							idx+1, len(domains), dom.ID, len(cached.Output.ProactiveRules), len(cached.Output.ReactionRules))
-						resCh <- domainResult{idx: idx, rec: cached}
-						return
-					}
-				}
-			}
-
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			logProgress("[rulebook %d/%d] requesting DS for generic domain %s (%s)...\n",
-				idx+1, len(domains), dom.ID, dom.Title)
-
-			var rec DomainRulebookRecord
-			var lastErr error
-			for attempt := 1; attempt <= 2; attempt++ {
-				rec, lastErr = client.GenerateDomainRules(ctx, ont, dom)
-				if lastErr == nil {
-					break
-				}
-				if attempt < 2 && ctx.Err() == nil {
-					logProgress("[rulebook %d/%d] retry %s after error: %v\n", idx+1, len(domains), dom.ID, lastErr)
-					time.Sleep(2 * time.Second)
-				}
-			}
-			if lastErr != nil {
-				resCh <- domainResult{idx: idx, err: lastErr}
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				errs[idx] = ctx.Err()
 				return
 			}
-			if raw, err := json.MarshalIndent(rec, "", "  "); err == nil {
-				_ = os.WriteFile(domFile, raw, 0o644)
+
+			path := filepath.Join(cfg.OutDir, "domains", dom.ID+".json")
+			rec, sent, err := client.generateDomainRules(ctx, ont, dom, path, cfg.Resume)
+			if err != nil {
+				errs[idx] = err
+				return
 			}
-			logProgress("[rulebook %d/%d] done %s: %d proactive, %d reaction (%dms, %d tokens)\n",
-				idx+1, len(domains), dom.ID, len(rec.Output.ProactiveRules), len(rec.Output.ReactionRules), rec.DurationMS, rec.TotalTokens)
-			resCh <- domainResult{idx: idx, rec: rec}
+			records[idx] = rec
+			requested[idx] = sent
+			logProgress("[rulebook %d/%d] %s: %d proactive, %d reaction\n",
+				idx+1, len(domains), dom.ID, len(rec.Output.ProactiveRules), len(rec.Output.ReactionRules))
 		}(i, d)
 	}
 
 	wg.Wait()
-	close(resCh)
-	close(calCh)
-
-	calRes := <-calCh
-	records := make([]DomainRulebookRecord, len(domains))
-	firstErr := calRes.err
-	for r := range resCh {
-		if r.err != nil {
-			if firstErr == nil {
-				firstErr = r.err
-			}
-			continue
+	for i, err := range errs {
+		if err != nil {
+			errs[i] = fmt.Errorf("domain %s failed: %w", domains[i].ID, err)
 		}
-		records[r.idx] = r.rec
 	}
-	if firstErr != nil {
-		return RulebookExpandSummary{}, nil, firstErr
+	if calibrationErr != nil {
+		errs = append(errs, fmt.Errorf("trait_calibration failed: %w", calibrationErr))
+	}
+	if err := errors.Join(errs...); err != nil {
+		return RulebookExpandSummary{}, nil, err
 	}
 
 	rb := &agent.InteractionRulebook{
@@ -1790,7 +1516,11 @@ func ExpandWorldRulebook(ctx context.Context, w *sim.World, client Client, cfg R
 		Glossaries:  ont.Glossaries,
 	}
 
-	totalTokens := calRes.rec.TotalTokens
+	totalTokens := calibration.TotalTokens
+	totalRequests := 0
+	if calibrationRequested {
+		totalRequests++
+	}
 	domainFiles := make(map[string]string, len(records)+1)
 	domainFiles["_trait_calibration"] = filepath.Join("domains", "_trait_calibration.json")
 	var professionEncounterMaps []map[string]agent.EncounterProfile
@@ -1798,20 +1528,23 @@ func ExpandWorldRulebook(ctx context.Context, w *sim.World, client Client, cfg R
 	var encounterMaps []map[string]agent.EncounterProfile
 	var hobbyMaps []map[string]map[string]float64
 
-	if len(calRes.rec.Output.ProfessionEncounterModifiers) > 0 {
-		professionEncounterMaps = append(professionEncounterMaps, calRes.rec.Output.ProfessionEncounterModifiers)
+	if len(calibration.Output.ProfessionEncounterModifiers) > 0 {
+		professionEncounterMaps = append(professionEncounterMaps, calibration.Output.ProfessionEncounterModifiers)
 	}
-	if len(calRes.rec.Output.PersonalityStanceWeights) > 0 {
-		personalityMaps = append(personalityMaps, calRes.rec.Output.PersonalityStanceWeights)
+	if len(calibration.Output.PersonalityStanceWeights) > 0 {
+		personalityMaps = append(personalityMaps, calibration.Output.PersonalityStanceWeights)
 	}
-	if len(calRes.rec.Output.PersonalityEncounterModifiers) > 0 {
-		encounterMaps = append(encounterMaps, calRes.rec.Output.PersonalityEncounterModifiers)
+	if len(calibration.Output.PersonalityEncounterModifiers) > 0 {
+		encounterMaps = append(encounterMaps, calibration.Output.PersonalityEncounterModifiers)
 	}
-	if len(calRes.rec.Output.HobbyActionWeights) > 0 {
-		hobbyMaps = append(hobbyMaps, calRes.rec.Output.HobbyActionWeights)
+	if len(calibration.Output.HobbyActionWeights) > 0 {
+		hobbyMaps = append(hobbyMaps, calibration.Output.HobbyActionWeights)
 	}
 
-	for _, rec := range records {
+	for i, rec := range records {
+		if requested[i] {
+			totalRequests++
+		}
 		totalTokens += rec.TotalTokens
 		domainFiles[rec.Domain.ID] = filepath.Join("domains", rec.Domain.ID+".json")
 		if len(rec.Output.ProfessionEncounterModifiers) > 0 {
@@ -1844,6 +1577,9 @@ func ExpandWorldRulebook(ctx context.Context, w *sim.World, client Client, cfg R
 	rb.PersonalityEncounterModifiers = mergeEncounterModifierMaps(encounterMaps)
 	rb.HobbyActionWeights = mergeNestedWeightMaps(hobbyMaps)
 
+	if _, err := (agent.DefaultRuleCompiler{}).Compile(rb, w.Catalog); err != nil {
+		return RulebookExpandSummary{}, nil, fmt.Errorf("compile generated rulebook: %w", err)
+	}
 	audit := SanitizeAndAuditRulebook(rb, ont, w)
 
 	totalBranches := 0
@@ -1864,12 +1600,12 @@ func ExpandWorldRulebook(ctx context.Context, w *sim.World, client Client, cfg R
 		WorldID:             ont.WorldID,
 		Theme:               ont.Environment.Theme,
 		Genre:               ont.Environment.Genre,
-		Model:               client.Model,
-		Endpoint:            client.Endpoint,
+		Model:               strings.TrimSpace(client.Model),
+		Endpoint:            endpointURL,
 		StartedAt:           started,
 		CompletedAt:         time.Now().UTC(),
 		Domains:             len(domains),
-		TotalRequests:       len(domains) + 1,
+		TotalRequests:       totalRequests,
 		TotalTokens:         totalTokens,
 		TotalProactiveRules: len(rb.ProactiveRules),
 		TotalReactionRules:  len(rb.ReactionRules),
@@ -1895,7 +1631,7 @@ func ExpandWorldRulebook(ctx context.Context, w *sim.World, client Client, cfg R
 func renderRulebookOverviewMD(sum RulebookExpandSummary, rb *agent.InteractionRulebook) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# 通用角色交互因果规则库 — %s (%s)\n\n", nonEmptyStr(sum.Theme, sum.WorldID), sum.WorldID)
-	fmt.Fprintf(&b, "- 离线合成请求数：%d 次（%d 个交互领域 + 1 次全局职业/性格/爱好解耦标定，与人口规模无关）\n", sum.TotalRequests, sum.Domains)
+	fmt.Fprintf(&b, "- 本次模型请求数：%d 次。覆盖 %d 个交互领域及全局标定。\n", sum.TotalRequests, sum.Domains)
 	fmt.Fprintf(&b, "- 通用主动交互规则：%d 条（含爱好权重：%d 条｜含同好加成：%d 条｜全局爱好→行为表：%d 项）\n",
 		sum.TotalProactiveRules, sum.Audit.HobbyWeightedProactiveRules, sum.Audit.SharedHobbyProactiveRules, sum.Audit.HobbyActionKeys)
 	fmt.Fprintf(&b, "- 通用因果反应规则：%d 条（当事角色2：%d｜同场目击者：%d｜总反应分支：%d｜含性格权重分支：%d｜职业暴露基线：%d 项｜性格→8立场：%d 项｜性格→遭遇修正：%d 项）\n",

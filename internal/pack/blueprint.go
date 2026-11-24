@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"sort"
 	"strings"
@@ -14,20 +15,20 @@ import (
 // Blueprint is a compact, LLM-friendly world specification (~100-250 lines JSON) that compiles
 // into a strictly validated, conservation-balanced WorldPack with automatic survival scaffolding.
 type Blueprint struct {
-	SchemaVersion int                       `json:"schema_version,omitempty"`
-	ID            string                    `json:"id"`
-	Name          string                    `json:"name"`
-	Genre         string                    `json:"genre"`
-	Summary       string                    `json:"summary,omitempty"`
-	CurrencyName  string                    `json:"currency_name,omitempty"`
-	ActorNoun     string                    `json:"actor_noun,omitempty"`
-	AuthorityName string                    `json:"authority_name,omitempty"`
-	OversightName string                    `json:"oversight_name,omitempty"`
-	FoodItemID    string                    `json:"food_item_id,omitempty"`
-	FoodItemName  string                    `json:"food_item_name,omitempty"`
-	WaterItemID   string                    `json:"water_item_id,omitempty"`
-	WaterItemName string                    `json:"water_item_name,omitempty"`
-	SupplyDays    *int                      `json:"supply_days,omitempty"`
+	SchemaVersion  int                     `json:"schema_version,omitempty"`
+	ID             string                  `json:"id"`
+	Name           string                  `json:"name"`
+	Genre          string                  `json:"genre"`
+	Summary        string                  `json:"summary,omitempty"`
+	CurrencyName   string                  `json:"currency_name,omitempty"`
+	ActorNoun      string                  `json:"actor_noun,omitempty"`
+	AuthorityName  string                  `json:"authority_name,omitempty"`
+	OversightName  string                  `json:"oversight_name,omitempty"`
+	FoodItemID     string                  `json:"food_item_id,omitempty"`
+	FoodItemName   string                  `json:"food_item_name,omitempty"`
+	WaterItemID    string                  `json:"water_item_id,omitempty"`
+	WaterItemName  string                  `json:"water_item_name,omitempty"`
+	SupplyDays     *int                    `json:"supply_days,omitempty"`
 	Institutions   *sim.InstitutionToggles `json:"institutions,omitempty"`
 	Forms          []BlueprintForm         `json:"forms,omitempty"`
 	Skills         []sim.SkillSpec         `json:"skills,omitempty"`
@@ -37,17 +38,17 @@ type Blueprint struct {
 	Currencies     []sim.CurrencySpec      `json:"currencies,omitempty"`
 	GoldenFingers  []sim.GoldenFingerSpec  `json:"golden_fingers,omitempty"`
 	Transitions    []sim.TransitionSpec    `json:"transitions,omitempty"`
-	CustomItems   []BlueprintItem           `json:"custom_items,omitempty"`
-	Districts     []BlueprintDistrict       `json:"districts"`
-	Roads         []BlueprintRoad           `json:"roads,omitempty"`
-	Factions      []BlueprintFaction        `json:"factions,omitempty"`
-	Actors        []BlueprintActor          `json:"actors"`
-	Mentorships   []sim.MentorshipBond      `json:"mentorships,omitempty"`
-	Kinships      []sim.ActorKinship        `json:"kinships,omitempty"`
-	Grudges       []BlueprintGrudge         `json:"grudges,omitempty"`
-	Diplomacy     []BlueprintDiplomacy      `json:"diplomacy,omitempty"`
-	Secrets       []BlueprintSecret         `json:"secrets,omitempty"`
-	WorldEvents   []BlueprintWorldEvent     `json:"world_events,omitempty"`
+	CustomItems    []BlueprintItem         `json:"custom_items,omitempty"`
+	Districts      []BlueprintDistrict     `json:"districts"`
+	Roads          []BlueprintRoad         `json:"roads,omitempty"`
+	Factions       []BlueprintFaction      `json:"factions,omitempty"`
+	Actors         []BlueprintActor        `json:"actors"`
+	Mentorships    []sim.MentorshipBond    `json:"mentorships,omitempty"`
+	Kinships       []sim.ActorKinship      `json:"kinships,omitempty"`
+	Grudges        []BlueprintGrudge       `json:"grudges,omitempty"`
+	Diplomacy      []BlueprintDiplomacy    `json:"diplomacy,omitempty"`
+	Secrets        []BlueprintSecret       `json:"secrets,omitempty"`
+	WorldEvents    []BlueprintWorldEvent   `json:"world_events,omitempty"`
 }
 
 type BlueprintForm struct {
@@ -159,8 +160,8 @@ type BlueprintWorldEvent struct {
 	ProbPermillePerDay *int     `json:"prob_permille_per_day,omitempty"`
 	MinDay             int      `json:"min_day,omitempty"`
 	CooldownDays       int      `json:"cooldown_days,omitempty"`
-	DurationDays       int      `json:"duration_days,omitempty"`
-	Intensity          int      `json:"intensity,omitempty"`
+	DurationDays       *int     `json:"duration_days,omitempty"`
+	Intensity          *int     `json:"intensity,omitempty"`
 	RewardItem         string   `json:"reward_item,omitempty"`
 	RewardQty          *int     `json:"reward_qty,omitempty"`
 	RewardCoins        int      `json:"reward_coins,omitempty"`
@@ -766,13 +767,16 @@ func CompileBlueprint(bp Blueprint) (*WorldPack, error) {
 		} else if we.RewardItem != "" {
 			rewardQty = 1
 		}
-		durDays := we.DurationDays
-		if durDays <= 0 {
-			durDays = 5
+		durDays := 5
+		if we.DurationDays != nil {
+			durDays = *we.DurationDays
 		}
-		inten := we.Intensity
-		if inten <= 0 {
-			inten = 70
+		if durDays < 0 || int64(durDays) > math.MaxInt64/sim.TicksPerDay {
+			return nil, fmt.Errorf("world event %q duration_days cannot be represented as nonnegative ticks", we.ID)
+		}
+		inten := 70
+		if we.Intensity != nil {
+			inten = *we.Intensity
 		}
 		worldEvents = append(worldEvents, sim.WorldEventSpec{
 			ID:                 we.ID,
@@ -794,14 +798,17 @@ func CompileBlueprint(bp Blueprint) (*WorldPack, error) {
 	}
 
 	// Ensure deterministic district states with abundant water.
-	distStates := make(map[string]sim.DistrictState, len(worldMap.Districts))
+	initialSanitation := 80
+	distStates := make(map[string]sim.DistrictStateOverride, len(worldMap.Districts))
 	for _, d := range worldMap.Districts {
-		distStates[d.ID] = sim.DistrictState{
-			DistrictID:   d.ID,
-			Weather:      "clear",
-			Sanitation:   80,
-			Resources:    map[string]int64{"fresh_water": 50000},
-			MaxResources: map[string]int64{"fresh_water": 50000},
+		distStates[d.ID] = sim.DistrictStateOverride{
+			Sanitation: &initialSanitation,
+			DistrictState: sim.DistrictState{
+				DistrictID:   d.ID,
+				Weather:      "clear",
+				Resources:    map[string]int64{"fresh_water": 50000},
+				MaxResources: map[string]int64{"fresh_water": 50000},
+			},
 		}
 	}
 
@@ -889,7 +896,9 @@ func CompileBlueprint(bp Blueprint) (*WorldPack, error) {
 		HouseWear:      &sim.HouseWearRule{IntervalTicks: 365 * sim.TicksPerDay, ConditionLoss: 0, Source: "blueprint_disabled_wear"},
 	}
 
+	ecologyEnabled := true
 	wp := &WorldPack{
+		SchemaVersion:  worldPackSchemaVersion,
 		ID:             bp.ID,
 		Name:           name,
 		Genre:          genre,
@@ -902,7 +911,7 @@ func CompileBlueprint(bp Blueprint) (*WorldPack, error) {
 		Factions:       factions,
 		Actors:         actors,
 		Ecology: &sim.EcologySpec{
-			Enabled:        true,
+			Enabled:        &ecologyEnabled,
 			ScalePop:       maxIntBP(30, len(actors)),
 			DistrictStates: distStates,
 		},

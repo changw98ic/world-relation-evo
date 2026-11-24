@@ -20,13 +20,9 @@ func handleAttackAction(tx *WorldTx, a, b *Actor, x Action) []Event {
 	if b == nil || b.ID == a.ID || !SamePlace(*a, *b) || w.Tick < b.JailedUntil {
 		return actionFail(tx, a, x, "target is not nearby")
 	}
-	if a.Energy < 6 {
-		return actionFail(tx, a, x, "insufficient energy to attack")
-	}
 	if a.Health < 25 {
 		return actionFail(tx, a, x, "too injured to fight; must recuperate")
 	}
-	tx.setEnergy(a, a.Energy-6, x.Kind)
 	atkPower := CombatPowerWithCatalog(w.Catalog, *a)
 	defPower := CombatPowerWithCatalog(w.Catalog, *b)
 	stance := w.actorFactionRelation(*a, *b)
@@ -74,16 +70,12 @@ func handleSparAction(tx *WorldTx, a, b *Actor, x Action) []Event {
 	if b == nil || b.ID == a.ID || !SamePlace(*a, *b) || w.Tick < b.JailedUntil {
 		return actionFail(tx, a, x, "sparring partner is not nearby")
 	}
-	if a.Energy < 6 {
-		return actionFail(tx, a, x, "insufficient energy to spar")
-	}
 	if w.Tick < a.RestUntil {
 		return actionFail(tx, a, x, "still recuperating from recent bout")
 	}
 	if a.Health < 65 || b.Health < 65 {
 		return actionFail(tx, a, x, "fighter is injured and must recuperate before sparring")
 	}
-	tx.setEnergy(a, a.Energy-6, x.Kind)
 	if a.Health > 60 {
 		tx.adjustHealth(a, -2, 60, x.Kind)
 	}
@@ -114,15 +106,9 @@ func handleStealAction(tx *WorldTx, a, b *Actor, x Action) []Event {
 	if b == nil || b.ID == a.ID || !SamePlace(*a, *b) || w.Tick < b.JailedUntil {
 		return actionFail(tx, a, x, "target is not nearby")
 	}
-	if a.Energy < 5 {
-		return actionFail(tx, a, x, "insufficient energy to steal")
-	}
 	if a.Health < 45 || w.Tick < a.RestUntil {
 		return actionFail(tx, a, x, "thief is injured or laying low to recuperate")
 	}
-	tx.setEnergy(a, a.Energy-5, x.Kind)
-	env := w.Catalog.EffectiveEnvironment()
-	outlawTag := env.PrimaryOutlawTag()
 	stealth, maxCoins := w.Catalog.StealthBonus(*a)
 	if b.Task != nil && b.Task.Action.Kind == "sleep" {
 		stealth += 4
@@ -154,7 +140,7 @@ func handleStealAction(tx *WorldTx, a, b *Actor, x Action) []Event {
 			stolenQty = 1
 			tx.TransferItem(b, a, stolenItem, 1, x.Kind)
 		}
-		a.Tags = appendUnique(a.Tags, outlawTag)
+		w.Catalog.markOutlaw(a)
 		a.RestUntil = w.Tick + 32
 		tx.MutateTrust(b, a.ID, -2)
 		var victimObservers []*Actor
@@ -182,7 +168,7 @@ func handleStealAction(tx *WorldTx, a, b *Actor, x Action) []Event {
 		return events
 	}
 	dmg := -tx.adjustHealth(a, -12, 1, x.Kind)
-	a.Tags = appendUnique(a.Tags, outlawTag)
+	w.Catalog.markOutlaw(a)
 	a.RestUntil = w.Tick + 64
 	tx.MutateTrust(b, a.ID, -3)
 	ev := tx.record(a, x, "steal_foiled", map[string]any{
@@ -201,19 +187,13 @@ func handleRaidAction(tx *WorldTx, a, b *Actor, x Action) []Event {
 	if b == nil || b.ID == a.ID || !SamePlace(*a, *b) || w.Tick < b.JailedUntil {
 		return actionFail(tx, a, x, "target is not nearby")
 	}
-	if a.Energy < 8 {
-		return actionFail(tx, a, x, "insufficient energy to raid")
-	}
 	if a.Health < 55 || w.Tick < a.RestUntil {
 		return actionFail(tx, a, x, "raider is injured or recuperating after recent raid")
 	}
-	tx.setEnergy(a, a.Energy-8, x.Kind)
-	env := w.Catalog.EffectiveEnvironment()
-	outlawTag := env.PrimaryOutlawTag()
 	atkPower := CombatPowerWithCatalog(w.Catalog, *a)
 	defPower := CombatPowerWithCatalog(w.Catalog, *b)
 	profID := w.Catalog.BestProfessionForCapability(*a, "raid")
-	a.Tags = appendUnique(a.Tags, outlawTag)
+	w.Catalog.markOutlaw(a)
 	if atkPower >= defPower {
 		wantDmg := minInt(35, 14+(atkPower-defPower)/2)
 		dmg := -tx.adjustHealth(b, -wantDmg, 0, x.Kind)
@@ -282,14 +262,10 @@ func handleExtortAction(tx *WorldTx, a, b *Actor, x Action) []Event {
 	if w.Catalog.IsOutlawTags(b.IdentityTags()) {
 		return actionFail(tx, a, x, "cannot extort fellow outlaw")
 	}
-	if a.Energy < 6 {
-		return actionFail(tx, a, x, "insufficient energy to extort")
-	}
 	if a.Health < 50 || w.Tick < a.RestUntil {
 		return actionFail(tx, a, x, "enforcer is injured or resting")
 	}
-	tx.setEnergy(a, a.Energy-6, x.Kind)
-	a.Tags = appendUnique(a.Tags, env.PrimaryOutlawTag())
+	w.Catalog.markOutlaw(a)
 	atkPower := CombatPowerWithCatalog(w.Catalog, *a) + 2
 	defPower := CombatPowerWithCatalog(w.Catalog, *b)
 	fee := w.extortionDemand(*a, *b)
@@ -345,17 +321,14 @@ func handleBribeAction(tx *WorldTx, a, b *Actor, x Action) []Event {
 	if !w.partyMateAvailable(b) {
 		return actionFail(tx, a, x, "recipient cannot accept the bribe")
 	}
-	if a.Energy < 3 {
-		return actionFail(tx, a, x, "insufficient energy")
-	}
 	if a.Money < 4 {
 		return actionFail(tx, a, x, "insufficient coins to offer bribe")
 	}
-	tx.setEnergy(a, a.Energy-3, x.Kind)
 	bribeCoins := minInt(a.Money, minInt(a.Money/3+2, 10))
-	if tx.TransferCurrency(a, b, "coins", int64(bribeCoins), x.Kind) {
-		b.IllicitGain += bribeCoins
+	if !tx.TransferCurrency(a, b, "coins", int64(bribeCoins), x.Kind) {
+		return actionFail(tx, a, x, "recipient cannot hold the bribe")
 	}
+	b.IllicitGain += bribeCoins
 	tx.MutateTrust(a, b.ID, 2)
 	tx.MutateTrust(b, a.ID, 3)
 	w.addDistrictCorruption(a.Location, 2)
@@ -403,13 +376,9 @@ func handleArrestAction(tx *WorldTx, a, b *Actor, x Action) []Event {
 		return actionFail(tx, a, x, "no open warrant in this district")
 	}
 	x.BasisEventID = cc.BasisEventID
-	if a.Energy < 7 {
-		return actionFail(tx, a, x, "insufficient energy to detain suspect")
-	}
 	if a.Health < 45 || w.Tick < a.RestUntil {
 		return actionFail(tx, a, x, "enforcer is injured or resting from recent patrol clash")
 	}
-	tx.setEnergy(a, a.Energy-7, x.Kind)
 	lawPower := CombatPowerWithCatalog(w.Catalog, *a) + 3
 	usedWrit := false
 	if env.EnforcementItem != "" && a.Items[env.EnforcementItem] > 0 {
@@ -429,13 +398,13 @@ func handleArrestAction(tx *WorldTx, a, b *Actor, x Action) []Event {
 			tx.ProduceOrConsumeItem(a, env.EnforcementItem, -1, x.Kind)
 		}
 		if w.hasActiveCohorts() {
-			baseOfficial = w.debitTreasury(baseOfficial, "bounty")
+			baseOfficial = tx.debitTreasury(baseOfficial, "bounty")
 			tx.moveCurrency(a, "coins", baseOfficial, "treasury", x.Kind)
 		} else {
 			tx.MintOrBurnCurrency(a, "coins", baseOfficial, x.Kind)
 		}
 		if b.Health > 0 {
-			b.JailedUntil = w.Tick + w.effectiveJusticeSpec(w.JusticeRevolt).TrialSentenceTicks
+			tx.setSentence(b, w.Tick+w.effectiveJusticeSpec(w.JusticeRevolt).TrialSentenceTicks)
 			cc.Status = "arrested"
 			cc.ArrestEventID = w.NextID
 			cc.JailedUntilTick = b.JailedUntil

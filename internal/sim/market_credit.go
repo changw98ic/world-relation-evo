@@ -2,6 +2,7 @@ package sim
 
 import (
 	"fmt"
+	"math"
 	"sort"
 )
 
@@ -44,7 +45,7 @@ func DefaultMarketCreditSpec() MarketCreditSpec {
 	}
 }
 
-// EffectiveMarketCreditSpec fills omitted or invalid fields in s from DefaultMarketCreditSpec.
+// EffectiveMarketCreditSpec fills omitted fields from DefaultMarketCreditSpec.
 func EffectiveMarketCreditSpec(s MarketCreditSpec) MarketCreditSpec {
 	def := DefaultMarketCreditSpec()
 	s.MinPricePermille = resolveSpecNumber(s.MinPricePermille, def.MinPricePermille, s.ExplicitZero || s.explicitFields["min_price_permille"])
@@ -64,9 +65,6 @@ func EffectiveMarketCreditSpec(s MarketCreditSpec) MarketCreditSpec {
 	}
 	if !s.ExplicitZero && !s.explicitFields["hoard_release_permille"] && s.HoardReleasePermille < s.HoardTriggerPermille {
 		s.HoardReleasePermille = s.HoardTriggerPermille + 200
-	}
-	if s.MaxTenantSharePermille > 950 {
-		s.MaxTenantSharePermille = 950
 	}
 	if s.TraderTag == "" {
 		s.TraderTag = def.TraderTag
@@ -550,19 +548,27 @@ func (w *World) isMerchantCohort(c *PopulationCohort, spec MarketCreditSpec) boo
 	return false
 }
 
-func (w *World) isMerchantActor(a *Actor, spec MarketCreditSpec) bool {
-	if a == nil || a.Dead {
-		return false
+// Older saves separated a person's hoard from their other property. Restore
+// that property into the single inventory used by personal decisions.
+func (w *World) mergePersonalHoardedStock() error {
+	if w.MarketCredit == nil {
+		return nil
 	}
-	for pid, lv := range a.Professions {
-		if lv <= 0 {
+	for id, stock := range w.MarketCredit.HoardedStock {
+		a := w.actor(id)
+		if a == nil {
 			continue
 		}
-		if prof, ok := w.Catalog.ProfessionByID(pid); ok && prof.TradeMargin {
-			return true
+		for item, quantity := range stock {
+			held := a.Items[item]
+			if quantity < 0 || held < 0 || quantity > int64(math.MaxInt-held) {
+				return fmt.Errorf("restore hoard for actor %s: inventory of %s is out of range", id, item)
+			}
+			w.adjustActorItem(a, item, int(quantity), false)
 		}
+		delete(w.MarketCredit.HoardedStock, id)
 	}
-	return spec.TraderTag != "" && ActorHasTag(a.IdentityTags(), spec.TraderTag)
+	return nil
 }
 
 func (w *World) stepMerchantHoarding(mc *MarketCreditState, spec MarketCreditSpec) []Event {
@@ -588,14 +594,12 @@ func (w *World) stepMerchantHoarding(mc *MarketCreditState, spec MarketCreditSpe
 		bag[itemID] += qty
 	}
 
-	// 1. Macro merchant cohorts withhold excess inventory during scarcity and dump at peak prices.
+	// Merchant cohorts manage their pooled stock. Individuals choose when to
+	// sell from the inventory they own.
 	for i := range w.Cohorts {
 		c := &w.Cohorts[i]
 		if !w.isMerchantCohort(c, spec) {
 			continue
-		}
-		if c.ItemPool == nil {
-			c.ItemPool = map[string]int64{}
 		}
 		for _, itemID := range itemIDs {
 			it := w.Catalog.Items[itemID]
@@ -614,7 +618,7 @@ func (w *World) stepMerchantHoarding(mc *MarketCreditState, spec MarketCreditSpe
 						reason = "glut_clear"
 					}
 				}
-				c.ItemPool[itemID] += curHoarded
+				w.adjustCohortItem(c, itemID, curHoarded, false)
 				delete(mc.HoardedStock[c.ID], itemID)
 				if len(mc.HoardedStock[c.ID]) == 0 {
 					delete(mc.HoardedStock, c.ID)
@@ -665,10 +669,7 @@ func (w *World) stepMerchantHoarding(mc *MarketCreditState, spec MarketCreditSpe
 				if hoardQty <= 0 {
 					continue
 				}
-				c.ItemPool[itemID] -= hoardQty
-				if c.ItemPool[itemID] <= 0 {
-					delete(c.ItemPool, itemID)
-				}
+				w.adjustCohortItem(c, itemID, -(hoardQty), false)
 				addHoard(c.ID, itemID, hoardQty)
 				ev := Event{
 					ID:      w.NextID,
@@ -692,114 +693,6 @@ func (w *World) stepMerchantHoarding(mc *MarketCreditState, spec MarketCreditSpe
 		}
 	}
 
-	// 2. Focal trader actors also hoard/release surplus inventory under scarcity/peak signals.
-	for i := range w.Actors {
-		a := &w.Actors[i]
-		if a.Dead {
-			if bag := mc.HoardedStock[a.ID]; len(bag) > 0 {
-				var recipientCohort *PopulationCohort
-				for ci := range w.Cohorts {
-					if w.Cohorts[ci].District == a.Location && w.Cohorts[ci].Population > 0 {
-						recipientCohort = &w.Cohorts[ci]
-						break
-					}
-				}
-				if recipientCohort != nil {
-					if recipientCohort.ItemPool == nil {
-						recipientCohort.ItemPool = map[string]int64{}
-					}
-					for itemID, qty := range bag {
-						if qty > 0 {
-							recipientCohort.ItemPool[itemID] += qty
-						}
-					}
-				} else {
-					if a.Items == nil {
-						a.Items = map[string]int{}
-					}
-					for itemID, qty := range bag {
-						if qty > 0 {
-							a.Items[itemID] += int(qty)
-						}
-					}
-				}
-				delete(mc.HoardedStock, a.ID)
-			}
-			continue
-		}
-		if !w.isMerchantActor(a, spec) || w.Tick < a.JailedUntil {
-			continue
-		}
-		if a.Items == nil {
-			a.Items = map[string]int{}
-		}
-		for _, itemID := range itemIDs {
-			it := w.Catalog.Items[itemID]
-			pricePermille := mc.DistrictPrices[a.Location][itemID]
-			if pricePermille <= 0 {
-				pricePermille = 1000
-			}
-			curHoarded := mc.HoardedStock[a.ID][itemID]
-			if curHoarded > 0 && (pricePermille >= spec.HoardReleasePermille || a.Hunger >= 2 || a.Money <= 1 || pricePermille <= 900) {
-				reason := "price_peak"
-				if pricePermille < spec.HoardReleasePermille {
-					if a.Hunger >= 2 || a.Money <= 1 {
-						reason = "distress_liquidation"
-					} else {
-						reason = "glut_clear"
-					}
-				}
-				w.adjustActorItem(a, itemID, int(curHoarded), false)
-				delete(mc.HoardedStock[a.ID], itemID)
-				if len(mc.HoardedStock[a.ID]) == 0 {
-					delete(mc.HoardedStock, a.ID)
-				}
-				ev := w.record(a, Action{Kind: "offer", Location: a.Location, Item: itemID, Quantity: int(curHoarded)}, "hoard_released", map[string]any{
-					"text":           fmt.Sprintf("%s released %d hoarded %s in %s (%s at %d‰ price)", a.Name, curHoarded, itemID, a.Location, reason, pricePermille),
-					"holder_id":      a.ID,
-					"district":       a.Location,
-					"item":           itemID,
-					"quantity":       curHoarded,
-					"price_permille": pricePermille,
-					"reason":         reason,
-				})
-				events = append(events, ev)
-				continue
-			}
-
-			if pricePermille >= spec.HoardTriggerPermille && pricePermille < spec.HoardReleasePermille && a.Money >= 10 {
-				reserve := maxInt(2, w.Catalog.DesiredStock(a.IdentityTags(), itemID)/2)
-				if it.Edible && reserve < 4 {
-					reserve = 4
-				}
-				excess := int64(a.Items[itemID] - reserve)
-				if excess <= 0 {
-					continue
-				}
-				capQty := int64(spec.HoardSurplusMultiplier) * int64(maxInt(4, w.Catalog.DesiredStock(a.IdentityTags(), itemID)))
-				room := capQty - curHoarded
-				if room <= 0 {
-					continue
-				}
-				hoardQty := excess
-				if hoardQty > room {
-					hoardQty = room
-				}
-				w.adjustActorItem(a, itemID, -int(hoardQty), false)
-				addHoard(a.ID, itemID, hoardQty)
-				ev := w.record(a, Action{Kind: "wait", Location: a.Location, Item: itemID, Quantity: int(hoardQty)}, "merchant_hoarded", map[string]any{
-					"text":           fmt.Sprintf("%s hoarded %d %s in %s during scarcity (%d‰ price)", a.Name, hoardQty, itemID, a.Location, pricePermille),
-					"holder_id":      a.ID,
-					"district":       a.Location,
-					"item":           itemID,
-					"quantity":       hoardQty,
-					"total_hoarded":  curHoarded + hoardQty,
-					"price_permille": pricePermille,
-				})
-				events = append(events, ev)
-			}
-		}
-	}
 	return events
 }
 
@@ -873,7 +766,7 @@ func (w *World) applyMarketCreditActionTx(tx *WorldTx, mc *MarketCreditState, a 
 			tx.MutateTrust(lender, a.ID, 1)
 		} else if lc := w.findCohort(l.LenderCohortID); lc != nil && lc.Population > 0 {
 			tx.moveCurrency(a, "coins", -pay, lc.ID, x.Kind)
-			lc.MoneyPool += pay
+			w.addCohortCurrency(lc, "coins", pay)
 		} else {
 			tx.moveCurrency(a, "coins", -pay, "treasury", x.Kind)
 			w.creditTreasury(pay, "fee")
@@ -1146,15 +1039,15 @@ func (w *World) stepDailyCreditAndAnnexation(mc *MarketCreditState, spec MarketC
 					transferActorCoinsClean(tenant, owner, int(paid))
 				case tenant != nil:
 					w.adjustActorCurrency(tenant, "coins", -paid, false)
-					ownerCohort.MoneyPool += paid
+					w.addCohortCurrency(ownerCohort, "coins", paid)
 				case owner != nil:
-					tenantCohort.MoneyPool -= paid
+					w.addCohortCurrency(tenantCohort, "coins", -(paid))
 					ten.TenantCohortFunds -= paid
 					w.adjustActorCurrency(owner, "coins", paid, false)
 				default:
-					tenantCohort.MoneyPool -= paid
+					w.addCohortCurrency(tenantCohort, "coins", -(paid))
 					ten.TenantCohortFunds -= paid
-					ownerCohort.MoneyPool += paid
+					w.addCohortCurrency(ownerCohort, "coins", paid)
 				}
 				ten.LastRentTick = w.Tick
 				if tenant != nil {
@@ -1272,17 +1165,11 @@ func (w *World) stepDailyCreditAndAnnexation(mc *MarketCreditState, spec MarketC
 			if creditor == nil || creditor.Population <= 0 || debtor.ID == creditor.ID {
 				continue // An unavailable creditor's entitlement stays with the debtor.
 			}
-			debtor.MoneyPool -= coins
-			creditor.MoneyPool += coins
+			w.addCohortCurrency(debtor, "coins", -(coins))
+			w.addCohortCurrency(creditor, "coins", coins)
 			if qty > 0 {
-				debtor.ItemPool[rentItem] -= qty
-				if debtor.ItemPool[rentItem] == 0 {
-					delete(debtor.ItemPool, rentItem)
-				}
-				if creditor.ItemPool == nil {
-					creditor.ItemPool = map[string]int64{}
-				}
-				creditor.ItemPool[rentItem] += qty
+				w.adjustCohortItem(debtor, rentItem, -qty, false)
+				w.adjustCohortItem(creditor, rentItem, qty, false)
 			}
 			if coins > 0 || qty > 0 {
 				ev := Event{
@@ -1345,9 +1232,9 @@ func (w *World) stepDailyCreditAndAnnexation(mc *MarketCreditState, spec MarketC
 		if owed > 0 && debtor.MoneyPool > reserve && (w.Tick >= d.DueTick || debtor.MoneyPool >= owed+int64(debtor.Population)*4) {
 			pay := minInt64(owed, debtor.MoneyPool-reserve)
 			if pay > 0 {
-				debtor.MoneyPool -= pay
+				w.addCohortCurrency(debtor, "coins", -(pay))
 				if creditor != nil && creditor.Population > 0 {
-					creditor.MoneyPool += pay
+					w.addCohortCurrency(creditor, "coins", pay)
 				} else {
 					w.creditTreasury(pay, "fee")
 				}
@@ -1524,8 +1411,8 @@ func (w *World) stepDailyCreditAndAnnexation(mc *MarketCreditState, spec MarketC
 		if loanAmt <= 0 {
 			continue
 		}
-		chosen.MoneyPool -= loanAmt
-		borrower.MoneyPool += loanAmt
+		w.addCohortCurrency(chosen, "coins", -(loanAmt))
+		w.addCohortCurrency(borrower, "coins", loanAmt)
 		loanID := mc.allocLoanID()
 		dueTick := w.Tick + int64(spec.LoanTermTicks)
 		mc.CohortDebts = append(mc.CohortDebts, CohortDebtRecord{
